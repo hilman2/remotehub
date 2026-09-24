@@ -18,5 +18,8 @@ remotehub is in early development. Only the latest release receives security fix
 
 - Until a second factor for directory sign-ins exists (milestone M4), remotehub is meant for internal
   networks only. Exposure to the internet is not a supported setup yet.
+- To let people connect with their own directory account, the sign-in password is kept for the session,
+  encrypted with a key that exists only in the user's cookie. Set `REMOTEHUB_OWN_ACCOUNT_CONNECTIONS=false`
+  to switch this off.
 - The vault must decrypt stored credentials on the server to inject them into sessions. Whoever controls
   the server and its key file can decrypt them; protect both accordingly.
