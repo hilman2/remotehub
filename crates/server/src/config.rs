@@ -16,6 +16,8 @@ use secrecy::SecretString;
 use thiserror::Error;
 
 const DEFAULT_LISTEN: &str = "0.0.0.0:8080";
+/// The guacd service of the ops package's compose file.
+const DEFAULT_GUACD: &str = "guacd:4822";
 
 pub struct Config {
     /// Address the HTTP server binds to.
@@ -41,6 +43,9 @@ pub struct Config {
     /// Groups whose members administer remotehub: SIDs or group names
     /// (names are looked up in the directory at startup).
     pub admin_groups: Vec<String>,
+    /// guacd for RDP and VNC (`host:port`), only reachable on an internal
+    /// network.
+    pub guacd: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -175,6 +180,11 @@ impl Config {
             true,
         )?;
 
+        let guacd = setting("REMOTEHUB_GUACD")?.unwrap_or_else(|| DEFAULT_GUACD.to_owned());
+        if !guacd.contains(':') || guacd.contains(['/', ' ']) {
+            return Err(invalid("REMOTEHUB_GUACD", &guacd));
+        }
+
         Ok(Config {
             listen,
             database_url,
@@ -186,6 +196,7 @@ impl Config {
             master_key_file,
             own_account_connections,
             admin_groups,
+            guacd,
         })
     }
 }
@@ -248,6 +259,7 @@ impl fmt::Debug for Config {
             .field("ldap", &self.ldap.as_ref().map(|l| &l.url))
             .field("master_key_file", &self.master_key_file)
             .field("admin_groups", &self.admin_groups)
+            .field("guacd", &self.guacd)
             .finish()
     }
 }
@@ -294,6 +306,7 @@ mod tests {
         assert_eq!(config.session.max, Duration::from_secs(12 * 3600));
         assert!(config.ldap.is_none());
         assert!(config.admin_groups.is_empty());
+        assert_eq!(config.guacd, "guacd:4822");
         assert!(!config.log_json);
 
         assert_eq!(
@@ -369,6 +382,8 @@ mod tests {
             ("REMOTEHUB_SESSION_IDLE_MINUTES", "0"),
             ("REMOTEHUB_SESSION_IDLE_MINUTES", "soon"),
             ("REMOTEHUB_PUBLIC_URL", "remotehub.example.com"),
+            ("REMOTEHUB_GUACD", "guacd"),
+            ("REMOTEHUB_GUACD", "tcp://guacd:4822"),
         ] {
             assert!(
                 matches!(

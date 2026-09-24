@@ -104,6 +104,7 @@ async fn serve() -> anyhow::Result<()> {
         session: config.session,
         admin_groups,
         own_account_connections: config.own_account_connections,
+        guacd: config.guacd,
     };
     let state = AppState::new(pool.clone(), directory, settings, vault);
     tokio::spawn(purge_sessions(pool, config.session.idle));

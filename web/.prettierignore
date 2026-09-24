@@ -17,3 +17,6 @@ bun.lockb
 # Playwright output
 /test-results/
 /playwright-report/
+
+# Vendored from Apache Guacamole, unchanged (see its README.md)
+/src/lib/display/guacamole/

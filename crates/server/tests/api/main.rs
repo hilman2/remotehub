@@ -10,6 +10,7 @@ mod common;
 mod audit;
 mod break_glass;
 mod catalog;
+mod display;
 mod generated;
 mod http;
 mod secrets;

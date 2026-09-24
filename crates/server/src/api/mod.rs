@@ -2,6 +2,8 @@
 
 mod audit;
 mod catalog;
+mod connect;
+mod display;
 mod health;
 mod origin;
 pub mod problem;
@@ -37,6 +39,7 @@ pub fn router(state: AppState) -> Router<AppState> {
             put(catalog::update_device).delete(catalog::delete_device),
         )
         .route("/devices/{id}/terminal", get(terminal::terminal))
+        .route("/devices/{id}/display", get(display::display))
         .route("/devices/{id}/host-key", delete(catalog::reset_host_key))
         .route("/credentials", post(catalog::create_credential))
         .route(

@@ -10,6 +10,8 @@ const gitignorePath = path.resolve(import.meta.dirname, '.gitignore');
 
 export default defineConfig(
 	includeIgnoreFile(gitignorePath),
+	// Vendored from Apache Guacamole, unchanged (see its README.md).
+	{ ignores: ['src/lib/display/guacamole/'] },
 	js.configs.recommended,
 	ts.configs.recommended,
 	svelte.configs.recommended,

@@ -135,6 +135,12 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   (against cross-site WebSocket hijacking) and `connect`. The first frame gives the terminal size and, for
   devices that ask, the credentials for this connection only; then binary frames carry keystrokes and output.
   Every connection is audited as opened, closed (duration, bytes, exit code) or failed.
+- **Display WebSocket** (`/api/devices/{id}/display`, RDP and VNC): the same checks. The first frame gives
+  the display size and time zone (and asked credentials); the server opens the connection through guacd
+  with the credentials in `connect` and answers `connected`. Then text frames carry whole Guacamole
+  instructions; from the browser only input, display size, clipboard and stream acknowledgements reach
+  guacd — `argv` (changing connection parameters), file transfer and pipes are dropped and counted in the
+  audit entry. Own-account RDP signs in with the user principal name, which carries the domain.
 - All engines sit behind the trait `ProtocolEngine`, so an own RDP engine (IronRDP) can replace guacd later
   without changing API or UI.
 

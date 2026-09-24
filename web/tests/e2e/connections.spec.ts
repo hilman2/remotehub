@@ -1,13 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
 import { join } from 'node:path';
 
-// The first connection end to end (M1): an AD user of the test lab signs
-// in, sets up a folder, a credential and an SSH device through the UI, works
-// in the device's terminal and finds the connection in the audit log.
+// Connections end to end: an AD user of the test lab signs in, sets up
+// folders, credentials and devices through the UI, and works on them in the
+// browser — SSH in a terminal, RDP as a picture — against the test lab.
 
 // The development database keeps data between runs, so names are unique.
 const run = Date.now().toString(36);
 const sshHost = process.env.E2E_SSH_HOST ?? 'ssh-target';
+const desktopHost = process.env.E2E_DESKTOP_HOST ?? 'desktop-target';
 /** Keys of the lab's SSH target; the tests run in web/. */
 const labKeys = join(process.cwd(), '..', 'deploy', 'testlab', 'ssh');
 
@@ -28,13 +29,20 @@ async function newFolder(page: Page, name: string) {
 	await expect(page.getByRole('heading', { name })).toBeVisible();
 }
 
-/** An SSH device in the folder that signs in with the credential. */
-async function newDevice(page: Page, folder: string, name: string, credential: string) {
+/** A device in the folder that signs in with the credential (SSH by default). */
+async function newDevice(
+	page: Page,
+	folder: string,
+	name: string,
+	credential: string,
+	protocol?: { label: string; host: string }
+) {
 	const dialog = page.getByRole('dialog');
 	await page.getByRole('tree').getByRole('button', { name: folder, exact: true }).click();
 	await page.getByRole('button', { name: 'New device' }).click();
 	await dialog.getByLabel('Name', { exact: true }).fill(name);
-	await dialog.getByLabel('Host name or IP address').fill(sshHost);
+	if (protocol) await dialog.getByLabel('Protocol').selectOption({ label: protocol.label });
+	await dialog.getByLabel('Host name or IP address').fill(protocol?.host ?? sshHost);
 	await dialog.getByLabel('Sign in with').selectOption({ label: 'A stored credential' });
 	await dialog
 		.getByLabel('Credential', { exact: true })
@@ -118,4 +126,44 @@ test('an SSH key protected by a passphrase signs in', async ({ page, context }) 
 	await terminal.keyboard.press('Enter');
 	await expect(terminal.locator('.xterm-rows')).toContainText('key says tester');
 	await terminal.close();
+});
+
+test('an RDP desktop opens in the browser', async ({ page, context }) => {
+	await signIn(page);
+	const dialog = page.getByRole('dialog');
+	const folder = `E2E desktops ${run}`;
+	await newFolder(page, folder);
+
+	const credential = `desktop tester ${run}`;
+	await page.getByRole('button', { name: 'New credential' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(credential);
+	await dialog.getByLabel('User name', { exact: true }).fill('tester');
+	await dialog.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name: credential })).toBeVisible();
+
+	await newDevice(page, folder, `lab rdp ${run}`, credential, {
+		label: 'Remote Desktop (RDP)',
+		host: desktopHost
+	});
+	const [desktop] = await Promise.all([
+		context.waitForEvent('page'),
+		page.getByRole('link', { name: 'Connect' }).click()
+	]);
+	await expect(desktop.getByText('Connected', { exact: true })).toBeVisible();
+	await expect(desktop.getByRole('application')).toBeVisible();
+
+	// The lab desktop's background (#1e5b8c) in the corner of the picture.
+	await expect
+		.poll(
+			() =>
+				desktop.evaluate(() => {
+					const canvas = document.querySelector<HTMLCanvasElement>('[role=application] canvas');
+					const pixel = canvas?.getContext('2d')?.getImageData(4, 4, 1, 1).data;
+					return pixel ? [pixel[0], pixel[1], pixel[2]] : null;
+				}),
+			{ timeout: 15_000 }
+		)
+		.toEqual([30, 91, 140]);
+	await desktop.close();
 });

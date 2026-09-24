@@ -146,6 +146,7 @@ pub async fn sign_in(
         display_name: identity.display_name,
         kind: "directory".to_owned(),
         sid: Some(identity.sid.to_string()),
+        upn: identity.upn,
         groups,
     };
     let me = Me::of(&session, &state.settings);
@@ -236,6 +237,7 @@ pub async fn sign_in_break_glass(
         display_name: account.display_name,
         kind: "local".to_owned(),
         sid: None,
+        upn: None,
         groups: Vec::new(),
     };
     let me = Me::of(&session, &state.settings);
@@ -293,13 +295,14 @@ async fn upsert_directory_user<'e>(
     identity: &Identity,
 ) -> Result<Uuid, sqlx::Error> {
     sqlx::query_scalar(
-        "INSERT INTO users (kind, sid, guid, username, display_name, email, last_sign_in_at)
-         VALUES ('directory', $1, $2, $3, $4, $5, now())
+        "INSERT INTO users (kind, sid, guid, username, display_name, email, upn, last_sign_in_at)
+         VALUES ('directory', $1, $2, $3, $4, $5, $6, now())
          ON CONFLICT (sid) DO UPDATE SET
              guid = EXCLUDED.guid,
              username = EXCLUDED.username,
              display_name = EXCLUDED.display_name,
              email = EXCLUDED.email,
+             upn = EXCLUDED.upn,
              last_sign_in_at = now()
          RETURNING id",
     )
@@ -308,6 +311,7 @@ async fn upsert_directory_user<'e>(
     .bind(&identity.username)
     .bind(&identity.display_name)
     .bind(&identity.email)
+    .bind(&identity.upn)
     .fetch_one(db)
     .await
 }

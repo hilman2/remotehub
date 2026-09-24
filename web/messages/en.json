@@ -138,7 +138,6 @@
 	"device_host_key": "Host key",
 	"device_host_key_pending": "Pinned at the first connection",
 	"device_forget_host_key": "Forget",
-	"terminal_ssh_only": "In the browser, only SSH works so far; Remote Desktop and VNC follow.",
 	"terminal_connecting": "Connecting to {name} …",
 	"terminal_connected": "Connected · host key {fingerprint}",
 	"terminal_pinned": "First connection: the host key {fingerprint} is now pinned.",
@@ -177,5 +176,13 @@
 	"error_field_passphrase": "The key's passphrase is missing or wrong.",
 	"error_field_certificate": "The certificate is not an OpenSSH user certificate for this key.",
 	"field_load_private_key": "Load key from file",
-	"field_load_certificate": "Load certificate from file"
+	"field_load_certificate": "Load certificate from file",
+	"display_label": "Remote desktop of {name} — click into it to type",
+	"display_connected": "Connected",
+	"display_failed_target": "The device could not be reached, refused the sign-in or presented an unexpected certificate.",
+	"display_failed_auth": "The device refused the sign-in.",
+	"display_ended": "The session was ended on the device.",
+	"display_failed": "The connection failed.",
+	"display_detail": "Details: {detail}",
+	"credentials_username_optional": "User name (if the device asks for one)"
 }
