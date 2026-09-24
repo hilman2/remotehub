@@ -49,18 +49,26 @@ docker compose -p "$project" up -d --quiet-pull --wait --wait-timeout 180 ||
 # This container joins the stack's network, where remotehub and guacd are.
 network="${project}_default"
 docker network connect "$network" "$(hostname)"
+# A service's address on one of the stack's networks. Its name would be
+# ambiguous here: the local CI's own network has a db and a guacd, too.
+address() { # service network
+  docker inspect -f "{{(index .NetworkSettings.Networks \"${project}_$2\").IPAddress}}" \
+    "$(docker compose -p "$project" ps -q "$1")"
+}
+remotehub="$(address remotehub default)"
 
 if docker compose -p "$project" logs remotehub | grep "master key file"; then
   fail "remotehub finds the master key file too open"
 fi
 
 echo "── remotehub answers"
-health="$(curl -fsS http://remotehub:8080/api/health)" || fail "/api/health"
+health="$(curl -fsS "http://${remotehub}:8080/api/health")" || fail "/api/health"
 echo "$health"
 grep -q "\"version\":\"${EXPECT_VERSION}\"" <<<"$health" || fail "version is not ${EXPECT_VERSION}"
 grep -q '"database":"ok"' <<<"$health" || fail "the database is not reachable"
-curl -fsS http://remotehub:8080/ | grep -q '<html' || fail "the web UI is not served"
-curl -fsS http://remotehub:8080/devices/any | grep -q '<html' || fail "routes of the SPA do not fall back to index.html"
+curl -fsS "http://${remotehub}:8080/" | grep -q '<html' || fail "the web UI is not served"
+curl -fsS "http://${remotehub}:8080/devices/any" | grep -q '<html' ||
+  fail "routes of the SPA do not fall back to index.html"
 
 echo "── Hardening"
 container="$(docker compose -p "$project" ps -q remotehub)"
@@ -68,10 +76,13 @@ container="$(docker compose -p "$project" ps -q remotehub)"
 [ "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$container")" = true ] || fail "remotehub's file system is writable"
 users="$(docker top "$container" -o pid,uid | awk 'NR > 1 { print $2 }' | sort -u)"
 [ "$users" = 65532 ] || fail "processes in remotehub run as: ${users}"
-if timeout 3 bash -c '</dev/tcp/db/5432' 2>/dev/null; then
-  fail "the database is reachable from outside its network"
-fi
-timeout 3 bash -c '</dev/tcp/guacd/4822' || fail "guacd is not reachable"
+db_networks="$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}' \
+  "$(docker compose -p "$project" ps -q db)")"
+[ "$db_networks" = "${project}_database " ] || fail "the database is on the networks: ${db_networks}"
+[ "$(docker network inspect -f '{{.Internal}}' "${project}_database")" = true ] ||
+  fail "the database's network has a way out"
+guacd="$(address guacd default)"
+timeout 3 bash -c "</dev/tcp/${guacd}/4822" || fail "guacd is not reachable"
 
 echo "── CLI with the secrets"
 docker compose -p "$project" exec -T remotehub remotehub break-glass create check >/dev/null ||
