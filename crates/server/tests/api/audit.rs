@@ -1,10 +1,8 @@
 //! The audit log: what gets recorded, who may read it, and that it cannot be
 //! changed unnoticed.
 
-mod common;
-
+use crate::common::{ORIGIN, get, json, send, sign_in_request, state};
 use axum::http::{StatusCode, header};
-use common::{ORIGIN, get, json, send, sign_in_request, state};
 use remotehub_server::app;
 use remotehub_server::audit::{self, Action, Actor, Entry};
 use serde_json::{Value, json};

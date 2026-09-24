@@ -136,8 +136,10 @@ start_lab() { # tools
 }
 
 # User interface: types, formatting and lint, tests (including the
-# translation guards) and the static build. The pnpm store stays between runs
-# in a volume without a label.
+# translation guards) and the static build. The messages are compiled once;
+# then svelte-check, prettier/eslint and vitest run in parallel (they only
+# read), and the build comes last because it writes the messages again.
+# The pnpm store stays between runs in a volume without a label.
 part_web() { # tools
   ci_docker_run \
     -v remotehub-ci-pnpm-store:/pnpm-store \
@@ -145,19 +147,55 @@ part_web() { # tools
     "$1" bash -euo pipefail -c '
       cd web
       pnpm install --frozen-lockfile
+      pnpm i18n
+      pnpm exec svelte-kit sync
 
-      echo "── svelte-check"
-      pnpm check
+      step() { # name command...
+        local name="$1" start=$SECONDS
+        shift
+        if "$@" >"/tmp/$name.log" 2>&1; then
+          echo "ok $((SECONDS - start))s" >"/tmp/$name.result"
+        else
+          echo "FAILED $((SECONDS - start))s" >"/tmp/$name.result"
+        fi
+      }
+      step svelte-check pnpm exec svelte-check --tsconfig ./tsconfig.json --fail-on-warnings &
+      step lint pnpm lint &
+      step vitest pnpm exec vitest --run &
+      wait
 
-      echo "── prettier and eslint"
-      pnpm lint
-
-      echo "── vitest"
-      pnpm test
+      failed=0
+      for name in svelte-check lint vitest; do
+        echo "── $name: $(cat "/tmp/$name.result")"
+        cat "/tmp/$name.log"
+        grep -q "^ok" "/tmp/$name.result" || failed=1
+      done
+      [ "$failed" = 0 ]
 
       echo "── build"
       pnpm build
     '
+}
+
+# Runs a part in the background with its own log and records how long it took.
+#   in_background NAME COMMAND... (sets NAME_pid)
+in_background() {
+  local name="$1"
+  shift
+  (
+    local start=$SECONDS rc=0
+    # In the background, not in an || list, so set -e keeps working inside.
+    "$@" &
+    wait "$!" || rc=$?
+    echo "$((SECONDS - start))" >"${logs}/${name}.seconds"
+    exit "$rc"
+  ) >"${logs}/${name}.log" 2>&1 &
+  printf -v "${name}_pid" "%s" "$!"
+}
+
+rust_with_lab() { # tools lab
+  if [ "$2" = 1 ]; then start_lab "$1"; fi
+  part_rust "$1" "$2"
 }
 
 # Rust (with the lab) and web in parallel, each with its own log; failed parts
@@ -172,17 +210,12 @@ job_code() {
 
   if [ "$rust" = 1 ]; then
     ci_dienst db -e POSTGRES_USER=ci -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=ci "$POSTGRES_IMAGE"
-    (
-      if [ "$lab" = 1 ]; then start_lab "$tools"; fi
-      part_rust "$tools" "$lab"
-    ) >"${logs}/rust.log" 2>&1 &
-    rust_pid=$!
+    in_background rust rust_with_lab "$tools" "$lab"
   else
     echo "skipped: nothing under ${RUST_INPUTS[*]} deploy/testlab/ changed" >"${logs}/rust.log"
   fi
   if [ "$web" = 1 ]; then
-    part_web "$tools" >"${logs}/web.log" 2>&1 &
-    web_pid=$!
+    in_background web part_web "$tools"
   else
     echo "skipped: nothing under ${WEB_INPUTS[*]} changed" >"${logs}/web.log"
   fi
@@ -190,20 +223,22 @@ job_code() {
   if [ -n "$rust_pid" ]; then wait "$rust_pid" || rust_rc=$?; fi
   if [ -n "$web_pid" ]; then wait "$web_pid" || web_rc=$?; fi
 
-  local part rc
-  for part in rust web; do
-    rc="${part}_rc"
-    if [ "${!rc}" = 0 ]; then
-      printf '════ %s ✓\n' "$part"
-      cat "${logs}/${part}.log"
-    fi
-  done
-  for part in rust web; do
-    rc="${part}_rc"
-    if [ "${!rc}" != 0 ]; then
-      printf '════ %s ✗ (exit %s)\n' "$part" "${!rc}"
-      cat "${logs}/${part}.log"
-    fi
+  # Successful parts first, failed parts last.
+  local part rc seconds
+  for want in ok failed; do
+    for part in rust web; do
+      rc="${part}_rc"
+      seconds="$(cat "${logs}/${part}.seconds" 2>/dev/null || echo 0)"
+      if [ "$want" = ok ] && [ "${!rc}" = 0 ]; then
+        printf '════ %s ✓ %ss
+' "$part" "$seconds"
+        cat "${logs}/${part}.log"
+      elif [ "$want" = failed ] && [ "${!rc}" != 0 ]; then
+        printf '════ %s ✗ %ss (exit %s)
+' "$part" "$seconds" "${!rc}"
+        cat "${logs}/${part}.log"
+      fi
+    done
   done
   rm -rf "$logs"
   [ "$rust_rc" = 0 ] && [ "$web_rc" = 0 ]
