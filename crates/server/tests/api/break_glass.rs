@@ -1,9 +1,7 @@
 //! Break-glass accounts: CLI functions and the sign-in endpoint.
 
-mod common;
-
+use crate::common::{ORIGIN, get, json, send, state, vault};
 use axum::http::StatusCode;
-use common::{ORIGIN, get, json, send, state, vault};
 use remotehub_server::break_glass::{self, BreakGlassError};
 use remotehub_server::{AppState, app};
 use secrecy::SecretString;

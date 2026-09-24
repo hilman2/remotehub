@@ -1,7 +1,5 @@
 //! Sealed secret fields in the database.
 
-mod common;
-
 use remotehub_server::secrets::{self, SecretError};
 use remotehub_vault::VaultError;
 use sqlx::PgPool;
@@ -11,7 +9,7 @@ const OWNER: Uuid = Uuid::from_u128(7);
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn stores_only_ciphertext_and_opens_it_again(pool: PgPool) {
-    let vault = common::vault();
+    let vault = crate::common::vault();
     secrets::store(&pool, &vault, OWNER, 1, "password", b"Sup3r-Secret!")
         .await
         .unwrap();
@@ -43,7 +41,7 @@ async fn stores_only_ciphertext_and_opens_it_again(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_row_moved_to_another_owner_or_field_cannot_be_opened(pool: PgPool) {
-    let vault = common::vault();
+    let vault = crate::common::vault();
     secrets::store(&pool, &vault, OWNER, 1, "password", b"secret")
         .await
         .unwrap();
@@ -76,10 +74,17 @@ async fn a_row_moved_to_another_owner_or_field_cannot_be_opened(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn another_master_key_cannot_open_the_database(pool: PgPool) {
-    secrets::store(&pool, &common::vault(), OWNER, 1, "password", b"secret")
-        .await
-        .unwrap();
-    let error = secrets::load(&pool, &common::vault(), OWNER, 1, "password")
+    secrets::store(
+        &pool,
+        &crate::common::vault(),
+        OWNER,
+        1,
+        "password",
+        b"secret",
+    )
+    .await
+    .unwrap();
+    let error = secrets::load(&pool, &crate::common::vault(), OWNER, 1, "password")
         .await
         .unwrap_err();
     assert!(
@@ -90,7 +95,7 @@ async fn another_master_key_cannot_open_the_database(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_field_is_stored_once_per_version(pool: PgPool) {
-    let vault = common::vault();
+    let vault = crate::common::vault();
     secrets::store(&pool, &vault, OWNER, 1, "password", b"one")
         .await
         .unwrap();

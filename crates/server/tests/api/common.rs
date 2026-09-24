@@ -1,4 +1,4 @@
-//! Shared helpers for the server's HTTP tests.
+//! Shared helpers for the server's tests.
 #![allow(dead_code)]
 
 use std::sync::Arc;

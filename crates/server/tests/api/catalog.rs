@@ -1,11 +1,9 @@
 //! Folders, devices, credentials and grants over HTTP — with the permission
 //! rules of authorize() applied end to end.
 
-mod common;
-
+use crate::common::{BOB_SID, OPS_SID, authed, send, sign_in_request, state};
 use axum::Router;
 use axum::http::StatusCode;
-use common::{BOB_SID, OPS_SID, authed, send, sign_in_request, state};
 use remotehub_server::app;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -23,7 +21,7 @@ async fn call(
     method: &str,
     uri: &str,
     body: Option<Value>,
-) -> common::Response {
+) -> crate::common::Response {
     send(app, authed(method, uri, body, token)).await
 }
 

@@ -36,7 +36,7 @@ Everything goes through the GitHub workflow of the public repository `hilman2/re
 
 In Git Bash, Claude sessions lack the Unix PATH: `gh` is at `/c/Program Files/GitHub CLI/gh.exe`, and `lokal.sh` needs it on the PATH: `export PATH="$PATH:/c/Program Files/GitHub CLI"`.
 
-`scripts/ci/gemeinsam.sh`, the commit status `lokal` and the file name `lokal.sh` stay German on purpose: they are shared verbatim across all of the maintainer's repositories.
+This repository shares nothing with other projects. `scripts/ci/gemeinsam.sh` started as a copy from another repository and belongs to remotehub alone; change it freely here (its German comments are a leftover). The CI lock is per repository (`.git/ci-lokal/sperre`).
 
 ## Principles
 
@@ -79,7 +79,7 @@ docker compose -f deploy/compose.dev.yml down               # volumes are kept
 ```
 
 - **Server** is rebuilt and restarted on every change under `crates/` or `migrations/`. On Windows, file events from bind mounts do not reach containers, so `watchexec` polls (`--poll`).
-- **Build output:** `target/` lives in the volume `target` (path `/target`), not in the working copy.
+- **Build output:** `target/` lives in the volume `target` (path `/target`), not in the working copy. The CI and development images link with mold (`CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS`).
 - **Database:** `127.0.0.1:55440` (user, password and database `remotehub`). Tests with `#[sqlx::test]` create a fresh database per test on the same server.
 - **Configuration:** `REMOTEHUB_*` environment variables, each also as `REMOTEHUB_*_FILE` (Docker secrets); see `crates/server/src/config.rs`. Required: `REMOTEHUB_DATABASE_URL`, `REMOTEHUB_PUBLIC_URL` (the origin people open; state-changing requests from other origins are refused), `REMOTEHUB_MASTER_KEY_FILE` (only as a file; create a line with `remotehub generate-key`, the development key is `deploy/dev/master.key`). Directory: `REMOTEHUB_LDAP_URL`, `_BIND_DN`, `_BIND_PASSWORD`, `_BASE_DN`, optional `_CA_FILE`, `_STARTTLS`, `_USER_FILTER`. Administrators: `REMOTEHUB_ADMIN_GROUPS` (SIDs or group names, looked up at startup; dev: `RH Admins`, i.e. alice).
 - **CLI:** `remotehub generate-key`, `remotehub verify-audit` (exits 1 if the audit chain is broken), `remotehub break-glass create|reset|delete|list` (emergency accounts; password and TOTP secret are printed once); `remotehub` alone serves. In development: `docker compose -f deploy/compose.dev.yml exec server cargo run -q -p remotehub-server -- break-glass create emergency`.
@@ -88,7 +88,8 @@ docker compose -f deploy/compose.dev.yml down               # volumes are kept
   - pnpm only takes versions older than seven days (`web/pnpm-workspace.yaml`), so don't pin a range to a brand-new release.
   - Messages are in `web/messages/{en,de}.json`; `pnpm i18n` compiles them (also part of `pnpm check` and `pnpm test`). Language and theme switch sit in the header.
 - **Test lab** (`deploy/testlab/`): a Samba AD domain controller `dc` (domain `REMOTEHUB.TEST`, LDAPS with the test CA in `deploy/testlab/dc/tls/ca.crt`, users and nested groups in `users.sh`) and an SSH target `ssh-target` (see its README). Both run on the compose network only.
-  - Tests that need the lab are marked `#[ignore = "needs the test lab"]`, live in `tests/integration_*.rs` and read `REMOTEHUB_TEST_LDAP_URL` and `REMOTEHUB_TEST_SSH_HOST`. Run them with `docker compose -f deploy/compose.dev.yml run --rm workbench cargo nextest run --run-ignored only`. The CI runs them after the normal tests, with the lab started while Rust compiles. Use `#[ignore]` for nothing else.
+  - The server's integration tests are **one** test binary, `crates/server/tests/api/` (add new files as modules in `main.rs`): every file directly in `tests/` would be linked into its own binary with the whole server in it. Helpers are in `tests/api/common.rs`.
+  - Tests that need the lab are marked `#[ignore = "needs the test lab"]` and read `REMOTEHUB_TEST_LDAP_URL` and `REMOTEHUB_TEST_SSH_HOST`. Run them with `docker compose -f deploy/compose.dev.yml run --rm workbench cargo nextest run --run-ignored only`. The CI runs them after the normal tests, with the lab started while Rust compiles. Use `#[ignore]` for nothing else.
   - The test lab's passwords, keys and certificates are public on purpose and protect nothing else.
 - **rust-analyzer** runs via the dev container (`.devcontainer/`, service `workbench`).
 - **Rust version:** it appears in `rust-toolchain.toml`, `scripts/ci/tools.Dockerfile` and `deploy/dev/rust.Dockerfile`; the CI job `base` checks that all three match.
@@ -99,9 +100,11 @@ bash scripts/ci/lokal.sh --pr 12       # check the head commit of a PR
 bash scripts/ci/lokal.sh --help        # all options
 ```
 
-The local CI needs Docker, `gh` and Git Bash. Only one run at a time per machine (lock under `~/.cache/ci-lokal`); logs are under `.git/ci-lokal/protokolle/`.
+The local CI needs Docker, `gh` and Git Bash. Only one run of this repository at a time (lock `.git/ci-lokal/sperre`); other repositories never wait for it. Logs are under `.git/ci-lokal/protokolle/`.
 
 - **Jobs:** `base` (always, seconds) and `code`, which checks Rust (fmt, clippy, tests, then the lab tests) and the web UI (svelte-check, lint, vitest, build) in parallel.
+- **Nothing is checked twice:** a commit with the same file state (Git tree) as one already checked green — e.g. a PR's merge commit — takes over that result without running.
+- **Only what changed is compiled:** Rust builds from the fixed path `/src` (volume `remotehub-ci-src`), synced by content, so cargo rebuilds only the crates whose files changed.
 - **Only what a change can affect runs:** the files changed since the merge base with `main` decide (`RUST_INPUTS`, `WEB_INPUTS`, `LAB_INPUTS` in `lokal.sh`). A commit on `main` itself, a change under `scripts/ci/` or `CI_FULL=1 bash scripts/ci/lokal.sh` runs everything.
 - **Working rhythm (Claude sessions):** while developing, run only the checks for what you are changing (one crate's tests, one vitest file, `pnpm check`). Run `lokal.sh` exactly once per PR, in the background, and continue with the next issue meanwhile — never the full suite by hand and then again in the CI.
 

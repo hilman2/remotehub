@@ -1,9 +1,9 @@
 //! Sign-in, sessions and sign-out over HTTP, with a fake directory.
 
-mod common;
-
+use crate::common::{
+    ADMINS_SID, ALICE_SID, ORIGIN, get, json, send, settings, sign_in_request, state,
+};
 use axum::http::{StatusCode, header};
-use common::{ADMINS_SID, ALICE_SID, ORIGIN, get, json, send, settings, sign_in_request, state};
 use remotehub_server::{AppState, app};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -255,6 +255,6 @@ async fn invalid_bodies_and_missing_directory_are_problems(pool: PgPool) {
 }
 
 fn app_without_directory(pool: PgPool) -> axum::Router {
-    let state = AppState::new(pool, None, settings(), common::vault());
+    let state = AppState::new(pool, None, settings(), crate::common::vault());
     app(state, None)
 }
