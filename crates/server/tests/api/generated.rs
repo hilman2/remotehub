@@ -7,9 +7,11 @@ use remotehub_server::api::problem;
 use remotehub_server::audit;
 
 fn check(relative: &str, expected: &str) {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(relative);
+    // At run time: a test binary must not depend on the path it was built under.
+    let path =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("set by cargo and nextest"))
+            .join("../..")
+            .join(relative);
     if std::env::var_os("REMOTEHUB_BLESS").is_some() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, expected).unwrap();
