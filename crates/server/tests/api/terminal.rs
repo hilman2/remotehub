@@ -70,6 +70,14 @@ async fn event(socket: &mut Socket) -> Value {
     }
 }
 
+/// The next event, which must be `connected`; anything else fails with the
+/// whole event, error code included.
+async fn expect_connected(socket: &mut Socket) -> Value {
+    let event = event(socket).await;
+    assert_eq!(event["type"], "connected", "{event}");
+    event
+}
+
 /// Terminal output until `needle` shows up.
 async fn output_until(socket: &mut Socket, needle: &str) -> String {
     let mut seen = String::new();
@@ -223,7 +231,7 @@ async fn a_stored_credential_opens_a_shell_and_pins_the_host_key(pool: PgPool) {
     assert_eq!(tree["devices"][0]["host_key_fingerprint"], fingerprint);
     let mut again = open(address, &device, &token, ORIGIN).await.unwrap();
     start(&mut again, json!({})).await;
-    assert_eq!(event(&mut again).await["pinned"], false);
+    assert_eq!(expect_connected(&mut again).await["pinned"], false);
     drop(again);
 
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -315,7 +323,7 @@ async fn asked_credentials_work_once_and_wrong_ones_are_reported(pool: PgPool) {
         json!({ "username": "tester", "password": "Tester-Passw0rd!" }),
     )
     .await;
-    assert_eq!(event(&mut socket).await["type"], "connected");
+    expect_connected(&mut socket).await;
 
     let mut socket = open(address, &wrong, &token, ORIGIN).await.unwrap();
     start(&mut socket, json!({})).await;
@@ -395,7 +403,7 @@ async fn the_own_account_connects_with_the_sign_in_password(pool: PgPool) {
         .insert("origin", ORIGIN.parse().unwrap());
     let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
     start(&mut socket, json!({})).await;
-    assert_eq!(event(&mut socket).await["type"], "connected");
+    expect_connected(&mut socket).await;
     socket
         .send(Message::Binary(b"whoami\n".to_vec().into()))
         .await
@@ -434,7 +442,7 @@ async fn a_stored_key_with_certificate_opens_a_shell(pool: PgPool) {
 
     let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
     start(&mut socket, json!({})).await;
-    assert_eq!(event(&mut socket).await["type"], "connected");
+    expect_connected(&mut socket).await;
     socket
         .send(Message::Binary(
             b"echo \"cert: $(whoami)\"\n".to_vec().into(),
@@ -488,7 +496,7 @@ async fn a_certificate_from_the_ca_signs_in_as_the_user(pool: PgPool) {
     let (address, _, token, device) = certificate_device(pool, Some(lab_ca())).await;
     let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
     start(&mut socket, json!({})).await;
-    assert_eq!(event(&mut socket).await["type"], "connected");
+    expect_connected(&mut socket).await;
     socket
         .send(Message::Binary(b"echo \"ca: $(whoami)\"\n".to_vec().into()))
         .await
@@ -585,7 +593,7 @@ async fn the_laps_password_signs_in_as_the_local_account(pool: PgPool) {
     let address = serve(state).await;
     let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
     start(&mut socket, json!({})).await;
-    assert_eq!(event(&mut socket).await["type"], "connected");
+    expect_connected(&mut socket).await;
     socket
         .send(Message::Binary(
             b"echo \"laps: $(whoami)\"\n".to_vec().into(),

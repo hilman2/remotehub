@@ -17,15 +17,20 @@ COPY --chmod=755 clipboard-echo /usr/local/bin/clipboard-echo
 COPY xrdp.ini /etc/xrdp/xrdp.ini
 # A fresh session for every sign-in, gone when it disconnects: tests always
 # see the same desktop. No drive redirection (no FUSE in a container).
+# sesman never learns that a client of an Xvnc session left, so
+# KillDisconnected alone kept every session (#75): Xvnc ends itself five
+# seconds after its last client, and the session with it.
 RUN sed -i \
       -e 's/^Policy=.*/Policy=Separate/' \
       -e 's/^KillDisconnected=.*/KillDisconnected=true/' \
       -e 's/^DisconnectedTimeLimit=.*/DisconnectedTimeLimit=0/' \
       -e 's/^#EnableFuseMount=false/EnableFuseMount=false/' \
+      -e '/^\[Xvnc\]/,/^\[/ s/^param=96$/param=96\nparam=-MaxDisconnectionTime\nparam=5/' \
       /etc/xrdp/sesman.ini \
   && grep -q '^Policy=Separate' /etc/xrdp/sesman.ini \
   && grep -q '^KillDisconnected=true' /etc/xrdp/sesman.ini \
-  && grep -q '^EnableFuseMount=false' /etc/xrdp/sesman.ini
+  && grep -q '^EnableFuseMount=false' /etc/xrdp/sesman.ini \
+  && grep -q '^param=-MaxDisconnectionTime' /etc/xrdp/sesman.ini
 COPY tls/ /etc/xrdp/tls/
 RUN chown -R root:xrdp /etc/xrdp/tls && chmod 640 /etc/xrdp/tls/key.pem
 COPY --chmod=755 start.sh /usr/local/bin/start-desktop

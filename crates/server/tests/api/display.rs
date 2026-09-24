@@ -74,10 +74,15 @@ async fn text(socket: &mut Socket) -> String {
     }
 }
 
-/// Guacamole instructions until `needle` shows up.
+/// Guacamole instructions until `needle` shows up. Fails at once when guacd
+/// disconnects first, instead of waiting out the timeout.
 async fn instructions_until(socket: &mut Socket, needle: &str) -> String {
     let mut seen = String::new();
     while !seen.contains(needle) {
+        assert!(
+            !seen.contains("10.disconnect;"),
+            "{needle:?} not seen before guacd disconnected: {seen:.500}"
+        );
         let message = tokio::time::timeout(Duration::from_secs(20), socket.next())
             .await
             .unwrap_or_else(|_| panic!("{needle:?} not seen in: {seen:.500}"))
@@ -92,6 +97,22 @@ async fn instructions_until(socket: &mut Socket, needle: &str) -> String {
 
 /// The lab certificate's fingerprint (deploy/testlab/desktop/README.md).
 const LAB_CERTIFICATE: &str = "C1:E8:6D:13:4E:8D:B7:A5:D2:72:01:8F:93:8F:C4:44:EC:E4:C0:D5:97:C8:00:EF:25:24:BB:76:22:0B:DF:CD";
+
+/// Leaves the session as a browser does, and waits until the server has
+/// closed its side, and with it the guacd connection. A test that only
+/// dropped the socket would end the server with it before it said goodbye to
+/// guacd, and xrdp would keep the session (#75).
+async fn leave(mut socket: Socket) {
+    let _ = socket.send(Message::Close(None)).await;
+    let _ = tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(Ok(message)) = socket.next().await {
+            if let Message::Close(_) = message {
+                break;
+            }
+        }
+    })
+    .await;
+}
 
 /// The server's first frame, JSON.
 async fn connected(socket: &mut Socket) -> Value {
@@ -221,11 +242,16 @@ async fn a_stored_credential_opens_an_rdp_desktop(pool: PgPool) {
         ))
         .await
         .unwrap();
-    socket.send(Message::Close(None)).await.unwrap();
-    drop(socket);
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let log = send(&app, get("/api/audit", Some(&token))).await.json();
+    leave(socket).await;
+    // The server records the end after it has closed the socket.
+    let mut log = Value::Null;
+    for _ in 0..50 {
+        log = send(&app, get("/api/audit", Some(&token))).await.json();
+        if log.to_string().contains("connection.closed") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     let closed = log
         .as_array()
         .unwrap()
@@ -257,7 +283,7 @@ async fn vnc_asks_for_the_password_and_reports_a_wrong_one(pool: PgPool) {
     start(&mut socket, json!({ "password": "Vnc-Pw1!" })).await;
     assert_eq!(connected(&mut socket).await["type"], "connected");
     instructions_until(&mut socket, "3.img,").await;
-    drop(socket);
+    leave(socket).await;
 
     // guacd reports the refusal as an instruction; the client shows it.
     let mut socket = open(address, &vnc, &token, "display", ORIGIN)
@@ -267,6 +293,7 @@ async fn vnc_asks_for_the_password_and_reports_a_wrong_one(pool: PgPool) {
     assert_eq!(connected(&mut socket).await["type"], "connected");
     let seen = instructions_until(&mut socket, "5.error,").await;
     assert!(!seen.contains("3.img,"), "{seen:.300}");
+    leave(socket).await;
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -322,7 +349,7 @@ async fn a_changed_rdp_certificate_stops_the_connection_until_the_pin_is_forgott
     start(&mut socket, json!({})).await;
     let connected = connected(&mut socket).await;
     assert_eq!(connected["pinned"], true, "{connected}");
-    drop(socket);
+    leave(socket).await;
 
     let tree = send(&app, get("/api/tree", Some(&token))).await.json();
     assert_eq!(
@@ -434,6 +461,7 @@ async fn text_crosses_the_rdp_clipboard_both_ways(pool: PgPool) {
     // without surrogate pairs (GUAC_WRITE_UTF16 in src/common/iconv.c), so
     // U+1F600 arrives as U+F600.
     clipboard_round_trip(&mut socket, "über RDP €").await;
+    leave(socket).await;
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -446,6 +474,7 @@ async fn text_crosses_the_vnc_clipboard_both_ways(pool: PgPool) {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap();
     clipboard_round_trip(&mut socket, &format!("vnc {}", now.as_nanos())).await;
+    leave(socket).await;
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -458,6 +487,7 @@ async fn an_rdp_desktop_follows_the_browser_window(pool: PgPool) {
         .await
         .unwrap();
     instructions_until(&mut socket, "4.size,1.0,4.1280,3.720;").await;
+    leave(socket).await;
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -480,4 +510,5 @@ async fn an_rdp_desktop_opens_with_its_laps_password(pool: PgPool) {
     assert_eq!(connected(&mut socket).await["type"], "connected");
     let seen = instructions_until(&mut socket, "3.img,").await;
     assert!(!seen.contains("5.error,"), "{seen:.300}");
+    leave(socket).await;
 }
