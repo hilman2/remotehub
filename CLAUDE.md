@@ -91,6 +91,7 @@ docker compose -f deploy/compose.dev.yml down               # volumes are kept
   - The server's integration tests are **one** test binary, `crates/server/tests/api/` (add new files as modules in `main.rs`): every file directly in `tests/` would be linked into its own binary with the whole server in it. Helpers are in `tests/api/common.rs`.
   - Tests that need the lab are marked `#[ignore = "needs the test lab"]` and read `REMOTEHUB_TEST_LDAP_URL` and `REMOTEHUB_TEST_SSH_HOST`. Run them with `docker compose -f deploy/compose.dev.yml run --rm workbench cargo nextest run --run-ignored only`. The CI runs them after the normal tests, with the lab started while Rust compiles. Use `#[ignore]` for nothing else.
   - The test lab's passwords, keys and certificates are public on purpose and protect nothing else.
+- **End-to-end tests** (Playwright, `web/tests/e2e/`) run in a real browser against the running development stack: `docker compose -f deploy/compose.dev.yml --profile e2e run --rm e2e`. The CI runs them in full runs, or with `CI_E2E=1`. Keep `@playwright/test` equal to the Playwright image in `compose.dev.yml` and `lokal.sh`.
 - **rust-analyzer** runs via the dev container (`.devcontainer/`, service `workbench`).
 - **Rust version:** it appears in `rust-toolchain.toml`, `scripts/ci/tools.Dockerfile` and `deploy/dev/rust.Dockerfile`; the CI job `base` checks that all three match.
 

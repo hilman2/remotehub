@@ -91,6 +91,25 @@ services:
       ssh-target:
         condition: service_started
 
+  # End-to-end tests in a real browser against this stack (web/tests/e2e):
+  #   docker compose -f deploy/compose.dev.yml --profile e2e run --rm e2e
+  # It shares the network of `web`, so the UI is http://localhost:5180 — Secure
+  # cookies need localhost. Keep the image equal to @playwright/test.
+  e2e:
+    image: mcr.microsoft.com/playwright:v1.63.0-noble
+    profiles: [e2e]
+    network_mode: "service:web"
+    working_dir: /work/web
+    command: node node_modules/@playwright/test/cli.js test
+    environment:
+      TZ: Europe/Berlin
+      E2E_BASE_URL: http://localhost:5180
+      E2E_SSH_HOST: ssh-target
+      CI: "1"
+    volumes:
+      - ..:/work
+      - web-node-modules:/work/web/node_modules
+
   # Test lab (deploy/testlab): a throwaway AD domain and an SSH target for the
   # integration tests. Only reachable on the compose network; users,
   # passwords and keys are in the READMEs and scripts there.
