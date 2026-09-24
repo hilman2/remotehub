@@ -29,9 +29,10 @@ export default defineConfig({
 		// locale comes from the user's choice (localStorage), then the browser,
 		// then English — never from the URL, the SPA has one set of routes.
 		// Keep the strategy in sync with the `i18n` script in package.json.
-		// Not under vitest: tests use the messages `pnpm i18n` compiled, so the
-		// CI can run vitest next to svelte-check without rewriting them.
-		...(process.env.VITEST
+		// Not under vitest, and not when the CI compiled them beforehand
+		// (PARAGLIDE_PRECOMPILED): then vitest and the build leave the compiled
+		// messages alone while svelte-check reads them in parallel.
+		...(process.env.VITEST || process.env.PARAGLIDE_PRECOMPILED
 			? []
 			: [
 					paraglideVitePlugin({

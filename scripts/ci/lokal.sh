@@ -81,45 +81,55 @@ job_base() {
   '
 }
 
-# Rust: formatting, Clippy without warnings, the tests of the whole workspace
-# against a fresh PostgreSQL (#[sqlx::test] creates a database per test) and,
-# if the lab is needed, the tests marked #[ignore = "needs the test lab"]
-# against the Samba domain controller and the SSH target.
+# Runs a script in the Rust tools container with the cargo caches, a fresh
+# PostgreSQL (#[sqlx::test] creates a database per test) and the lab.
 # Every run unpacks the commit afresh; so Rust does not build cold each time,
 # the registry and target/ live in volumes without a label — gemeinsam.sh
-# removes labelled volumes after the run. Build jobs are capped because the
-# Docker host has little memory.
-part_rust() { # tools lab(0|1)
-  local tools="$1" lab="$2"
-  ci_warten db 60 pg_isready -h 127.0.0.1 -U ci -d ci
+# removes labelled volumes after the run.
+cargo_run() { # tools script
   ci_docker_run \
     -v remotehub-ci-cargo-registry:/usr/local/cargo/registry \
     -v remotehub-ci-cargo-git:/usr/local/cargo/git \
     -v remotehub-ci-target:/ci-target \
-    -e CARGO_TARGET_DIR=/ci-target -e CARGO_BUILD_JOBS=6 -e CARGO_TERM_COLOR=never \
+    -e CARGO_TARGET_DIR=/ci-target -e CARGO_BUILD_JOBS=8 -e CARGO_TERM_COLOR=never \
     -e DATABASE_URL=postgres://ci:ci@db:5432/ci \
     -e REMOTEHUB_TEST_LDAP_URL=ldaps://dc.remotehub.test \
     -e REMOTEHUB_TEST_SSH_HOST=ssh-target \
-    -e LAB="$lab" \
-    "$tools" bash -euo pipefail -c '
-      echo "── Toolchain"
-      rustc --version
-      cargo nextest --version | head -1
+    "$1" bash -euo pipefail -c "$2"
+}
 
-      echo "── cargo fmt"
-      cargo fmt --all --check
+# Rust: formatting, Clippy without warnings and the tests of the whole
+# workspace; if the lab is needed, it starts while Rust compiles, and the
+# tests marked #[ignore = "needs the test lab"] run afterwards with the test
+# binaries just built.
+part_rust() { # tools lab(0|1)
+  local tools="$1" lab="$2" lab_pid=""
+  if [ "$lab" = 1 ]; then
+    start_lab "$tools" &
+    lab_pid=$!
+  fi
+  ci_warten db 60 pg_isready -h 127.0.0.1 -U ci -d ci
+  cargo_run "$tools" '
+    echo "── Toolchain"
+    rustc --version
+    cargo nextest --version | head -1
 
-      echo "── cargo clippy"
-      cargo clippy --workspace --all-targets --locked -- -D warnings
+    echo "── cargo fmt"
+    cargo fmt --all --check
 
-      echo "── cargo nextest"
-      cargo nextest run --workspace --locked --no-tests=warn
+    echo "── cargo clippy"
+    cargo clippy --workspace --all-targets --locked -- -D warnings
 
-      if [ "$LAB" = 1 ]; then
-        echo "── cargo nextest (test lab)"
-        cargo nextest run --workspace --locked --no-tests=warn --run-ignored only
-      fi
+    echo "── cargo nextest"
+    cargo nextest run --workspace --locked --no-tests=warn
+  '
+  if [ -n "$lab_pid" ]; then
+    wait "$lab_pid"
+    cargo_run "$tools" '
+      echo "── cargo nextest (test lab)"
+      cargo nextest run --workspace --locked --no-tests=warn --run-ignored only
     '
+  fi
 }
 
 # Starts the lab (images from the commit under test; the build cache keeps
@@ -137,16 +147,19 @@ start_lab() { # tools
 
 # User interface: types, formatting and lint, tests (including the
 # translation guards) and the static build. The messages are compiled once;
-# then svelte-check, prettier/eslint and vitest run in parallel (they only
-# read), and the build comes last because it writes the messages again.
+# then all four checks run in parallel — vitest and the build leave the
+# compiled messages alone (PARAGLIDE_PRECOMPILED, see web/vite.config.ts).
+# The lockfile's packages were checked against minimumReleaseAge when they
+# were added, so the install does not ask the registry again.
 # The pnpm store stays between runs in a volume without a label.
 part_web() { # tools
   ci_docker_run \
     -v remotehub-ci-pnpm-store:/pnpm-store \
     -e pnpm_config_store_dir=/pnpm-store \
+    -e PARAGLIDE_PRECOMPILED=1 \
     "$1" bash -euo pipefail -c '
       cd web
-      pnpm install --frozen-lockfile
+      pnpm install --frozen-lockfile --config.minimum-release-age=0
       pnpm i18n
       pnpm exec svelte-kit sync
 
@@ -162,18 +175,16 @@ part_web() { # tools
       step svelte-check pnpm exec svelte-check --tsconfig ./tsconfig.json --fail-on-warnings &
       step lint pnpm lint &
       step vitest pnpm exec vitest --run &
+      step build pnpm exec vite build &
       wait
 
       failed=0
-      for name in svelte-check lint vitest; do
+      for name in svelte-check lint vitest build; do
         echo "── $name: $(cat "/tmp/$name.result")"
         cat "/tmp/$name.log"
         grep -q "^ok" "/tmp/$name.result" || failed=1
       done
       [ "$failed" = 0 ]
-
-      echo "── build"
-      pnpm build
     '
 }
 
@@ -193,11 +204,6 @@ in_background() {
   printf -v "${name}_pid" "%s" "$!"
 }
 
-rust_with_lab() { # tools lab
-  if [ "$2" = 1 ]; then start_lab "$1"; fi
-  part_rust "$1" "$2"
-}
-
 # Rust (with the lab) and web in parallel, each with its own log; failed parts
 # are printed last so the summary of gemeinsam.sh shows them.
 job_code() {
@@ -210,7 +216,7 @@ job_code() {
 
   if [ "$rust" = 1 ]; then
     ci_dienst db -e POSTGRES_USER=ci -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=ci "$POSTGRES_IMAGE"
-    in_background rust rust_with_lab "$tools" "$lab"
+    in_background rust part_rust "$tools" "$lab"
   else
     echo "skipped: nothing under ${RUST_INPUTS[*]} deploy/testlab/ changed" >"${logs}/rust.log"
   fi
