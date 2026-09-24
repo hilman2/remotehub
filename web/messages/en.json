@@ -160,5 +160,22 @@
 	"audit_connection_failed": "Connection failed",
 	"audit_device_host_key_pinned": "Pinned a host key",
 	"audit_device_host_key_reset": "Forgot a host key",
-	"error_own_account_unavailable": "Your sign-in password is not available in this session. Sign in again — or this is switched off here."
+	"error_own_account_unavailable": "Your sign-in password is not available in this session. Sign in again — or this is switched off here.",
+	"credential_kind": "Type",
+	"credential_kind_password": "Password",
+	"credential_kind_ssh_key": "SSH key",
+	"field_private_key": "Private key",
+	"field_passphrase": "Passphrase",
+	"field_certificate": "OpenSSH user certificate (optional)",
+	"field_key_keep": "Leave empty to keep the current key, passphrase and certificate.",
+	"credential_key": "Key",
+	"credential_certificate": "Certificate",
+	"credential_certificate_yes": "OpenSSH user certificate",
+	"credential_certificate_no": "None",
+	"credential_key_hidden": "The private key is stored encrypted and used for connections without being shown.",
+	"error_field_private_key": "This is not a private key in OpenSSH or PEM format.",
+	"error_field_passphrase": "The key's passphrase is missing or wrong.",
+	"error_field_certificate": "The certificate is not an OpenSSH user certificate for this key.",
+	"field_load_private_key": "Load key from file",
+	"field_load_certificate": "Load certificate from file"
 }

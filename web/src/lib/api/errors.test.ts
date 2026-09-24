@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import de from '../../../messages/de.json';
 import en from '../../../messages/en.json';
 import { locales } from '$lib/i18n';
-import { ERROR_CODES, errorMessage, readProblem } from './errors';
+import { ERROR_CODES, errorMessage, problemMessage, readProblem } from './errors';
 
 describe('error messages', () => {
 	it('exist for every error code in every locale', () => {
@@ -30,6 +30,24 @@ describe('error messages', () => {
 	it('fall back to a generic text for codes of a newer server', () => {
 		expect(errorMessage('something_new', 'en')).toContain('something_new');
 		expect(errorMessage('something_new', 'de')).toContain('something_new');
+	});
+});
+
+describe('problemMessage', () => {
+	it('explains invalid key fields', () => {
+		const problem = { code: 'invalid_request', params: { field: 'passphrase' } };
+		expect(problemMessage(problem, 'en')).toBe("The key's passphrase is missing or wrong.");
+		expect(problemMessage(problem, 'de')).toBe(
+			'Die Passphrase des Schlüssels fehlt oder ist falsch.'
+		);
+	});
+
+	it('falls back to the code for other fields and codes', () => {
+		const other = { code: 'invalid_request', params: { field: 'name' } };
+		expect(problemMessage(other, 'en')).toBe(errorMessage('invalid_request', 'en'));
+		expect(problemMessage({ code: 'not_found' }, 'en')).toBe(errorMessage('not_found', 'en'));
+		const inherited = { code: 'invalid_request', params: { field: 'toString' } };
+		expect(problemMessage(inherited, 'en')).toBe(errorMessage('invalid_request', 'en'));
 	});
 });
 

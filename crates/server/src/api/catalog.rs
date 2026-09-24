@@ -10,6 +10,7 @@ use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use remotehub_directory::{Principal, Sid};
+use remotehub_gateway::ssh::{KeyError, SshKey};
 use remotehub_model::{Catalog, ObjectId, Role, Subject};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -155,9 +156,13 @@ struct CredentialRow {
     id: Uuid,
     folder_id: Uuid,
     name: String,
+    kind: String,
     username: String,
     domain: String,
     version: i32,
+    key_algorithm: Option<String>,
+    key_fingerprint: Option<String>,
+    has_certificate: bool,
 }
 
 #[derive(Serialize)]
@@ -183,7 +188,9 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
     .fetch_all(&state.db)
     .await?;
     let credentials: Vec<CredentialRow> = sqlx::query_as(
-        "SELECT id, folder_id, name, username, domain, version FROM credentials ORDER BY lower(name)",
+        "SELECT id, folder_id, name, kind, username, domain, version, key_algorithm, key_fingerprint,
+                has_certificate
+         FROM credentials ORDER BY lower(name)",
     )
     .fetch_all(&state.db)
     .await?;
@@ -651,12 +658,117 @@ pub async fn reset_host_key(
 pub struct CredentialInput {
     folder_id: Uuid,
     name: String,
+    /// `password` (default) or `ssh_key`; fixed after creation.
+    #[serde(default)]
+    kind: Option<String>,
     #[serde(default)]
     username: String,
     #[serde(default)]
     domain: String,
-    /// Required when creating; when updating, absent keeps the password.
+    /// Kind `password`: required when creating; absent keeps it.
     password: Option<SecretString>,
+    /// Kind `ssh_key`: required when creating; absent keeps key, passphrase
+    /// and certificate.
+    private_key: Option<SecretString>,
+    passphrase: Option<SecretString>,
+    certificate: Option<String>,
+}
+
+/// The secret fields of one credential version, checked and ready to seal.
+enum Secrets {
+    Password(SecretString),
+    Key {
+        private_key: SecretString,
+        passphrase: Option<SecretString>,
+        certificate: Option<String>,
+        algorithm: String,
+        fingerprint: String,
+    },
+}
+
+impl Secrets {
+    fn fields(&self) -> Vec<(&'static str, &[u8])> {
+        match self {
+            Secrets::Password(password) => {
+                vec![(PASSWORD_FIELD, password.expose_secret().as_bytes())]
+            }
+            Secrets::Key {
+                private_key,
+                passphrase,
+                certificate,
+                ..
+            } => {
+                let mut fields = vec![(PRIVATE_KEY_FIELD, private_key.expose_secret().as_bytes())];
+                if let Some(passphrase) = passphrase {
+                    fields.push((PASSPHRASE_FIELD, passphrase.expose_secret().as_bytes()));
+                }
+                if let Some(certificate) = certificate {
+                    fields.push((CERTIFICATE_FIELD, certificate.as_bytes()));
+                }
+                fields
+            }
+        }
+    }
+
+    /// What identifies a key, stored in plain text to show it.
+    fn key_info(&self) -> (Option<&str>, Option<&str>, bool) {
+        match self {
+            Secrets::Password(_) => (None, None, false),
+            Secrets::Key {
+                algorithm,
+                fingerprint,
+                certificate,
+                ..
+            } => (Some(algorithm), Some(fingerprint), certificate.is_some()),
+        }
+    }
+}
+
+const PRIVATE_KEY_FIELD: &str = "private_key";
+const PASSPHRASE_FIELD: &str = "passphrase";
+const CERTIFICATE_FIELD: &str = "certificate";
+
+/// The new secrets of a credential, if any were given; keys are parsed and
+/// matched against their certificate before anything is stored.
+fn new_secrets(kind: &str, input: &CredentialInput) -> Result<Option<Secrets>, Problem> {
+    match kind {
+        "password" => Ok(input.password.clone().map(Secrets::Password)),
+        "ssh_key" => {
+            let Some(private_key) = input.private_key.clone() else {
+                return Ok(None);
+            };
+            let passphrase = input
+                .passphrase
+                .clone()
+                .filter(|p| !p.expose_secret().is_empty());
+            let certificate = input
+                .certificate
+                .as_deref()
+                .map(str::trim)
+                .filter(|c| !c.is_empty())
+                .map(str::to_owned);
+            let key = SshKey::parse(
+                private_key.expose_secret(),
+                passphrase.as_ref().map(|p| p.expose_secret()),
+                certificate.as_deref(),
+            )
+            .map_err(|error| {
+                invalid(match error {
+                    KeyError::InvalidKey => "private_key",
+                    KeyError::PassphraseRequired | KeyError::WrongPassphrase => "passphrase",
+                    KeyError::InvalidCertificate | KeyError::CertificateMismatch => "certificate",
+                })
+            })?;
+            Ok(Some(Secrets::Key {
+                private_key,
+                passphrase,
+                certificate,
+                algorithm: key.algorithm(),
+                fingerprint: key.fingerprint(),
+            }))
+        }
+        _ => Err(invalid("kind")),
+    }
 }
 
 fn plain(value: &str, field: &str) -> Result<String, Problem> {
@@ -665,6 +777,21 @@ fn plain(value: &str, field: &str) -> Result<String, Problem> {
         return Err(invalid(field));
     }
     Ok(value.to_owned())
+}
+
+async fn seal_version(
+    tx: &mut sqlx::PgConnection,
+    state: &AppState,
+    id: Uuid,
+    version: i32,
+    secrets: &Secrets,
+) -> Result<(), Problem> {
+    for (field, value) in secrets.fields() {
+        secrets::store(&mut *tx, &state.vault, id, version, field, value)
+            .await
+            .map_err(secret_problem)?;
+    }
+    Ok(())
 }
 
 pub async fn create_credential(
@@ -677,7 +804,14 @@ pub async fn create_credential(
     let name = name(&input.name, "name")?;
     let username = plain(&input.username, "username")?;
     let domain = plain(&input.domain, "domain")?;
-    let password = input.password.ok_or_else(|| invalid("password"))?;
+    let kind = input.kind.clone().unwrap_or_else(|| "password".to_owned());
+    let secrets = new_secrets(&kind, &input)?.ok_or_else(|| {
+        invalid(if kind == "ssh_key" {
+            "private_key"
+        } else {
+            "password"
+        })
+    })?;
     let (subject, catalog) = context(&state, &session).await?;
     require(
         &catalog,
@@ -686,28 +820,29 @@ pub async fn create_credential(
         ObjectId::Folder(input.folder_id),
     )?;
 
+    let (algorithm, fingerprint, has_certificate) = secrets.key_info();
     let mut tx = state.db.begin().await?;
     let id: Uuid = sqlx::query_scalar(
-        "INSERT INTO credentials (folder_id, name, username, domain) VALUES ($1, $2, $3, $4) RETURNING id",
+        "INSERT INTO credentials
+             (folder_id, name, username, domain, kind, key_algorithm, key_fingerprint, has_certificate)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
     )
     .bind(input.folder_id)
     .bind(&name)
     .bind(&username)
     .bind(&domain)
+    .bind(&kind)
+    .bind(algorithm)
+    .bind(fingerprint)
+    .bind(has_certificate)
     .fetch_one(&mut *tx)
     .await
     .map_err(database)?;
-    secrets::store(
-        &mut *tx,
-        &state.vault,
-        id,
-        1,
-        PASSWORD_FIELD,
-        password.expose_secret().as_bytes(),
-    )
-    .await
-    .map_err(secret_problem)?;
-    let details = json!({ "name": name, "username": username, "domain": domain });
+    seal_version(&mut tx, &state, id, 1, &secrets).await?;
+    let details = json!({
+        "name": name, "username": username, "domain": domain, "kind": kind,
+        "key_fingerprint": fingerprint, "has_certificate": has_certificate,
+    });
     audit::record(
         &mut *tx,
         entry(
@@ -744,6 +879,14 @@ pub async fn update_credential(
             ObjectId::Folder(input.folder_id),
         )?;
     }
+    let kind: String = sqlx::query_scalar("SELECT kind FROM credentials WHERE id = $1")
+        .bind(id)
+        .fetch_one(&state.db)
+        .await?;
+    if input.kind.as_deref().is_some_and(|k| k != kind) {
+        return Err(invalid("kind"));
+    }
+    let secrets = new_secrets(&kind, &input)?;
 
     let mut tx = state.db.begin().await?;
     let version: i32 = sqlx::query_scalar(
@@ -756,25 +899,27 @@ pub async fn update_credential(
     .bind(&name)
     .bind(&username)
     .bind(&domain)
-    .bind(input.password.is_some())
+    .bind(secrets.is_some())
     .fetch_one(&mut *tx)
     .await
     .map_err(database)?;
-    if let Some(password) = &input.password {
-        secrets::store(
-            &mut *tx,
-            &state.vault,
-            id,
-            version,
-            PASSWORD_FIELD,
-            password.expose_secret().as_bytes(),
+    if let Some(secrets) = &secrets {
+        let (algorithm, fingerprint, has_certificate) = secrets.key_info();
+        sqlx::query(
+            "UPDATE credentials SET key_algorithm = $2, key_fingerprint = $3, has_certificate = $4
+             WHERE id = $1",
         )
-        .await
-        .map_err(secret_problem)?;
+        .bind(id)
+        .bind(algorithm)
+        .bind(fingerprint)
+        .bind(has_certificate)
+        .execute(&mut *tx)
+        .await?;
+        seal_version(&mut tx, &state, id, version, secrets).await?;
     }
     let details = json!({
         "name": name, "username": username, "domain": domain,
-        "folder_id": input.folder_id, "password_changed": input.password.is_some(),
+        "folder_id": input.folder_id, "secret_changed": secrets.is_some(),
     });
     audit::record(
         &mut *tx,

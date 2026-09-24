@@ -36,13 +36,20 @@ export interface Device {
 	role: Role;
 }
 
+export type CredentialKind = 'password' | 'ssh_key';
+
 export interface Credential {
 	id: string;
 	folder_id: string;
 	name: string;
+	kind: CredentialKind;
 	username: string;
 	domain: string;
 	version: number;
+	/** SSH keys only: what identifies the key, never the key itself. */
+	key_algorithm: string | null;
+	key_fingerprint: string | null;
+	has_certificate: boolean;
 	role: Role;
 }
 
@@ -69,8 +76,13 @@ export interface CredentialInput {
 	name: string;
 	username: string;
 	domain: string;
+	kind?: CredentialKind;
 	/** Required when creating; omitted when updating keeps the password. */
 	password?: string;
+	/** SSH keys: required when creating; omitted when updating keeps key, passphrase and certificate. */
+	private_key?: string;
+	passphrase?: string;
+	certificate?: string;
 }
 
 export interface GrantRow {

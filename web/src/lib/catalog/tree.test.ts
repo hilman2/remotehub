@@ -32,9 +32,13 @@ const tree: Tree = {
 			id: 'c',
 			folder_id: 'w',
 			name: 'domain admin',
+			kind: 'password',
 			username: 'administrator',
 			domain: 'EXAMPLE',
 			version: 1,
+			key_algorithm: null,
+			key_fingerprint: null,
+			has_certificate: false,
 			role: 'connect'
 		}
 	]

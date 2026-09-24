@@ -1,5 +1,5 @@
-/** Labels for roles, protocols and sign-in modes; `Record` makes a missing one a type error. */
-import type { AuthMode, ObjectKind, Protocol, Role } from '$lib/api/catalog';
+/** Labels for roles, protocols, sign-in modes and credential kinds; `Record` makes a missing one a type error. */
+import type { AuthMode, CredentialKind, ObjectKind, Protocol, Role } from '$lib/api/catalog';
 import { m } from '$lib/paraglide/messages';
 
 export const ROLE_LABELS: Record<Role, () => string> = {
@@ -26,4 +26,9 @@ export const KIND_LABELS: Record<ObjectKind, () => string> = {
 	folder: m.catalog_kind_folder,
 	device: m.catalog_kind_device,
 	credential: m.catalog_kind_credential
+};
+
+export const CREDENTIAL_KIND_LABELS: Record<CredentialKind, () => string> = {
+	password: m.credential_kind_password,
+	ssh_key: m.credential_kind_ssh_key
 };

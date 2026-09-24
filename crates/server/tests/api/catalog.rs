@@ -397,7 +397,7 @@ async fn passwords_are_sealed_versioned_and_never_returned(pool: PgPool) {
         .await
         .json()
         .to_string();
-    assert!(log.contains("credential.updated") && log.contains("\"password_changed\":true"));
+    assert!(log.contains("credential.updated") && log.contains("\"secret_changed\":true"));
     assert!(!log.contains("T0p-Secret!") && !log.contains("N3w!"));
 
     // Deleting the credential leaves its devices asking for credentials.
@@ -606,4 +606,130 @@ async fn devices_are_validated(pool: PgPool) {
         let response = call(&f.app, &f.alice, "POST", "/api/devices", Some(body)).await;
         assert_eq!(response.code(), "invalid_request", "{field}");
     }
+}
+
+/// A file of the lab's SSH target (deploy/testlab/ssh).
+fn lab_key(file: &str) -> String {
+    let dir = std::path::PathBuf::from(
+        std::env::var("CARGO_MANIFEST_DIR").expect("set by cargo and nextest"),
+    );
+    std::fs::read_to_string(dir.join("../../deploy/testlab/ssh").join(file)).unwrap()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn ssh_keys_are_checked_sealed_and_shown_only_by_fingerprint(pool: PgPool) {
+    let f = fixture(pool.clone()).await;
+    let key = lab_key("tester_ed25519_cert");
+    let certificate = lab_key("tester_ed25519_cert-cert.pub");
+    let body = |extra: Value| {
+        let mut body =
+            json!({ "folder_id": f.linux, "name": "key", "kind": "ssh_key", "username": "tester" });
+        body.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        body
+    };
+
+    for (extra, field) in [
+        (json!({}), "private_key"),
+        (json!({ "private_key": "not a key" }), "private_key"),
+        (
+            json!({ "private_key": lab_key("tester_ed25519_passphrase") }),
+            "passphrase",
+        ),
+        (
+            json!({ "private_key": lab_key("tester_ed25519_passphrase"), "passphrase": "wrong" }),
+            "passphrase",
+        ),
+        (
+            json!({ "private_key": lab_key("tester_ed25519"), "certificate": certificate }),
+            "certificate",
+        ),
+    ] {
+        let response = call(
+            &f.app,
+            &f.alice,
+            "POST",
+            "/api/credentials",
+            Some(body(extra)),
+        )
+        .await;
+        assert_eq!(response.code(), "invalid_request");
+        assert_eq!(response.json()["params"]["field"], field);
+    }
+
+    let id = create(
+        &f.app,
+        &f.alice,
+        "/api/credentials",
+        body(json!({ "private_key": key, "certificate": certificate })),
+    )
+    .await;
+    let everything = tree(&f.app, &f.alice).await;
+    let shown = everything["credentials"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == id.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(shown["kind"], "ssh_key");
+    assert_eq!(shown["key_algorithm"], "ssh-ed25519");
+    assert!(
+        shown["key_fingerprint"]
+            .as_str()
+            .unwrap()
+            .starts_with("SHA256:")
+    );
+    assert_eq!(shown["has_certificate"], true);
+    let secret_line = key.lines().nth(1).unwrap();
+    assert!(!everything.to_string().contains(secret_line));
+    let log = call(&f.app, &f.alice, "GET", "/api/audit", None)
+        .await
+        .json()
+        .to_string();
+    assert!(!log.contains(secret_line));
+
+    let fields: Vec<String> = sqlx::query_scalar(
+        "SELECT field FROM secret_fields WHERE owner_id = $1::uuid ORDER BY field",
+    )
+    .bind(&id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(fields, ["certificate", "private_key"]);
+
+    // The kind stays; a new key makes a new version.
+    let change = call(
+        &f.app,
+        &f.alice,
+        "PUT",
+        &format!("/api/credentials/{id}"),
+        Some(body(json!({ "kind": "password" }))),
+    )
+    .await;
+    assert_eq!(change.json()["params"]["field"], "kind");
+    let renew = call(
+        &f.app,
+        &f.alice,
+        "PUT",
+        &format!("/api/credentials/{id}"),
+        Some(body(json!({ "private_key": lab_key("tester_ed25519") }))),
+    )
+    .await;
+    assert_eq!(renew.status, StatusCode::NO_CONTENT);
+    let renewed = tree(&f.app, &f.alice).await["credentials"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == id.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(
+        (
+            renewed["version"].as_i64(),
+            renewed["has_certificate"].as_bool()
+        ),
+        (Some(2), Some(false))
+    );
 }

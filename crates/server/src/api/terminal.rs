@@ -22,9 +22,9 @@ use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::http::header::ORIGIN;
 use axum::response::Response;
-use remotehub_gateway::ssh::{self, Output, Size, SshError, SshTarget};
+use remotehub_gateway::ssh::{self, Output, Size, SshAuth, SshError, SshKey, SshTarget};
 use remotehub_model::{ObjectId, Role};
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -38,6 +38,9 @@ use crate::{AppState, catalog, secrets};
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const START_TIMEOUT: Duration = Duration::from_secs(120);
 const PASSWORD_FIELD: &str = "password";
+const PRIVATE_KEY_FIELD: &str = "private_key";
+const PASSPHRASE_FIELD: &str = "passphrase";
+const CERTIFICATE_FIELD: &str = "certificate";
 
 #[derive(sqlx::FromRow)]
 struct Target {
@@ -148,7 +151,7 @@ async fn own_account(
     state: &AppState,
     session: &Session,
     headers: &HeaderMap,
-) -> Result<Result<(String, SecretString), Problem>, Problem> {
+) -> Result<Result<(String, Login), Problem>, Problem> {
     if !state.settings.own_account_connections || session.kind != "directory" {
         return Ok(Err(Problem::new(ErrorCode::OwnAccountUnavailable)));
     }
@@ -157,7 +160,10 @@ async fn own_account(
     };
     let password =
         String::from_utf8(password.to_vec()).map_err(|_| Problem::new(ErrorCode::Internal))?;
-    Ok(Ok((session.username.clone(), SecretString::from(password))))
+    Ok(Ok((
+        session.username.clone(),
+        Login::Password(SecretString::from(password)),
+    )))
 }
 
 async fn run(
@@ -165,7 +171,7 @@ async fn run(
     state: AppState,
     session: Session,
     target: Target,
-    own: Option<Result<(String, SecretString), Problem>>,
+    own: Option<Result<(String, Login), Problem>>,
     address: String,
 ) {
     // 1. The browser says how big its terminal is (and, if asked, who to be).
@@ -193,7 +199,7 @@ async fn run(
         Some(own) => own,
         None => credentials(&state, &target, username, password).await,
     };
-    let (username, password) = match resolved {
+    let (username, login) = match resolved {
         Ok(credentials) => credentials,
         Err(problem) => {
             send_problem(&mut socket, &problem).await;
@@ -208,14 +214,17 @@ async fn run(
             host: &target.host,
             port,
             username: &username,
-            password: &password,
+            auth: match &login {
+                Login::Password(password) => SshAuth::Password(password),
+                Login::Key(key) => SshAuth::Key(key),
+            },
             pinned_host_key: target.host_key.as_deref(),
         },
         size,
         CONNECT_TIMEOUT,
     )
     .await;
-    drop(password);
+    drop(login);
     let mut shell = match opened {
         Ok(shell) => shell,
         Err(error) => {
@@ -324,34 +333,70 @@ async fn run(
     .await;
 }
 
-/// User name and password for the device's sign-in mode.
+/// How to sign in to the target, resolved on the server.
+enum Login {
+    Password(SecretString),
+    Key(Box<SshKey>),
+}
+
+/// A sealed field of the credential's current version as text.
+async fn stored_text(
+    state: &AppState,
+    credential: Uuid,
+    version: i32,
+    field: &str,
+) -> Result<Option<SecretString>, Problem> {
+    let secret = secrets::load(&state.db, &state.vault, credential, version, field)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "cannot open a stored secret");
+            Problem::new(ErrorCode::Internal)
+        })?;
+    secret
+        .map(|bytes| String::from_utf8(bytes.to_vec()).map(SecretString::from))
+        .transpose()
+        .map_err(|_| Problem::new(ErrorCode::Internal))
+}
+
+/// User name and login for the device's sign-in mode.
 async fn credentials(
     state: &AppState,
     target: &Target,
     username: Option<String>,
     password: Option<SecretString>,
-) -> Result<(String, SecretString), Problem> {
+) -> Result<(String, Login), Problem> {
     match target.auth_mode.as_str() {
         "stored" => {
             let credential = target
                 .credential_id
                 .ok_or(Problem::new(ErrorCode::InvalidRequest).param("field", "credential_id"))?;
-            let (username, version): (String, i32) =
-                sqlx::query_as("SELECT username, version FROM credentials WHERE id = $1")
+            let (username, version, kind): (String, i32, String) =
+                sqlx::query_as("SELECT username, version, kind FROM credentials WHERE id = $1")
                     .bind(credential)
                     .fetch_one(&state.db)
                     .await?;
-            let secret =
-                secrets::load(&state.db, &state.vault, credential, version, PASSWORD_FIELD)
-                    .await
-                    .map_err(|error| {
-                        tracing::error!(%error, "cannot open a stored password");
-                        Problem::new(ErrorCode::Internal)
-                    })?
+            if kind == "ssh_key" {
+                let private_key = stored_text(state, credential, version, PRIVATE_KEY_FIELD)
+                    .await?
                     .ok_or(Problem::new(ErrorCode::Internal))?;
-            let password = String::from_utf8(secret.to_vec())
-                .map_err(|_| Problem::new(ErrorCode::Internal))?;
-            Ok((username, SecretString::from(password)))
+                let passphrase = stored_text(state, credential, version, PASSPHRASE_FIELD).await?;
+                let certificate =
+                    stored_text(state, credential, version, CERTIFICATE_FIELD).await?;
+                let key = SshKey::parse(
+                    private_key.expose_secret(),
+                    passphrase.as_ref().map(|p| p.expose_secret()),
+                    certificate.as_ref().map(|c| c.expose_secret()),
+                )
+                .map_err(|error| {
+                    tracing::error!(%error, "a stored SSH key does not open");
+                    Problem::new(ErrorCode::Internal)
+                })?;
+                return Ok((username, Login::Key(Box::new(key))));
+            }
+            let password = stored_text(state, credential, version, PASSWORD_FIELD)
+                .await?
+                .ok_or(Problem::new(ErrorCode::Internal))?;
+            Ok((username, Login::Password(password)))
         }
         "ask" => {
             let username = username
@@ -359,7 +404,7 @@ async fn credentials(
                 .ok_or(Problem::new(ErrorCode::InvalidRequest).param("field", "username"))?;
             let password = password
                 .ok_or(Problem::new(ErrorCode::InvalidRequest).param("field", "password"))?;
-            Ok((username.trim().to_owned(), password))
+            Ok((username.trim().to_owned(), Login::Password(password)))
         }
         _ => Err(Problem::new(ErrorCode::InvalidRequest).param("field", "auth_mode")),
     }

@@ -30,12 +30,18 @@
 		type Tree
 	} from '$lib/api/catalog';
 	import type { ApiResult } from '$lib/api/client';
-	import { errorMessage } from '$lib/api/errors';
+	import { errorMessage, problemMessage } from '$lib/api/errors';
 	import CredentialForm from '$lib/catalog/CredentialForm.svelte';
 	import DeviceForm from '$lib/catalog/DeviceForm.svelte';
 	import FolderNodeView from '$lib/catalog/FolderNodeView.svelte';
 	import Grants from '$lib/catalog/Grants.svelte';
-	import { AUTH_MODE_LABELS, KIND_LABELS, PROTOCOL_LABELS, ROLE_LABELS } from '$lib/catalog/labels';
+	import {
+		AUTH_MODE_LABELS,
+		CREDENTIAL_KIND_LABELS,
+		KIND_LABELS,
+		PROTOCOL_LABELS,
+		ROLE_LABELS
+	} from '$lib/catalog/labels';
 	import { filter, nest, pathTo } from '$lib/catalog/tree';
 	import Dialog from '$lib/components/Dialog.svelte';
 	import { getLocale } from '$lib/i18n';
@@ -94,7 +100,7 @@
 	async function run(change: Promise<ApiResult<unknown>>, select?: (data: unknown) => void) {
 		const result = await change;
 		if (!result.ok) {
-			error = errorMessage(result.code);
+			error = problemMessage(result);
 			return;
 		}
 		dialogOpen = false;
@@ -417,7 +423,9 @@
 					{/if}
 				</div>
 			{:else if credential}
-				<p class="text-xs text-ink-3">{KIND_LABELS.credential()}</p>
+				<p class="text-xs text-ink-3">
+					{KIND_LABELS.credential()} · {CREDENTIAL_KIND_LABELS[credential.kind]()}
+				</p>
 				<h2 class="text-xl font-semibold">{credential.name}</h2>
 				<p class="mt-1 text-sm text-ink-2">
 					{pathTo(tree, credential.folder_id)
@@ -431,8 +439,25 @@
 						<dt class="text-ink-2">{m.field_domain()}</dt>
 						<dd class="font-mono">{credential.domain}</dd>
 					{/if}
-					<dt class="text-ink-2">{m.field_password()}</dt>
-					<dd class="text-ink-2">{m.credential_hidden()}</dd>
+					{#if credential.kind === 'ssh_key'}
+						<dt class="text-ink-2">{m.credential_key()}</dt>
+						<dd>
+							<span class="font-mono text-xs">{credential.key_algorithm}</span>
+							<span class="block font-mono text-xs break-all text-ink-2">
+								{credential.key_fingerprint}
+							</span>
+							<span class="mt-1 block text-ink-2">{m.credential_key_hidden()}</span>
+						</dd>
+						<dt class="text-ink-2">{m.credential_certificate()}</dt>
+						<dd>
+							{credential.has_certificate
+								? m.credential_certificate_yes()
+								: m.credential_certificate_no()}
+						</dd>
+					{:else}
+						<dt class="text-ink-2">{m.field_password()}</dt>
+						<dd class="text-ink-2">{m.credential_hidden()}</dd>
+					{/if}
 				</dl>
 				<p class="mt-3 text-sm text-ink-2">
 					{m.catalog_access({ role: ROLE_LABELS[credential.role]() })} · {m.credential_version({
@@ -490,67 +515,72 @@
 {/if}
 
 <Dialog bind:open={dialogOpen} title={dialogTitle}>
-	{#if open?.type === 'folder'}
-		<form onsubmit={saveFolder}>
-			<label class="block text-sm font-medium" for="folder-name">{m.field_name()}</label>
-			<input
-				id="folder-name"
-				class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
-				required
-				maxlength="200"
-				bind:value={folderName}
-			/>
-			<div class="mt-5 flex justify-end gap-2">
-				<button
-					type="button"
-					class="rounded-lg px-3 py-1.5 text-sm hover:bg-surface-2"
-					onclick={() => (dialogOpen = false)}
-				>
-					{m.action_cancel()}
-				</button>
-				<button
-					type="submit"
-					class="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink"
-				>
-					{open.folder ? m.action_save() : m.action_create()}
-				</button>
-			</div>
-		</form>
-	{:else if open?.type === 'device' && tree}
-		<DeviceForm
-			folderId={open.folderId}
-			device={open.device}
-			credentials={tree.credentials}
-			onsubmit={saveDevice}
-			oncancel={() => (dialogOpen = false)}
-		/>
-	{:else if open?.type === 'credential'}
-		<CredentialForm
-			folderId={open.folderId}
-			credential={open.credential}
-			onsubmit={saveCredential}
-			oncancel={() => (dialogOpen = false)}
-		/>
-	{:else if open?.type === 'grants'}
-		<Grants kind={open.kind} id={open.id} />
-	{:else if open?.type === 'delete'}
-		<p class="text-sm">{m.catalog_delete_confirm({ name: open.name })}</p>
-		<div class="mt-5 flex justify-end gap-2">
-			<button
-				type="button"
-				class="rounded-lg px-3 py-1.5 text-sm hover:bg-surface-2"
-				onclick={() => (dialogOpen = false)}
-			>
-				{m.action_cancel()}
-			</button>
-			<button
-				type="button"
-				class="rounded-lg bg-critical px-3 py-1.5 text-sm font-medium text-white"
-				onclick={remove}
-			>
-				{m.catalog_delete()}
-			</button>
-		</div>
+	<!-- Mounted per opening: no form keeps the state, or a key, of the last one. -->
+	{#if dialogOpen}
+		{#key open}
+			{#if open?.type === 'folder'}
+				<form onsubmit={saveFolder}>
+					<label class="block text-sm font-medium" for="folder-name">{m.field_name()}</label>
+					<input
+						id="folder-name"
+						class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
+						required
+						maxlength="200"
+						bind:value={folderName}
+					/>
+					<div class="mt-5 flex justify-end gap-2">
+						<button
+							type="button"
+							class="rounded-lg px-3 py-1.5 text-sm hover:bg-surface-2"
+							onclick={() => (dialogOpen = false)}
+						>
+							{m.action_cancel()}
+						</button>
+						<button
+							type="submit"
+							class="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink"
+						>
+							{open.folder ? m.action_save() : m.action_create()}
+						</button>
+					</div>
+				</form>
+			{:else if open?.type === 'device' && tree}
+				<DeviceForm
+					folderId={open.folderId}
+					device={open.device}
+					credentials={tree.credentials}
+					onsubmit={saveDevice}
+					oncancel={() => (dialogOpen = false)}
+				/>
+			{:else if open?.type === 'credential'}
+				<CredentialForm
+					folderId={open.folderId}
+					credential={open.credential}
+					onsubmit={saveCredential}
+					oncancel={() => (dialogOpen = false)}
+				/>
+			{:else if open?.type === 'grants'}
+				<Grants kind={open.kind} id={open.id} />
+			{:else if open?.type === 'delete'}
+				<p class="text-sm">{m.catalog_delete_confirm({ name: open.name })}</p>
+				<div class="mt-5 flex justify-end gap-2">
+					<button
+						type="button"
+						class="rounded-lg px-3 py-1.5 text-sm hover:bg-surface-2"
+						onclick={() => (dialogOpen = false)}
+					>
+						{m.action_cancel()}
+					</button>
+					<button
+						type="button"
+						class="rounded-lg bg-critical px-3 py-1.5 text-sm font-medium text-white"
+						onclick={remove}
+					>
+						{m.catalog_delete()}
+					</button>
+				</div>
+			{/if}
+		{/key}
 	{/if}
 	{#if error && dialogOpen}
 		<p class="mt-4 flex items-center gap-2 text-sm" role="alert">

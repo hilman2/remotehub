@@ -19,7 +19,8 @@ const IDENTICAL_IN_GERMAN = new Set<string>([
 	'field_port',
 	'protocol_ssh',
 	'protocol_vnc',
-	'credential_version'
+	'credential_version',
+	'field_passphrase'
 ]);
 
 /** Every message as text; plural and select variants as their JSON. */

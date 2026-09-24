@@ -6,17 +6,110 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use russh::client::{self, Handle, Msg};
-use russh::keys::{HashAlg, PublicKey, PublicKeyOrCertificate};
+use russh::keys::{
+    Certificate, HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKey, PublicKeyOrCertificate,
+};
 use russh::{ChannelMsg, ChannelReadHalf, ChannelWriteHalf};
 use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
+
+/// How to sign in.
+pub enum SshAuth<'a> {
+    Password(&'a SecretString),
+    Key(&'a SshKey),
+}
+
+/// A private key, decrypted and ready to sign in, optionally with an OpenSSH
+/// user certificate. Built only on the server; never serialised.
+pub struct SshKey {
+    key: Arc<PrivateKey>,
+    certificate: Option<Certificate>,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum KeyError {
+    #[error("not a private key in OpenSSH or PEM format")]
+    InvalidKey,
+    #[error("the key needs its passphrase")]
+    PassphraseRequired,
+    #[error("wrong passphrase")]
+    WrongPassphrase,
+    #[error("not an OpenSSH user certificate")]
+    InvalidCertificate,
+    #[error("the certificate belongs to another key")]
+    CertificateMismatch,
+}
+
+impl SshKey {
+    /// Reads a private key (optionally encrypted) and an optional
+    /// certificate, and checks that they belong together.
+    pub fn parse(
+        private_key: &str,
+        passphrase: Option<&str>,
+        certificate: Option<&str>,
+    ) -> Result<SshKey, KeyError> {
+        let passphrase = passphrase.filter(|p| !p.is_empty());
+        let key = match russh::keys::decode_secret_key(private_key.trim(), None) {
+            Ok(key) => key,
+            Err(_) if !looks_like_private_key(private_key) => return Err(KeyError::InvalidKey),
+            Err(_) => match passphrase {
+                None => return Err(KeyError::PassphraseRequired),
+                Some(passphrase) => {
+                    russh::keys::decode_secret_key(private_key.trim(), Some(passphrase))
+                        .map_err(|_| KeyError::WrongPassphrase)?
+                }
+            },
+        };
+        let certificate = certificate
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(|c| Certificate::from_openssh(c).map_err(|_| KeyError::InvalidCertificate))
+            .transpose()?;
+        if let Some(certificate) = &certificate {
+            if certificate.cert_type() != russh::keys::ssh_key::certificate::CertType::User {
+                return Err(KeyError::InvalidCertificate);
+            }
+            if certificate.public_key() != key.public_key().key_data() {
+                return Err(KeyError::CertificateMismatch);
+            }
+        }
+        Ok(SshKey {
+            key: Arc::new(key),
+            certificate,
+        })
+    }
+
+    /// e.g. `ssh-ed25519`
+    pub fn algorithm(&self) -> String {
+        self.key.algorithm().to_string()
+    }
+
+    /// SHA-256 fingerprint of the public key.
+    pub fn fingerprint(&self) -> String {
+        self.key
+            .public_key()
+            .fingerprint(HashAlg::Sha256)
+            .to_string()
+    }
+
+    pub fn has_certificate(&self) -> bool {
+        self.certificate.is_some()
+    }
+}
+
+/// An unreadable key that at least has the armour of one is probably
+/// encrypted rather than garbage.
+fn looks_like_private_key(text: &str) -> bool {
+    let text = text.trim();
+    text.starts_with("-----BEGIN") && text.contains("PRIVATE KEY-----")
+}
 
 /// Where and as whom to connect.
 pub struct SshTarget<'a> {
     pub host: &'a str,
     pub port: u16,
     pub username: &'a str,
-    pub password: &'a SecretString,
+    pub auth: SshAuth<'a>,
     /// The host key pinned at the first connection (OpenSSH format); `None`
     /// trusts the key presented now (trust on first use).
     pub pinned_host_key: Option<&'a str>,
@@ -144,10 +237,40 @@ async fn open_inner(target: SshTarget<'_>, size: Size) -> Result<SshSession, Ssh
     };
     let host_key = presented_key.ok_or_else(|| SshError::Protocol("no host key".into()))?;
 
-    let auth = handle
-        .authenticate_password(target.username, target.password.expose_secret())
-        .await
-        .map_err(|e| SshError::Protocol(e.to_string()))?;
+    let auth = match target.auth {
+        SshAuth::Password(password) => {
+            handle
+                .authenticate_password(target.username, password.expose_secret())
+                .await
+        }
+        SshAuth::Key(SshKey {
+            key,
+            certificate: Some(certificate),
+        }) => {
+            handle
+                .authenticate_openssh_cert(target.username, key.clone(), certificate.clone())
+                .await
+        }
+        SshAuth::Key(SshKey {
+            key,
+            certificate: None,
+        }) => {
+            // RSA keys sign with the best hash the server accepts.
+            let hash = handle
+                .best_supported_rsa_hash()
+                .await
+                .ok()
+                .flatten()
+                .flatten();
+            handle
+                .authenticate_publickey(
+                    target.username,
+                    PrivateKeyWithHashAlg::new(key.clone(), hash),
+                )
+                .await
+        }
+    }
+    .map_err(|e| SshError::Protocol(e.to_string()))?;
     if !auth.success() {
         return Err(SshError::AuthenticationFailed);
     }

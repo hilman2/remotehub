@@ -397,3 +397,44 @@ async fn the_own_account_connects_with_the_sign_in_password(pool: PgPool) {
         .unwrap();
     output_until(&mut socket, "tester").await;
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn a_stored_key_with_certificate_opens_a_shell(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+        .join("../../deploy/testlab/ssh");
+    let read = |f: &str| std::fs::read_to_string(dir.join(f)).unwrap();
+    let credential = create(
+        &app,
+        &token,
+        "/api/credentials",
+        json!({
+            "folder_id": folder, "name": "certified", "kind": "ssh_key", "username": "tester",
+            "private_key": read("tester_ed25519_cert"), "certificate": read("tester_ed25519_cert-cert.pub"),
+        }),
+    )
+    .await;
+    let device = create(
+        &app,
+        &token,
+        "/api/devices",
+        json!({
+            "folder_id": folder, "name": "by certificate", "protocol": "ssh", "host": ssh_host(),
+            "port": 22, "auth_mode": "stored", "credential_id": credential,
+        }),
+    )
+    .await;
+    let address = serve(state).await;
+
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({})).await;
+    assert_eq!(event(&mut socket).await["type"], "connected");
+    socket
+        .send(Message::Binary(
+            b"echo \"cert: $(whoami)\"\n".to_vec().into(),
+        ))
+        .await
+        .unwrap();
+    output_until(&mut socket, "cert: tester").await;
+}

@@ -54,7 +54,9 @@ Crates are created with the issue that first needs them.
    - **own AD account** — the sign-in password, kept encrypted with a key that only the user's cookie holds.
 4. The server starts the engine:
    - **SSH:** russh connects, verifies the pinned host key, authenticates, opens a PTY. Only terminal
-     bytes and resize events cross the WebSocket; xterm.js renders them.
+     bytes and resize events cross the WebSocket; xterm.js renders them. A stored credential is a
+     password or an SSH key (OpenSSH or PEM, optionally with passphrase and OpenSSH user certificate); a
+     key is parsed and matched to its certificate before it is sealed, and shown only by fingerprint.
    - **RDP/VNC:** the server opens a TCP connection to guacd, performs the Guacamole handshake
      (`select → args → connect → ready`) and puts the credentials into `connect`. From then on it relays
      Guacamole instructions between guacd and the browser, where the Guacamole JS client draws them.

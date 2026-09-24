@@ -25,6 +25,32 @@ export function errorMessage(code: string, locale?: Locale): string {
 	return message({}, options);
 }
 
+/** Invalid fields whose problem has its own, more helpful text. */
+const FIELD_MESSAGES = {
+	private_key: m.error_field_private_key,
+	passphrase: m.error_field_passphrase,
+	certificate: m.error_field_certificate
+} as const;
+
+/** The message for a failed call: a field-specific text where there is one, else the code's. */
+export function problemMessage(
+	problem: { code: string; params?: Record<string, unknown> },
+	locale?: Locale
+): string {
+	const field = problem.params?.field;
+	if (
+		problem.code === 'invalid_request' &&
+		typeof field === 'string' &&
+		Object.hasOwn(FIELD_MESSAGES, field)
+	) {
+		return FIELD_MESSAGES[field as keyof typeof FIELD_MESSAGES](
+			{},
+			locale ? { locale } : undefined
+		);
+	}
+	return errorMessage(problem.code, locale);
+}
+
 /** Reads a problem response; null if the body is not one. */
 export async function readProblem(response: Response): Promise<Problem | null> {
 	try {
