@@ -30,3 +30,13 @@ export async function signOut(): Promise<void> {
 	await api('DELETE', '/api/session');
 	session.user = null;
 }
+
+export async function signInBreakGlass(
+	username: string,
+	password: string,
+	code: string
+): Promise<ApiResult<User>> {
+	const result = await api<User>('POST', '/api/session/break-glass', { username, password, code });
+	if (result.ok) session.user = result.data;
+	return result;
+}

@@ -18,6 +18,7 @@ use uuid::Uuid;
 use super::problem::{ErrorCode, Problem};
 use crate::audit::{self, Action, Actor, Entry};
 use crate::auth::{PER_ADDRESS, PER_USER};
+use crate::break_glass;
 use crate::session::{self, Session};
 use crate::{AppState, Settings};
 
@@ -138,6 +139,95 @@ pub async fn sign_in(
         display_name: identity.display_name,
         kind: "directory".to_owned(),
         groups,
+    };
+    let me = Me::of(&session, &state.settings);
+    Ok(([session::set_cookie(&token)], Json(me)))
+}
+
+#[derive(Deserialize)]
+pub struct BreakGlassSignIn {
+    username: String,
+    password: SecretString,
+    code: String,
+}
+
+/// Sign-in with a break-glass account: password and TOTP code. Every
+/// attempt is audited with `break_glass: true`, and a success is logged as
+/// a warning, so emergency access never goes unnoticed.
+pub async fn sign_in_break_glass(
+    State(state): State<AppState>,
+    ClientAddress(address): ClientAddress,
+    body: Result<Json<BreakGlassSignIn>, JsonRejection>,
+) -> Result<impl IntoResponse, Problem> {
+    let Json(BreakGlassSignIn {
+        username,
+        password,
+        code,
+    }) = body.map_err(|_| Problem::new(ErrorCode::InvalidRequest))?;
+    let keys = [
+        (PER_USER, username.as_str()),
+        (PER_ADDRESS, address.as_str()),
+    ];
+    state.limiter.check(&keys).map_err(|wait| {
+        Problem::new(ErrorCode::TooManyAttempts).param("retry_after_seconds", wait.as_secs())
+    })?;
+
+    let account = break_glass::authenticate(&state.db, &state.vault, &username, &password, &code)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "break-glass sign-in failed internally");
+            Problem::new(ErrorCode::Internal)
+        })?;
+    let Some(account) = account else {
+        state.limiter.failed(&keys);
+        tracing::warn!(username = ?username, %address, "break-glass sign-in failed");
+        audit::record(
+            &state.db,
+            Entry {
+                actor: Actor {
+                    id: None,
+                    name: typed_name(&username),
+                },
+                action: Action::SignInFailed,
+                object: None,
+                details: json!({ "reason": ErrorCode::InvalidCredentials, "break_glass": true }),
+                address: Some(&address),
+            },
+        )
+        .await?;
+        return Err(Problem::new(ErrorCode::InvalidCredentials));
+    };
+    state.limiter.succeeded(&username);
+
+    let mut tx = state.db.begin().await?;
+    sqlx::query("UPDATE users SET last_sign_in_at = now() WHERE id = $1")
+        .bind(account.user_id)
+        .execute(&mut *tx)
+        .await?;
+    let token = session::create(&mut *tx, account.user_id, &[], state.settings.session.max).await?;
+    audit::record(
+        &mut *tx,
+        Entry {
+            actor: Actor {
+                id: Some(account.user_id),
+                name: &account.username,
+            },
+            action: Action::SignIn,
+            object: None,
+            details: json!({ "kind": "local", "break_glass": true }),
+            address: Some(&address),
+        },
+    )
+    .await?;
+    tx.commit().await?;
+    tracing::warn!(username = %account.username, %address, "BREAK-GLASS sign-in");
+
+    let session = Session {
+        user_id: account.user_id,
+        username: account.username,
+        display_name: account.display_name,
+        kind: "local".to_owned(),
+        groups: Vec::new(),
     };
     let me = Me::of(&session, &state.settings);
     Ok(([session::set_cookie(&token)], Json(me)))

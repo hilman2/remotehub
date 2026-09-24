@@ -1,15 +1,15 @@
 <script lang="ts">
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
-	import LogIn from '@lucide/svelte/icons/log-in';
+	import Siren from '@lucide/svelte/icons/siren';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import favicon from '$lib/assets/favicon.svg';
 	import { errorMessage } from '$lib/api/errors';
 	import { m } from '$lib/paraglide/messages';
-	import { signIn } from '$lib/session.svelte';
+	import { signInBreakGlass } from '$lib/session.svelte';
 
 	let username = $state('');
 	let password = $state('');
+	let code = $state('');
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 
@@ -17,12 +17,14 @@
 		event.preventDefault();
 		busy = true;
 		error = null;
-		const result = await signIn(username, password);
+		const result = await signInBreakGlass(username, password, code);
 		busy = false;
 		if (result.ok) {
 			password = '';
+			code = '';
 			await goto(resolve('/'));
 		} else {
+			code = '';
 			error = errorMessage(result.code);
 		}
 	}
@@ -34,9 +36,9 @@
 		onsubmit={submit}
 	>
 		<div class="mb-6 flex flex-col items-center gap-3 text-center">
-			<img src={favicon} alt="" class="size-10" />
-			<h1 class="text-xl font-semibold tracking-tight">{m.sign_in_title()}</h1>
-			<p class="text-sm text-ink-2">{m.sign_in_intro()}</p>
+			<Siren size={36} class="text-critical" aria-hidden="true" />
+			<h1 class="text-xl font-semibold tracking-tight">{m.break_glass_title()}</h1>
+			<p class="text-sm text-ink-2">{m.break_glass_intro()}</p>
 		</div>
 
 		<label class="block text-sm font-medium" for="username">{m.sign_in_username()}</label>
@@ -46,10 +48,8 @@
 			autocomplete="username"
 			required
 			bind:value={username}
-			aria-describedby="username-hint"
 			class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
 		/>
-		<p id="username-hint" class="mt-1 text-xs text-ink-3">{m.sign_in_username_hint()}</p>
 
 		<label class="mt-4 block text-sm font-medium" for="password">{m.sign_in_password()}</label>
 		<input
@@ -62,6 +62,19 @@
 			class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
 		/>
 
+		<label class="mt-4 block text-sm font-medium" for="code">{m.break_glass_code()}</label>
+		<input
+			id="code"
+			name="code"
+			inputmode="numeric"
+			autocomplete="one-time-code"
+			pattern="[0-9]*"
+			maxlength="6"
+			required
+			bind:value={code}
+			class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2 font-mono tracking-widest"
+		/>
+
 		{#if error}
 			<p class="mt-4 flex items-start gap-2 text-sm" role="alert">
 				<CircleAlert size={16} class="mt-0.5 shrink-0 text-critical" aria-hidden="true" />
@@ -72,17 +85,16 @@
 		<button
 			type="submit"
 			disabled={busy}
-			class="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 font-medium text-accent-ink disabled:opacity-60"
+			class="mt-6 w-full rounded-lg bg-accent px-4 py-2 font-medium text-accent-ink disabled:opacity-60"
 		>
-			<LogIn size={16} aria-hidden="true" />
 			{busy ? m.sign_in_busy() : m.sign_in_submit()}
 		</button>
 
 		<a
-			href={resolve('/sign-in/break-glass')}
-			class="mt-4 block text-center text-xs text-ink-3 hover:text-ink hover:underline"
+			href={resolve('/sign-in')}
+			class="mt-4 block text-center text-sm text-ink-2 hover:text-ink hover:underline"
 		>
-			{m.sign_in_break_glass_link()}
+			{m.break_glass_back()}
 		</a>
 	</form>
 </div>

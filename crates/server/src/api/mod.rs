@@ -22,6 +22,7 @@ pub fn router(state: AppState) -> Router<AppState> {
                 .post(session::sign_in)
                 .delete(session::sign_out),
         )
+        .route("/session/break-glass", post(session::sign_in_break_glass))
         .route("/audit", get(audit::list))
         .route("/audit/verify", post(audit::verify))
         // Unknown API paths are a problem response, never the SPA's index.html.

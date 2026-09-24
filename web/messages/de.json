@@ -54,5 +54,14 @@
 	"audit_session_sign_in_failed": "Anmeldung fehlgeschlagen",
 	"audit_session_sign_out": "Abgemeldet",
 	"audit_audit_verified": "Audit-Protokoll geprüft",
-	"error_forbidden": "Dafür fehlt die Berechtigung."
+	"error_forbidden": "Dafür fehlt die Berechtigung.",
+	"sign_in_break_glass_link": "Notfallzugang (Break-Glass)",
+	"break_glass_title": "Notfallzugang",
+	"break_glass_intro": "Für den Fall, dass der Verzeichnisdienst ausfällt. Jede Anmeldung hier wird protokolliert.",
+	"break_glass_code": "Code aus der Authenticator-App",
+	"break_glass_back": "Zurück zur normalen Anmeldung",
+	"break_glass_banner": "Mit einem Notfallkonto angemeldet. Alles, was hier geschieht, wird protokolliert.",
+	"audit_break_glass_created": "Break-Glass-Konto angelegt",
+	"audit_break_glass_reset": "Break-Glass-Konto zurückgesetzt",
+	"audit_break_glass_deleted": "Break-Glass-Konto gelöscht"
 }
