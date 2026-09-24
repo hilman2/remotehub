@@ -36,7 +36,7 @@ Everything goes through the GitHub workflow of the public repository `hilman2/re
 
 In Git Bash, Claude sessions lack the Unix PATH: `gh` is at `/c/Program Files/GitHub CLI/gh.exe`, and `lokal.sh` needs it on the PATH: `export PATH="$PATH:/c/Program Files/GitHub CLI"`.
 
-`scripts/ci/gemeinsam.sh`, the commit status `lokal` and the file name `lokal.sh` stay German on purpose: they are shared verbatim across all of the maintainer's repositories.
+This repository shares nothing with other projects. `scripts/ci/gemeinsam.sh` started as a copy from another repository and belongs to remotehub alone; change it freely here (its German comments are a leftover). The CI lock is per repository (`.git/ci-lokal/sperre`).
 
 ## Principles
 
@@ -100,9 +100,11 @@ bash scripts/ci/lokal.sh --pr 12       # check the head commit of a PR
 bash scripts/ci/lokal.sh --help        # all options
 ```
 
-The local CI needs Docker, `gh` and Git Bash. Only one run at a time per machine (lock under `~/.cache/ci-lokal`); logs are under `.git/ci-lokal/protokolle/`.
+The local CI needs Docker, `gh` and Git Bash. Only one run of this repository at a time (lock `.git/ci-lokal/sperre`); other repositories never wait for it. Logs are under `.git/ci-lokal/protokolle/`.
 
 - **Jobs:** `base` (always, seconds) and `code`, which checks Rust (fmt, clippy, tests, then the lab tests) and the web UI (svelte-check, lint, vitest, build) in parallel.
+- **Nothing is checked twice:** a commit with the same file state (Git tree) as one already checked green — e.g. a PR's merge commit — takes over that result without running.
+- **Only what changed is compiled:** Rust builds from the fixed path `/src` (volume `remotehub-ci-src`), synced by content, so cargo rebuilds only the crates whose files changed.
 - **Only what a change can affect runs:** the files changed since the merge base with `main` decide (`RUST_INPUTS`, `WEB_INPUTS`, `LAB_INPUTS` in `lokal.sh`). A commit on `main` itself, a change under `scripts/ci/` or `CI_FULL=1 bash scripts/ci/lokal.sh` runs everything.
 - **Working rhythm (Claude sessions):** while developing, run only the checks for what you are changing (one crate's tests, one vitest file, `pnpm check`). Run `lokal.sh` exactly once per PR, in the background, and continue with the next issue meanwhile — never the full suite by hand and then again in the CI.
 

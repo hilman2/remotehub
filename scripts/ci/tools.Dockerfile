@@ -16,7 +16,7 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
   && npm install -g pnpm@12.6.0 \
   && node --version && pnpm --version
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends shellcheck mold \
+  && apt-get install -y --no-install-recommends shellcheck mold rsync \
   && rm -rf /var/lib/apt/lists/*
 RUN rustup component add rustfmt clippy
 # mold links test binaries several times faster than GNU ld; set only here,

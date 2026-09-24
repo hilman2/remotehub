@@ -2,9 +2,8 @@
 # Local CI for remotehub — the repository's only CI (no Actions workflows).
 # Usage and options: bash scripts/ci/lokal.sh --help
 #
-# gemeinsam.sh is the shared scaffold, kept verbatim across all of the
-# maintainer's repositories (German on purpose); only this file is specific
-# to remotehub.
+# gemeinsam.sh is the scaffold (lock, commit status, containers); it started
+# as a copy from another repository and belongs to remotehub alone now.
 #
 # Fast by design:
 # - Only what a change can affect runs: the files changed since the merge
@@ -83,19 +82,30 @@ job_base() {
 
 # Runs a script in the Rust tools container with the cargo caches, a fresh
 # PostgreSQL (#[sqlx::test] creates a database per test) and the lab.
-# Every run unpacks the commit afresh; so Rust does not build cold each time,
-# the registry and target/ live in volumes without a label — gemeinsam.sh
-# removes labelled volumes after the run.
+#
+# Only what changed is compiled: every run unpacks the commit into a new
+# volume under a new path, which cargo would treat as new packages. So the
+# source is synced into a volume at the fixed path /src, by content: only
+# files that really changed get written (and a new mtime), and cargo rebuilds
+# just the crates they belong to. The registry, target/ and /src live in
+# volumes without a label — gemeinsam.sh removes labelled volumes after a run.
 cargo_run() { # tools script
   ci_docker_run \
     -v remotehub-ci-cargo-registry:/usr/local/cargo/registry \
     -v remotehub-ci-cargo-git:/usr/local/cargo/git \
     -v remotehub-ci-target:/ci-target \
+    -v remotehub-ci-src:/src \
     -e CARGO_TARGET_DIR=/ci-target -e CARGO_BUILD_JOBS=8 -e CARGO_TERM_COLOR=never \
     -e DATABASE_URL=postgres://ci:ci@db:5432/ci \
     -e REMOTEHUB_TEST_LDAP_URL=ldaps://dc.remotehub.test \
     -e REMOTEHUB_TEST_SSH_HOST=ssh-target \
-    "$1" bash -euo pipefail -c "$2"
+    "$1" bash -euo pipefail -c "
+      rsync -rlc --delete \\
+        --exclude=/web/node_modules/ --exclude=/web/.svelte-kit/ \\
+        --exclude=/web/build/ --exclude=/web/src/lib/paraglide/ \\
+        ./ /src/
+      cd /src
+      $2"
 }
 
 # Rust: formatting, Clippy without warnings and the tests of the whole
