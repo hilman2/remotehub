@@ -221,10 +221,22 @@ part_e2e() { # tools
     -e 'REMOTEHUB_ADMIN_GROUPS=RH Admins' \
     "$1" /ci-target/debug/remotehub
   ci_warten e2e-server 60 bash -c '</dev/tcp/127.0.0.1/8080'
+  local rc=0
   docker run --rm --label "ci-lokal=${CI_ID}" --network "container:${CI_ID}-e2e-server" \
     -v "${CI_VOLUME}:${CI_SRC}" -w "${CI_SRC}/web" \
     -e E2E_BASE_URL=http://localhost:8080 -e E2E_SSH_HOST=ssh-target -e CI=1 \
-    "$E2E_IMAGE" node node_modules/@playwright/test/cli.js test
+    "$E2E_IMAGE" node node_modules/@playwright/test/cli.js test || rc=$?
+  if [ "$rc" != 0 ]; then
+    # The run's volume is removed afterwards: keep traces, page snapshots and
+    # the server's log next to the CI logs.
+    local kept="${CI_PROTOKOLLE}/e2e"
+    mkdir -p "$kept"
+    docker logs "${CI_ID}-e2e-server" >"${kept}/server.log" 2>&1 || true
+    docker run --rm -v "${CI_VOLUME}:${CI_SRC}:ro" "$1" \
+      tar -C "${CI_SRC}/web" -cf - test-results | tar -C "$kept" -xf - || true
+    echo "Traces and the server log: ${kept} (npx playwright show-trace <trace.zip>)"
+  fi
+  return "$rc"
 }
 
 # Runs a part in the background with its own log and records how long it took.

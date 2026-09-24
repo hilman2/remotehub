@@ -183,6 +183,8 @@ CI_PENDING=0
 # Fester Compose-Projektname je Repo: Die Sperre verhindert Überschneidungen,
 # und Images, die Compose baut, werden beim nächsten Lauf wiederverwendet.
 CI_COMPOSE=""
+# Log directory of the run; jobs may put more files there (e.g. test traces).
+CI_PROTOKOLLE=""
 
 ci_aufraeumen() {
   local rc=$?
@@ -326,12 +328,11 @@ ci_main() {
 
   ci_sperren
 
-  local protokolle
-  protokolle="${CI_ABLAGE}/protokolle/${CI_SHA_KURZ}-$(date +%Y%m%d-%H%M%S)"
-  mkdir -p "$protokolle"
+  CI_PROTOKOLLE="${CI_ABLAGE}/protokolle/${CI_SHA_KURZ}-$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$CI_PROTOKOLLE"
 
   echo "▶ ${CI_REPO_KURZ} ${CI_SHA_KURZ} — $(git -C "$CI_WURZEL" log -1 --format=%s "$CI_SHA")"
-  echo "  Protokolle: ${protokolle}"
+  echo "  Protokolle: ${CI_PROTOKOLLE}"
 
   if [ "$CI_STATUS" = 1 ]; then
     if ci_auf_github; then
@@ -351,10 +352,10 @@ ci_main() {
     set +e
     if [ "$CI_LAUT" = 1 ]; then
       echo
-      (set -euo pipefail; "job_${j}") 2>&1 | tee "${protokolle}/${j}.log"
+      (set -euo pipefail; "job_${j}") 2>&1 | tee "${CI_PROTOKOLLE}/${j}.log"
       rc=${PIPESTATUS[0]}
     else
-      (set -euo pipefail; "job_${j}") >"${protokolle}/${j}.log" 2>&1
+      (set -euo pipefail; "job_${j}") >"${CI_PROTOKOLLE}/${j}.log" 2>&1
       rc=$?
     fi
     set -e
@@ -366,7 +367,7 @@ ci_main() {
       echo "✗ $(ci_dauer $((SECONDS - t))) (Exit ${rc})"
       if [ "$CI_LAUT" = 0 ]; then
         echo "  ── letzte Zeilen aus ${j}.log ──"
-        tail -n 40 "${protokolle}/${j}.log" | sed 's/^/    /'
+        tail -n 40 "${CI_PROTOKOLLE}/${j}.log" | sed 's/^/    /'
       fi
     fi
   done
