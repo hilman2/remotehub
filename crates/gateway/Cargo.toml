@@ -1,0 +1,19 @@
+[package]
+name = "remotehub-gateway"
+description = "Protocol engines that run connections on the server: SSH via russh (RDP and VNC via guacd follow)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+russh.workspace = true
+secrecy.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
