@@ -5,6 +5,8 @@ export interface User {
 	username: string;
 	display_name: string;
 	kind: 'directory' | 'local';
+	/** May manage remotehub: folders at the top, grants, the audit log. */
+	admin: boolean;
 }
 
 export const session = $state<{ user: User | null; loaded: boolean }>({

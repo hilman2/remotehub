@@ -16,11 +16,11 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
+use sqlx::{PgExecutor, PgPool};
 use uuid::Uuid;
 
-use crate::AppState;
 use crate::api::problem::{ErrorCode, Problem};
+use crate::{AppState, Settings};
 
 pub const COOKIE_NAME: &str = "__Host-remotehub-session";
 
@@ -38,6 +38,18 @@ pub struct Session {
     pub groups: Vec<String>,
 }
 
+impl Session {
+    /// Administrators manage remotehub itself: break-glass accounts and
+    /// members of the configured admin groups.
+    pub fn is_admin(&self, settings: &Settings) -> bool {
+        self.kind == "local"
+            || self
+                .groups
+                .iter()
+                .any(|g| settings.admin_groups.contains(g))
+    }
+}
+
 fn hash(token: &str) -> [u8; 32] {
     Sha256::digest(token.as_bytes()).into()
 }
@@ -49,8 +61,8 @@ fn new_token() -> String {
 }
 
 /// Starts a session and returns its token for the cookie.
-pub async fn create(
-    db: &PgPool,
+pub async fn create<'e>(
+    db: impl PgExecutor<'e>,
     user_id: Uuid,
     groups: &[String],
     max: Duration,
@@ -107,7 +119,7 @@ pub async fn lookup(
     }))
 }
 
-pub async fn delete(db: &PgPool, token: &str) -> Result<(), sqlx::Error> {
+pub async fn delete<'e>(db: impl PgExecutor<'e>, token: &str) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM sessions WHERE token_hash = $1")
         .bind(hash(token).as_slice())
         .execute(db)

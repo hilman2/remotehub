@@ -17,7 +17,12 @@ async fn sign_in_session_and_sign_out(pool: PgPool) {
     assert_eq!(response.status, StatusCode::OK);
     assert_eq!(
         response.json(),
-        json!({ "username": "alice", "display_name": "Alice Admin", "kind": "directory" })
+        json!({
+            "username": "alice",
+            "display_name": "Alice Admin",
+            "kind": "directory",
+            "admin": true
+        })
     );
     let cookie = response.headers[header::SET_COOKIE]
         .to_str()

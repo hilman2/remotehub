@@ -28,6 +28,7 @@ pub fn settings() -> Settings {
             idle: Duration::from_secs(30 * 60),
             max: Duration::from_secs(12 * 3600),
         },
+        admin_groups: vec![ADMINS_SID.to_owned()],
     }
 }
 
@@ -48,12 +49,14 @@ pub fn state(db: PgPool) -> AppState {
     AppState::new(db, Some(Arc::new(FakeDirectory)), settings(), vault())
 }
 
-/// alice / right signs in (member of one group); carol is disabled;
+/// alice / right signs in (member of the admin group), bob / right signs in
+/// without groups; carol is disabled;
 /// "offline" makes the directory unreachable; everything else is wrong.
 pub struct FakeDirectory;
 
 pub const ALICE_SID: &str = "S-1-5-21-1-2-3-1105";
 pub const ADMINS_SID: &str = "S-1-5-21-1-2-3-1201";
+pub const BOB_SID: &str = "S-1-5-21-1-2-3-1106";
 
 impl IdentityProvider for FakeDirectory {
     async fn authenticate(
@@ -70,6 +73,15 @@ impl IdentityProvider for FakeDirectory {
                 display_name: "Alice Admin".into(),
                 email: None,
                 groups: vec![ADMINS_SID.parse::<Sid>().unwrap()],
+            }),
+            ("bob", "right") => Ok(Identity {
+                sid: BOB_SID.parse().unwrap(),
+                guid: Uuid::from_u128(0xb0b),
+                username: "bob".into(),
+                upn: None,
+                display_name: "Bob Helpdesk".into(),
+                email: None,
+                groups: vec![],
             }),
             ("carol", _) => Err(AuthError::AccountDisabled),
             ("offline", _) => Err(AuthError::Unavailable("connection refused".into())),

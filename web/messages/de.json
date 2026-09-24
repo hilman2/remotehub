@@ -37,5 +37,22 @@
 	"sign_in_submit": "Anmelden",
 	"sign_in_busy": "Anmeldung läuft …",
 	"sign_out": "Abmelden",
-	"signed_in_as": "Angemeldet als {name}"
+	"signed_in_as": "Angemeldet als {name}",
+	"nav_audit": "Audit-Protokoll",
+	"audit_title": "Audit-Protokoll",
+	"audit_intro": "Jede Anmeldung, Verbindung und Änderung, die neuesten zuerst.",
+	"audit_col_time": "Zeit",
+	"audit_col_actor": "Wer",
+	"audit_col_action": "Was",
+	"audit_col_address": "Von",
+	"audit_empty": "Noch keine Einträge.",
+	"audit_more": "Ältere Einträge",
+	"audit_verify": "Integrität prüfen",
+	"audit_verify_ok": "Das Protokoll ist unverändert: {entries} Einträge geprüft.",
+	"audit_verify_broken": "Das Protokoll wurde ab Eintrag {seq} verändert.",
+	"audit_session_sign_in": "Angemeldet",
+	"audit_session_sign_in_failed": "Anmeldung fehlgeschlagen",
+	"audit_session_sign_out": "Abgemeldet",
+	"audit_audit_verified": "Audit-Protokoll geprüft",
+	"error_forbidden": "Dafür fehlt die Berechtigung."
 }

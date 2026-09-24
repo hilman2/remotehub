@@ -67,6 +67,7 @@ services:
       REMOTEHUB_LDAP_BIND_DN: svc-remotehub@remotehub.test
       REMOTEHUB_LDAP_BIND_PASSWORD: Svc-Passw0rd!
       REMOTEHUB_LDAP_BASE_DN: DC=remotehub,DC=test
+      REMOTEHUB_ADMIN_GROUPS: RH Admins
     command: >
       watchexec --poll 1000ms --restart --watch crates --watch migrations --watch Cargo.toml
       --exts rs,toml,sql,ftl -- cargo run --package remotehub-server

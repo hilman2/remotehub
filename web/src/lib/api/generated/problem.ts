@@ -5,6 +5,7 @@ export const ERROR_CODES = [
 	'not_found',
 	'invalid_request',
 	'unauthenticated',
+	'forbidden',
 	'invalid_credentials',
 	'account_disabled',
 	'account_locked',
