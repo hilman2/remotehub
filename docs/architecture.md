@@ -123,6 +123,9 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 
 - guacd runs in its own container without published ports, as non-root, read-only, with resource limits
   and a pinned version. It links GPL-licensed libvncclient and therefore stays a separate process.
+- The guacd image (`deploy/guacd`) is built from the Apache source release (checksum pinned) against
+  FreeRDP 3 from Debian, because the official image still links FreeRDP 2. It contains only the RDP and VNC
+  plugins; FreeRDP gets a tmpfs home directory for its state.
 - guacd 1.6 authenticates RDP with NTLM only; Kerberos arrives with guacd 1.7 (GUACAMOLE-2057). Members of
   *Protected Users* and domains without NTLM are not supported until then.
 - RDP certificates and SSH host keys are pinned on first use; a change aborts the connection and shows both
@@ -150,8 +153,8 @@ English is the base locale, German the second; more can follow (ADR 0002).
 
 - `crates/`, `web/`, `migrations/`, `deploy/`, `docs/`, `scripts/ci/`.
 - **Development** runs entirely in Docker (`deploy/compose.dev.yml`): PostgreSQL on `127.0.0.1:55440`, UI on
-  `127.0.0.1:5180`, the server rebuilt by watchexec, plus a test lab (Samba AD DC, SSH target; RDP and VNC
-  targets from M2) on the compose network.
+  `127.0.0.1:5180`, the server rebuilt by watchexec, plus a test lab (Samba AD DC, SSH target, a desktop
+  target with RDP and VNC) and guacd on the compose network.
 - **CI** runs locally (`scripts/ci/lokal.sh`) and reports the commit status `lokal`; `main` requires it.
 - **Operations (M2):** images on GHCR (`ghcr.io/hilman2/remotehub`, guacd image), an ops package with
   compose file, install, update, backup and restore scripts; releases via `scripts/ci/release.sh`.

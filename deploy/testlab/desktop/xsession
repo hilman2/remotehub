@@ -1,0 +1,5 @@
+#!/bin/sh
+# Desktop of the lab user, for RDP and VNC alike: a fixed background colour
+# that tests can look for, and a terminal whose title names the protocol.
+xsetroot -solid '#1e5b8c'
+exec xterm -geometry 100x30+40+40 -T "remotehub lab ${LAB_PROTOCOL:-RDP}"

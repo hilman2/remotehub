@@ -110,8 +110,8 @@ services:
       - ..:/work
       - web-node-modules:/work/web/node_modules
 
-  # Test lab (deploy/testlab): a throwaway AD domain and an SSH target for the
-  # integration tests. Only reachable on the compose network; users,
+  # Test lab (deploy/testlab): a throwaway AD domain, an SSH target and a
+  # desktop target (RDP and VNC) for the integration tests. Only reachable on the compose network; users,
   # passwords and keys are in the READMEs and scripts there.
   dc:
     build: testlab/dc
@@ -130,6 +130,25 @@ services:
     build: testlab/ssh
     image: remotehub-testlab-ssh
     hostname: ssh-target
+
+  desktop-target:
+    build: testlab/desktop
+    image: remotehub-testlab-desktop
+    hostname: desktop-target
+
+  # RDP and VNC engine (deploy/guacd), hardened as in production. guacd serves
+  # anyone who reaches port 4822, so it is never published.
+  guacd:
+    build: guacd
+    image: remotehub-guacd
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/guacd:uid=1000,mode=0700
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    pids_limit: 256
 
   web:
     # SvelteKit with Vite: http://localhost:5180 (API and WebSocket go to the server)
