@@ -1,5 +1,6 @@
 <script lang="ts">
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import Clock from '@lucide/svelte/icons/clock';
 	import User from '@lucide/svelte/icons/user';
 	import Users from '@lucide/svelte/icons/users';
 	import {
@@ -14,10 +15,13 @@
 		type Role
 	} from '$lib/api/catalog';
 	import { errorMessage } from '$lib/api/errors';
+	import { formatLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
 	import { ROLE_LABELS } from './labels';
 
 	let { kind, id }: { kind: ObjectKind; id: string } = $props();
+
+	const time = new Intl.DateTimeFormat(formatLocale(), { dateStyle: 'short', timeStyle: 'short' });
 
 	let direct = $state<GrantRow[]>([]);
 	let inherited = $state<GrantRow[]>([]);
@@ -90,6 +94,15 @@
 	</span>
 {/snippet}
 
+{#snippet until(expiresAt: string | null)}
+	{#if expiresAt}
+		<span class="inline-flex items-center gap-1 text-xs text-ink-3">
+			<Clock size={13} aria-hidden="true" />
+			{m.grants_until({ time: time.format(new Date(expiresAt)) })}
+		</span>
+	{/if}
+{/snippet}
+
 <h3 class="text-sm font-medium text-ink-2">{m.grants_direct()}</h3>
 {#if direct.length === 0}
 	<p class="mt-2 text-sm text-ink-3">{m.grants_none()}</p>
@@ -99,6 +112,7 @@
 			<li class="flex items-center gap-3 px-3 py-2 text-sm">
 				{@render principal(g.principal_kind, g.principal_name)}
 				<span class="ml-auto text-ink-2">{ROLE_LABELS[g.role]()}</span>
+				{@render until(g.expires_at)}
 				<button
 					type="button"
 					class="rounded-md px-2 py-1 text-xs text-ink-3 hover:bg-surface-2 hover:text-critical"
@@ -118,6 +132,7 @@
 			<li class="flex items-center gap-3 px-3 py-2 text-sm">
 				{@render principal(g.principal_kind, g.principal_name)}
 				<span class="ml-auto">{ROLE_LABELS[g.role]()}</span>
+				{@render until(g.expires_at)}
 			</li>
 		{/each}
 	</ul>

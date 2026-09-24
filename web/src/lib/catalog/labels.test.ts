@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { KEYBOARD_LAYOUTS } from '$lib/api/catalog';
 import { locales } from '$lib/i18n';
-import { keyboardLayoutLabel } from './labels';
+import { durationLabel, keyboardLayoutLabel } from './labels';
+
+describe('duration labels', () => {
+	it('count hours in the UI language', () => {
+		expect(durationLabel(60, 'en')).toBe('1 hour');
+		expect(durationLabel(1440, 'en')).toBe('24 hours');
+		expect(durationLabel(240, 'de')).toBe('4 Stunden');
+	});
+});
 
 describe('keyboard layout labels', () => {
 	it('name language and region in the UI language', () => {

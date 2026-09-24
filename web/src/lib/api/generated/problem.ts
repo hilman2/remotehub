@@ -23,6 +23,9 @@ export const ERROR_CODES = [
 	'connection_failed',
 	'own_account_unavailable',
 	'ssh_ca_unavailable',
+	'request_pending',
+	'request_decided',
+	'own_request',
 	'directory_unavailable',
 	'database_unavailable',
 	'internal'

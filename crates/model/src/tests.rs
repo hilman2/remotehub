@@ -26,11 +26,15 @@ const SWITCH01: Uuid = Uuid::from_u128(13);
 const ROOT_PW: Uuid = Uuid::from_u128(21);
 const DA_PW: Uuid = Uuid::from_u128(22);
 
+/// The catalogs' "now", in Unix seconds.
+const NOW: i64 = 1_800_000_000;
+
 fn grant(object: ObjectId, principal: &str, role: Role) -> Grant {
     Grant {
         object,
         principal: principal.to_owned(),
         role,
+        until: None,
     }
 }
 
@@ -51,6 +55,7 @@ fn catalog() -> Catalog {
             grant(ObjectId::Credential(ROOT_PW), "S-alice", Role::Reveal),
             grant(ObjectId::Folder(NETWORK), "S-net", Role::Manage),
         ],
+        NOW,
     )
 }
 
@@ -196,9 +201,67 @@ fn a_folder_loop_does_not_hang() {
         [],
         [],
         [grant(Folder(a), "S-x", Role::Edit)],
+        NOW,
     );
     assert_eq!(
         catalog.effective_role(&subject(&["S-x"]), Folder(b)),
         Some(Role::Edit)
     );
+}
+
+#[test]
+fn a_just_in_time_grant_counts_until_it_runs_out() {
+    let at = |now: i64| {
+        let jit = Grant {
+            until: Some(NOW + 3600),
+            ..grant(Device(DC01), "S-helpdesk", Role::Connect)
+        };
+        let permanent = grant(Device(DC01), "S-helpdesk", Role::List);
+        Catalog::new(
+            [(WINDOWS, None)],
+            [(DC01, WINDOWS)],
+            [],
+            [permanent, jit],
+            now,
+        )
+    };
+    let helpdesk = subject(&["S-helpdesk"]);
+    assert_eq!(
+        at(NOW).effective_role(&helpdesk, Device(DC01)),
+        Some(Role::Connect)
+    );
+    assert_eq!(
+        at(NOW + 3599).effective_role(&helpdesk, Device(DC01)),
+        Some(Role::Connect)
+    );
+    // At the end and after it, only the permanent grant is left.
+    for later in [NOW + 3600, NOW + 86_400] {
+        assert_eq!(
+            at(later).effective_role(&helpdesk, Device(DC01)),
+            Some(Role::List),
+            "{later}"
+        );
+    }
+}
+
+#[test]
+fn requests_go_up_to_reveal_and_approvals_need_manage() {
+    let catalog = catalog();
+    let helpdesk = subject(&["S-helpdesk"]);
+    // helpdesk sees dc01 (list) and may ask for more.
+    assert!(catalog.may_request(&helpdesk, Role::Connect, Device(DC01)));
+    assert!(catalog.may_request(&helpdesk, Role::Reveal, Device(DC01)));
+    // Not for changing things, not for what they already hold, not for what
+    // they cannot see.
+    assert!(!catalog.may_request(&helpdesk, Role::Edit, Device(DC01)));
+    assert!(!catalog.may_request(&helpdesk, Role::List, Device(DC01)));
+    assert!(!catalog.may_request(&helpdesk, Role::Connect, Device(WEB01)));
+    let ops = subject(&["S-ops"]);
+    assert!(!catalog.may_request(&ops, Role::Connect, Device(WEB01)));
+    assert!(catalog.may_request(&ops, Role::Reveal, Device(WEB01)));
+
+    assert!(catalog.may_approve(&subject(&["S-net"]), Device(SWITCH01)));
+    assert!(catalog.may_approve(&admin(), Device(DC01)));
+    assert!(!catalog.may_approve(&subject(&["S-linux"]), Device(WEB01)));
+    assert!(!catalog.may_approve(&subject(&["S-net"]), Device(DC01)));
 }

@@ -12,11 +12,11 @@ const desktopHost = process.env.E2E_DESKTOP_HOST ?? 'desktop-target';
 /** Keys of the lab's SSH target; the tests run in web/. */
 const labKeys = join(process.cwd(), '..', 'deploy', 'testlab', 'ssh');
 
-async function signIn(page: Page) {
+async function signIn(page: Page, user = 'alice', password = 'Alice-Passw0rd!') {
 	await page.goto('/');
 	await expect(page).toHaveURL(/\/sign-in$/);
-	await page.getByLabel('User name').fill('alice');
-	await page.getByLabel('Password').fill('Alice-Passw0rd!');
+	await page.getByLabel('User name').fill(user);
+	await page.getByLabel('Password').fill(password);
 	await page.getByRole('button', { name: 'Sign in' }).click();
 	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
 }
@@ -156,6 +156,57 @@ test('an SSH device signs in with a certificate from remotehub', async ({ page, 
 	await terminal.keyboard.press('Enter');
 	await expect(terminal.locator('.xterm-rows')).toContainText('ca says alice');
 	await terminal.close();
+});
+
+test('access asked for just in time is approved by someone else', async ({ page, browser }) => {
+	// alice sets up a device that bob may only see.
+	await signIn(page);
+	const dialog = page.getByRole('dialog');
+	const folder = `E2E jit ${run}`;
+	await newFolder(page, folder);
+	const name = `lab ssh jit ${run}`;
+	await page.getByRole('tree').getByRole('button', { name: folder, exact: true }).click();
+	await page.getByRole('button', { name: 'New device' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(name);
+	await dialog.getByLabel('Host name or IP address').fill(sshHost);
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name })).toBeVisible();
+	await page.getByRole('button', { name: 'Permissions' }).click();
+	await dialog.getByLabel('Search users and groups').fill('Bob');
+	await dialog.getByRole('button', { name: /Bob Helpdesk/ }).click();
+	await dialog.locator('select').selectOption({ label: 'See' });
+	await dialog.getByRole('button', { name: 'Grant' }).click();
+	await expect(dialog.getByText('Bob Helpdesk')).toBeVisible();
+	await page.keyboard.press('Escape');
+
+	// bob asks for connect with a reason.
+	const bobs = await browser.newContext();
+	const bob = await bobs.newPage();
+	await signIn(bob, 'bob', 'Bob-Passw0rd!');
+	// A device's entry in the tree shows its host, too.
+	const entry = bob.getByRole('tree').getByRole('button', { name: `${name} ${sshHost}` });
+	await bob.getByRole('searchbox').fill(name);
+	await entry.click();
+	await expect(bob.getByRole('link', { name: 'Connect' })).toHaveCount(0);
+	await bob.getByRole('button', { name: 'Request access' }).click();
+	await bob.getByRole('dialog').getByLabel('Reason').fill('Rotate the logs');
+	await bob.getByRole('dialog').getByRole('button', { name: 'Send request' }).click();
+	await expect(bob.getByText('Request sent.')).toBeVisible();
+
+	// alice approves it on the requests page.
+	await page.getByRole('link', { name: 'Access requests' }).click();
+	const item = page.getByRole('listitem').filter({ hasText: 'Rotate the logs' });
+	await item.getByRole('button', { name: 'Approve' }).click();
+	await expect(item).toHaveCount(0);
+
+	// bob may connect now, and sees until when.
+	await bob.reload();
+	await bob.getByRole('searchbox').fill(name);
+	await entry.click();
+	await expect(bob.getByRole('link', { name: 'Connect' })).toBeVisible();
+	await bob.getByRole('link', { name: 'Access requests' }).click();
+	await expect(bob.getByText(/Approved · until .* · by alice/)).toBeVisible();
+	await bobs.close();
 });
 
 test('an RDP desktop opens in the browser', async ({ page, context }) => {

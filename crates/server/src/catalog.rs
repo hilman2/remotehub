@@ -11,6 +11,7 @@ struct GrantLink {
     credential_id: Option<Uuid>,
     principal_sid: String,
     role: String,
+    until: Option<i64>,
 }
 
 /// The whole tree with grants, as `authorize()` needs it. Loaded per request:
@@ -25,8 +26,15 @@ pub async fn load(db: &PgPool) -> Result<Catalog, sqlx::Error> {
     let credentials: Vec<(Uuid, Uuid)> = sqlx::query_as("SELECT id, folder_id FROM credentials")
         .fetch_all(db)
         .await?;
+    // The database's clock decides when a grant runs out, as it wrote
+    // expires_at; running out is decided in the model.
+    let (now,): (i64,) = sqlx::query_as("SELECT extract(epoch FROM now())::bigint")
+        .fetch_one(db)
+        .await?;
     let grants: Vec<GrantLink> = sqlx::query_as(
-        "SELECT folder_id, device_id, credential_id, principal_sid, role FROM grants",
+        "SELECT folder_id, device_id, credential_id, principal_sid, role,
+                extract(epoch FROM expires_at)::bigint AS until
+         FROM grants",
     )
     .fetch_all(db)
     .await?;
@@ -35,9 +43,10 @@ pub async fn load(db: &PgPool) -> Result<Catalog, sqlx::Error> {
             object: object_id(g.folder_id, g.device_id, g.credential_id)?,
             principal: g.principal_sid,
             role: Role::parse(&g.role)?,
+            until: g.until,
         })
     });
-    Ok(Catalog::new(folders, devices, credentials, grants))
+    Ok(Catalog::new(folders, devices, credentials, grants, now))
 }
 
 /// The object a grant row points to (exactly one column is set).

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import CircleCheck from '@lucide/svelte/icons/circle-check';
+	import Clock from '@lucide/svelte/icons/clock';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import MonitorSmartphone from '@lucide/svelte/icons/monitor-smartphone';
@@ -27,9 +29,12 @@
 		type DeviceInput,
 		type Folder,
 		type ObjectKind,
+		type Role,
 		type Tree
 	} from '$lib/api/catalog';
 	import type { ApiResult } from '$lib/api/client';
+	import { createRequest, requestableRoles } from '$lib/api/requests';
+	import RequestForm from '$lib/catalog/RequestForm.svelte';
 	import { errorMessage, problemMessage } from '$lib/api/errors';
 	import CredentialForm from '$lib/catalog/CredentialForm.svelte';
 	import DeviceForm from '$lib/catalog/DeviceForm.svelte';
@@ -55,7 +60,8 @@
 		| { type: 'device'; folderId: string; device: Device | null }
 		| { type: 'credential'; folderId: string; credential: Credential | null }
 		| { type: 'grants'; kind: ObjectKind; id: string; name: string }
-		| { type: 'delete'; kind: ObjectKind; id: string; name: string };
+		| { type: 'delete'; kind: ObjectKind; id: string; name: string }
+		| { type: 'request'; kind: ObjectKind; id: string; name: string; role: Role };
 
 	let tree = $state<Tree | null>(null);
 	let query = $state('');
@@ -65,6 +71,8 @@
 	let dialogOpen = $state(false);
 	let error = $state<string | null>(null);
 	let folderName = $state('');
+	/** The object whose access request was just sent, for the notice. */
+	let requested = $state<string | null>(null);
 
 	const roots = $derived(tree ? filter(nest(tree, getLocale()), query) : []);
 	const searching = $derived(query.trim().length > 0);
@@ -157,6 +165,12 @@
 		run(removal, () => (selected = null));
 	}
 
+	function sendRequest(role: Role, minutes: number, reason: string) {
+		if (open?.type !== 'request') return;
+		const { kind, id } = open;
+		run(createRequest({ kind, id }, role, minutes, reason), () => (requested = id));
+	}
+
 	function toggle(id: string) {
 		if (collapsed.has(id)) collapsed.delete(id);
 		else collapsed.add(id);
@@ -178,6 +192,8 @@
 				return m.grants_title({ name: open.name });
 			case 'delete':
 				return m.catalog_delete();
+			case 'request':
+				return m.request_title({ name: open.name });
 			default:
 				return '';
 		}
@@ -186,6 +202,29 @@
 	const button =
 		'inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm hover:bg-surface-2';
 </script>
+
+{#snippet requestAccess(kind: ObjectKind, id: string, name: string, role: Role | null)}
+	{#if role && requestableRoles(role).length > 0}
+		<button
+			type="button"
+			class={button}
+			onclick={() => show({ type: 'request', kind, id, name, role })}
+		>
+			<Clock size={16} aria-hidden="true" />
+			{m.request_access()}
+		</button>
+	{/if}
+{/snippet}
+
+{#snippet requestedNotice(id: string)}
+	{#if requested === id}
+		<p class="mt-3 flex items-center gap-2 text-sm" role="status">
+			<CircleCheck size={16} class="text-ok" aria-hidden="true" />
+			{m.request_sent()}
+			<a class="underline" href={resolve('/requests')}>{m.nav_requests()}</a>
+		</p>
+	{/if}
+{/snippet}
 
 <div class="flex flex-wrap items-center gap-3">
 	<h1 class="text-2xl font-semibold tracking-tight">{m.devices_title()}</h1>
@@ -317,7 +356,9 @@
 							{m.catalog_delete()}
 						</button>
 					{/if}
+					{@render requestAccess('folder', folder.id, folder.name, folder.role)}
 				</div>
+				{@render requestedNotice(folder.id)}
 			{:else if device}
 				<p class="text-xs text-ink-3">{KIND_LABELS.device()}</p>
 				<h2 class="text-xl font-semibold">{device.name}</h2>
@@ -437,7 +478,9 @@
 							{m.catalog_delete()}
 						</button>
 					{/if}
+					{@render requestAccess('device', device.id, device.name, device.role)}
 				</div>
+				{@render requestedNotice(device.id)}
 			{:else if credential}
 				<p class="text-xs text-ink-3">
 					{KIND_LABELS.credential()} · {CREDENTIAL_KIND_LABELS[credential.kind]()}
@@ -522,7 +565,9 @@
 							{m.catalog_delete()}
 						</button>
 					{/if}
+					{@render requestAccess('credential', credential.id, credential.name, credential.role)}
 				</div>
+				{@render requestedNotice(credential.id)}
 			{:else}
 				<p class="text-sm text-ink-2">{m.catalog_select_hint()}</p>
 			{/if}
@@ -577,6 +622,12 @@
 				/>
 			{:else if open?.type === 'grants'}
 				<Grants kind={open.kind} id={open.id} />
+			{:else if open?.type === 'request'}
+				<RequestForm
+					held={open.role}
+					onsubmit={sendRequest}
+					oncancel={() => (dialogOpen = false)}
+				/>
 			{:else if open?.type === 'delete'}
 				<p class="text-sm">{m.catalog_delete_confirm({ name: open.name })}</p>
 				<div class="mt-5 flex justify-end gap-2">

@@ -76,6 +76,9 @@ pub struct Grant {
     pub object: ObjectId,
     pub principal: String,
     pub role: Role,
+    /// Unix time (seconds) from which a just-in-time grant no longer counts;
+    /// `None` for a permanent grant.
+    pub until: Option<i64>,
 }
 
 /// The folder tree and all grants, loaded once per request.
@@ -88,14 +91,20 @@ pub struct Catalog {
 }
 
 impl Catalog {
+    /// The catalog as of `now` (Unix time, seconds): grants that ran out
+    /// before it grant nothing.
     pub fn new(
         folders: impl IntoIterator<Item = (Uuid, Option<Uuid>)>,
         devices: impl IntoIterator<Item = (Uuid, Uuid)>,
         credentials: impl IntoIterator<Item = (Uuid, Uuid)>,
         grants: impl IntoIterator<Item = Grant>,
+        now: i64,
     ) -> Self {
         let mut by_object: HashMap<ObjectId, Vec<(String, Role)>> = HashMap::new();
         for grant in grants {
+            if grant.until.is_some_and(|until| until <= now) {
+                continue;
+            }
             by_object
                 .entry(grant.object)
                 .or_default()
@@ -170,6 +179,23 @@ impl Catalog {
     pub fn authorize(&self, subject: &Subject, needed: Role, object: ObjectId) -> bool {
         self.effective_role(subject, object)
             .is_some_and(|role| role >= needed)
+    }
+
+    /// Whether the subject may ask for `role` on the object for a while: they
+    /// must see it, and hold less than that. Only `connect` and `reveal` are
+    /// given just in time; changing things stays with permanent grants.
+    pub fn may_request(&self, subject: &Subject, role: Role, object: ObjectId) -> bool {
+        matches!(role, Role::Connect | Role::Reveal)
+            && self
+                .effective_role(subject, object)
+                .is_some_and(|held| held < role)
+    }
+
+    /// Whether the subject may approve someone else's request for the
+    /// object: the same as managing it. That it is someone else is for the
+    /// caller to check, by the requester's identity.
+    pub fn may_approve(&self, subject: &Subject, object: ObjectId) -> bool {
+        self.authorize(subject, Role::Manage, object)
     }
 
     /// Creating at the top level (outside every folder) is for administrators.

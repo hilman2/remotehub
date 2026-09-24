@@ -78,6 +78,11 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - **Permissions:** a folder tree holds devices and credentials. A grant gives an AD group or a user a role
   on a folder or an entry: `list < connect < reveal < edit < manage`. Grants are inherited downwards and
   only allow. `authorize()` is the single decision point and is tested table-driven.
+- **Just-in-time access:** someone who sees an object asks for `connect` or `reveal` on it for up to a day,
+  with a reason (`/api/access-requests`). Someone else who manages the object approves or denies; nobody
+  decides their own request. An approval becomes a user grant with `expires_at`, and the catalog, built
+  with the database's `now`, drops it once it has run out; open sessions keep running. Every step is
+  audited (`access.*`).
 - **Stored credentials only go where their users may send them:** linking a credential to a device, or
   changing protocol, host or port of a device that has one, needs `connect` on that credential. Otherwise
   anyone with `edit` on a device could point it at their own server and capture the password.

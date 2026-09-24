@@ -67,6 +67,13 @@
 					>
 						{m.nav_devices()}
 					</a>
+					<a
+						href={resolve('/requests')}
+						class="rounded-md px-2.5 py-1.5 hover:bg-surface-2 hover:text-ink aria-[current=page]:text-ink"
+						aria-current={page.url.pathname === resolve('/requests') ? 'page' : undefined}
+					>
+						{m.nav_requests()}
+					</a>
 					{#if session.user.admin}
 						<a
 							href={resolve('/audit')}
