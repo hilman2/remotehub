@@ -25,7 +25,7 @@ E2E_IMAGE="mcr.microsoft.com/playwright:v1.63.0-noble"
 # What each part depends on (path prefixes). scripts/ci/ counts for all.
 RUST_INPUTS=(crates/ migrations/ Cargo.toml Cargo.lock rust-toolchain.toml deploy/dev/rust.Dockerfile)
 WEB_INPUTS=(web/ deploy/dev/web.Dockerfile)
-LAB_INPUTS=("${RUST_INPUTS[@]}" deploy/testlab/)
+LAB_INPUTS=("${RUST_INPUTS[@]}" deploy/testlab/ deploy/guacd/)
 
 # Files changed between the merge base with main and the commit under test.
 # Fails when everything has to run: CI_FULL=1, no merge base, or a commit
@@ -149,11 +149,18 @@ start_lab() { # tools
   ci_docker_run "$1" bash -euo pipefail -c '
     docker build --quiet --tag remotehub-ci-testlab-dc deploy/testlab/dc
     docker build --quiet --tag remotehub-ci-testlab-ssh deploy/testlab/ssh
+    docker build --quiet --tag remotehub-ci-testlab-desktop deploy/testlab/desktop
+    docker build --quiet --tag remotehub-ci-guacd deploy/guacd
   ' >/dev/null
   ci_dienst dc --hostname dc --network-alias dc.remotehub.test remotehub-ci-testlab-dc
   ci_dienst ssh-target --hostname ssh-target remotehub-ci-testlab-ssh
+  ci_dienst desktop-target --hostname desktop-target remotehub-ci-testlab-desktop
+  ci_dienst guacd --read-only --tmpfs /tmp --tmpfs /home/guacd:uid=1000,mode=0700 \
+    --cap-drop ALL --security-opt no-new-privileges remotehub-ci-guacd
   ci_warten dc 60 bash -c '</dev/tcp/127.0.0.1/636'
   ci_warten ssh-target 30 bash -c '</dev/tcp/127.0.0.1/22'
+  ci_warten desktop-target 30 bash -c '</dev/tcp/127.0.0.1/3389 && </dev/tcp/127.0.0.1/5900'
+  ci_warten guacd 30 bash -c '</dev/tcp/127.0.0.1/4822'
 }
 
 # User interface: types, formatting and lint, tests (including the
