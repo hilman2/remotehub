@@ -1,0 +1,19 @@
+[package]
+name = "remotehub-i18n"
+description = "Text that remotehub renders on the server, from Fluent catalogs per locale (ADR 0002)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+fluent-bundle.workspace = true
+unic-langid.workspace = true
+
+[dev-dependencies]
+fluent-syntax.workspace = true
+
+[lints]
+workspace = true

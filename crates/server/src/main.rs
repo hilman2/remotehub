@@ -7,6 +7,7 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use remotehub_directory::Sid;
 use remotehub_directory::ldap::LdapDirectory;
+use remotehub_i18n::{self as i18n, Locale, Message};
 use remotehub_server::api::health;
 use remotehub_server::audit::{Action, Actor, Entry};
 use remotehub_server::auth::Authenticator;
@@ -201,7 +202,9 @@ async fn manage_break_glass(action: BreakGlassAction) -> anyhow::Result<()> {
                 &account.username,
             )
             .await?;
-            println!("Break-glass account {:?} deleted.", account.username);
+            say(Message::BreakGlassDeleted {
+                username: account.username,
+            });
             return Ok(());
         }
         BreakGlassAction::Create { username } => (
@@ -220,16 +223,46 @@ async fn manage_break_glass(action: BreakGlassAction) -> anyhow::Result<()> {
     .fetch_one(&pool)
     .await?;
     audit_cli(&pool, action, user_id, &issued.username).await?;
-    println!(
-        "Break-glass account {:?} is ready. This is shown only once; keep it offline, \
-         e.g. in a safe.\n\n  Password:    {}\n  TOTP secret: {}\n  TOTP URI:    {}\n\n\
-         Sign in at {sign_in_url}",
-        issued.username,
-        issued.password.as_str(),
-        issued.totp_secret.as_str(),
-        issued.totp_uri.as_str(),
-    );
+    say(Message::BreakGlassReady {
+        username: issued.username.clone(),
+    });
+    // The secrets go straight from their zeroizing buffers to the terminal;
+    // only the labels are translated, padded to the longest one.
+    let locale = cli_locale();
+    let lines = [
+        (
+            Message::BreakGlassPasswordLabel {},
+            issued.password.as_str(),
+        ),
+        (
+            Message::BreakGlassTotpSecretLabel {},
+            issued.totp_secret.as_str(),
+        ),
+        (Message::BreakGlassTotpUriLabel {}, issued.totp_uri.as_str()),
+    ]
+    .map(|(label, value)| (i18n::render(locale, &label), value));
+    let width = lines
+        .iter()
+        .map(|(label, _)| label.chars().count())
+        .max()
+        .unwrap_or(0);
+    println!();
+    for (label, value) in lines {
+        println!("  {label:<width$} {value}");
+    }
+    println!();
+    say(Message::BreakGlassSignIn { url: sign_in_url });
     Ok(())
+}
+
+/// The locale of the admin's terminal (`LC_ALL`, `LC_MESSAGES`, `LANG`).
+fn cli_locale() -> Locale {
+    Locale::from_posix(|name| std::env::var(name).ok())
+}
+
+/// Prints a message in the terminal's locale.
+fn say(message: Message) {
+    println!("{}", i18n::render(cli_locale(), &message));
 }
 
 async fn audit_cli(
@@ -263,14 +296,17 @@ async fn verify_audit() -> anyhow::Result<()> {
     let result = audit::verify(&pool).await?;
     match result.first_broken {
         None => {
-            println!("audit log intact: {} entries", result.entries);
+            say(Message::AuditIntact {
+                entries: result.entries,
+            });
             Ok(())
         }
-        Some(seq) => {
-            eprintln!(
-                "audit log BROKEN from entry {seq} on ({} entries)",
-                result.entries
-            );
+        Some(first) => {
+            let broken = Message::AuditBroken {
+                first,
+                entries: result.entries,
+            };
+            eprintln!("{}", i18n::render(cli_locale(), &broken));
             std::process::exit(1);
         }
     }
