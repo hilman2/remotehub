@@ -2,10 +2,8 @@
 //! a fresh database with all migrations (needs `DATABASE_URL`, provided by the
 //! development compose and the local CI).
 
-mod common;
-
+use crate::common::{get, send, state, unreachable_pool};
 use axum::http::StatusCode;
-use common::{get, send, state, unreachable_pool};
 use remotehub_server::{VERSION, app};
 use serde_json::json;
 use sqlx::PgPool;

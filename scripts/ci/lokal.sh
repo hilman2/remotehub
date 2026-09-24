@@ -2,9 +2,8 @@
 # Local CI for remotehub — the repository's only CI (no Actions workflows).
 # Usage and options: bash scripts/ci/lokal.sh --help
 #
-# gemeinsam.sh is the shared scaffold, kept verbatim across all of the
-# maintainer's repositories (German on purpose); only this file is specific
-# to remotehub.
+# gemeinsam.sh is the scaffold (lock, commit status, containers); it started
+# as a copy from another repository and belongs to remotehub alone now.
 #
 # Fast by design:
 # - Only what a change can affect runs: the files changed since the merge
@@ -81,45 +80,66 @@ job_base() {
   '
 }
 
-# Rust: formatting, Clippy without warnings, the tests of the whole workspace
-# against a fresh PostgreSQL (#[sqlx::test] creates a database per test) and,
-# if the lab is needed, the tests marked #[ignore = "needs the test lab"]
-# against the Samba domain controller and the SSH target.
-# Every run unpacks the commit afresh; so Rust does not build cold each time,
-# the registry and target/ live in volumes without a label — gemeinsam.sh
-# removes labelled volumes after the run. Build jobs are capped because the
-# Docker host has little memory.
-part_rust() { # tools lab(0|1)
-  local tools="$1" lab="$2"
-  ci_warten db 60 pg_isready -h 127.0.0.1 -U ci -d ci
+# Runs a script in the Rust tools container with the cargo caches, a fresh
+# PostgreSQL (#[sqlx::test] creates a database per test) and the lab.
+#
+# Only what changed is compiled: every run unpacks the commit into a new
+# volume under a new path, which cargo would treat as new packages. So the
+# source is synced into a volume at the fixed path /src, by content: only
+# files that really changed get written (and a new mtime), and cargo rebuilds
+# just the crates they belong to. The registry, target/ and /src live in
+# volumes without a label — gemeinsam.sh removes labelled volumes after a run.
+cargo_run() { # tools script
   ci_docker_run \
     -v remotehub-ci-cargo-registry:/usr/local/cargo/registry \
     -v remotehub-ci-cargo-git:/usr/local/cargo/git \
     -v remotehub-ci-target:/ci-target \
-    -e CARGO_TARGET_DIR=/ci-target -e CARGO_BUILD_JOBS=6 -e CARGO_TERM_COLOR=never \
+    -v remotehub-ci-src:/src \
+    -e CARGO_TARGET_DIR=/ci-target -e CARGO_BUILD_JOBS=8 -e CARGO_TERM_COLOR=never \
     -e DATABASE_URL=postgres://ci:ci@db:5432/ci \
     -e REMOTEHUB_TEST_LDAP_URL=ldaps://dc.remotehub.test \
     -e REMOTEHUB_TEST_SSH_HOST=ssh-target \
-    -e LAB="$lab" \
-    "$tools" bash -euo pipefail -c '
-      echo "── Toolchain"
-      rustc --version
-      cargo nextest --version | head -1
+    "$1" bash -euo pipefail -c "
+      rsync -rlc --delete \\
+        --exclude=/web/node_modules/ --exclude=/web/.svelte-kit/ \\
+        --exclude=/web/build/ --exclude=/web/src/lib/paraglide/ \\
+        ./ /src/
+      cd /src
+      $2"
+}
 
-      echo "── cargo fmt"
-      cargo fmt --all --check
+# Rust: formatting, Clippy without warnings and the tests of the whole
+# workspace; if the lab is needed, it starts while Rust compiles, and the
+# tests marked #[ignore = "needs the test lab"] run afterwards with the test
+# binaries just built.
+part_rust() { # tools lab(0|1)
+  local tools="$1" lab="$2" lab_pid=""
+  if [ "$lab" = 1 ]; then
+    start_lab "$tools" &
+    lab_pid=$!
+  fi
+  ci_warten db 60 pg_isready -h 127.0.0.1 -U ci -d ci
+  cargo_run "$tools" '
+    echo "── Toolchain"
+    rustc --version
+    cargo nextest --version | head -1
 
-      echo "── cargo clippy"
-      cargo clippy --workspace --all-targets --locked -- -D warnings
+    echo "── cargo fmt"
+    cargo fmt --all --check
 
-      echo "── cargo nextest"
-      cargo nextest run --workspace --locked --no-tests=warn
+    echo "── cargo clippy"
+    cargo clippy --workspace --all-targets --locked -- -D warnings
 
-      if [ "$LAB" = 1 ]; then
-        echo "── cargo nextest (test lab)"
-        cargo nextest run --workspace --locked --no-tests=warn --run-ignored only
-      fi
+    echo "── cargo nextest"
+    cargo nextest run --workspace --locked --no-tests=warn
+  '
+  if [ -n "$lab_pid" ]; then
+    wait "$lab_pid"
+    cargo_run "$tools" '
+      echo "── cargo nextest (test lab)"
+      cargo nextest run --workspace --locked --no-tests=warn --run-ignored only
     '
+  fi
 }
 
 # Starts the lab (images from the commit under test; the build cache keeps
@@ -136,28 +156,63 @@ start_lab() { # tools
 }
 
 # User interface: types, formatting and lint, tests (including the
-# translation guards) and the static build. The pnpm store stays between runs
-# in a volume without a label.
+# translation guards) and the static build. The messages are compiled once;
+# then all four checks run in parallel — vitest and the build leave the
+# compiled messages alone (PARAGLIDE_PRECOMPILED, see web/vite.config.ts).
+# The lockfile's packages were checked against minimumReleaseAge when they
+# were added, so the install does not ask the registry again.
+# The pnpm store stays between runs in a volume without a label.
 part_web() { # tools
   ci_docker_run \
     -v remotehub-ci-pnpm-store:/pnpm-store \
     -e pnpm_config_store_dir=/pnpm-store \
+    -e PARAGLIDE_PRECOMPILED=1 \
     "$1" bash -euo pipefail -c '
       cd web
-      pnpm install --frozen-lockfile
+      pnpm install --frozen-lockfile --config.minimum-release-age=0
+      pnpm i18n
+      pnpm exec svelte-kit sync
 
-      echo "── svelte-check"
-      pnpm check
+      step() { # name command...
+        local name="$1" start=$SECONDS
+        shift
+        if "$@" >"/tmp/$name.log" 2>&1; then
+          echo "ok $((SECONDS - start))s" >"/tmp/$name.result"
+        else
+          echo "FAILED $((SECONDS - start))s" >"/tmp/$name.result"
+        fi
+      }
+      step svelte-check pnpm exec svelte-check --tsconfig ./tsconfig.json --fail-on-warnings &
+      step lint pnpm lint &
+      step vitest pnpm exec vitest --run &
+      step build pnpm exec vite build &
+      wait
 
-      echo "── prettier and eslint"
-      pnpm lint
-
-      echo "── vitest"
-      pnpm test
-
-      echo "── build"
-      pnpm build
+      failed=0
+      for name in svelte-check lint vitest build; do
+        echo "── $name: $(cat "/tmp/$name.result")"
+        cat "/tmp/$name.log"
+        echo
+        grep -q "^ok" "/tmp/$name.result" || failed=1
+      done
+      [ "$failed" = 0 ]
     '
+}
+
+# Runs a part in the background with its own log and records how long it took.
+#   in_background NAME COMMAND... (sets NAME_pid)
+in_background() {
+  local name="$1"
+  shift
+  (
+    local start=$SECONDS rc=0
+    # In the background, not in an || list, so set -e keeps working inside.
+    "$@" &
+    wait "$!" || rc=$?
+    echo "$((SECONDS - start))" >"${logs}/${name}.seconds"
+    exit "$rc"
+  ) >"${logs}/${name}.log" 2>&1 &
+  printf -v "${name}_pid" "%s" "$!"
 }
 
 # Rust (with the lab) and web in parallel, each with its own log; failed parts
@@ -172,17 +227,12 @@ job_code() {
 
   if [ "$rust" = 1 ]; then
     ci_dienst db -e POSTGRES_USER=ci -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=ci "$POSTGRES_IMAGE"
-    (
-      if [ "$lab" = 1 ]; then start_lab "$tools"; fi
-      part_rust "$tools" "$lab"
-    ) >"${logs}/rust.log" 2>&1 &
-    rust_pid=$!
+    in_background rust part_rust "$tools" "$lab"
   else
     echo "skipped: nothing under ${RUST_INPUTS[*]} deploy/testlab/ changed" >"${logs}/rust.log"
   fi
   if [ "$web" = 1 ]; then
-    part_web "$tools" >"${logs}/web.log" 2>&1 &
-    web_pid=$!
+    in_background web part_web "$tools"
   else
     echo "skipped: nothing under ${WEB_INPUTS[*]} changed" >"${logs}/web.log"
   fi
@@ -190,20 +240,22 @@ job_code() {
   if [ -n "$rust_pid" ]; then wait "$rust_pid" || rust_rc=$?; fi
   if [ -n "$web_pid" ]; then wait "$web_pid" || web_rc=$?; fi
 
-  local part rc
-  for part in rust web; do
-    rc="${part}_rc"
-    if [ "${!rc}" = 0 ]; then
-      printf '════ %s ✓\n' "$part"
-      cat "${logs}/${part}.log"
-    fi
-  done
-  for part in rust web; do
-    rc="${part}_rc"
-    if [ "${!rc}" != 0 ]; then
-      printf '════ %s ✗ (exit %s)\n' "$part" "${!rc}"
-      cat "${logs}/${part}.log"
-    fi
+  # Successful parts first, failed parts last.
+  local part rc seconds
+  for want in ok failed; do
+    for part in rust web; do
+      rc="${part}_rc"
+      seconds="$(cat "${logs}/${part}.seconds" 2>/dev/null || echo 0)"
+      if [ "$want" = ok ] && [ "${!rc}" = 0 ]; then
+        printf '════ %s ✓ %ss
+' "$part" "$seconds"
+        cat "${logs}/${part}.log"
+      elif [ "$want" = failed ] && [ "${!rc}" != 0 ]; then
+        printf '════ %s ✗ %ss (exit %s)
+' "$part" "$seconds" "${!rc}"
+        cat "${logs}/${part}.log"
+      fi
+    done
   done
   rm -rf "$logs"
   [ "$rust_rc" = 0 ] && [ "$web_rc" = 0 ]

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Gerüst der lokalen CI — in allen privaten Repos gleichlautend.
+# Gerüst der lokalen CI von remotehub. Ursprünglich aus einem anderen Repo
+# kopiert; es gehört jetzt allein diesem Repo und wird hier frei geändert.
+# Nichts davon wird mit anderen Repos geteilt oder abgeglichen.
 #
 # Warum lokal: Private Repos haben 3 000 Action-Minuten im Monat, die im
 # September 2026 nach zwei Wochen aufgebraucht waren. Deshalb laufen alle
@@ -44,7 +46,9 @@ Lokale CI für ${CI_REPO_KURZ} — ersetzt GitHub Actions.
   bash scripts/ci/lokal.sh --laut       Job-Ausgaben mitschreiben statt nur ins Protokoll
 
 Jobs: ${CI_JOBS[*]}
-Es läuft rechnerweit immer nur eine lokale CI; weitere warten.
+Je Repo läuft immer nur eine lokale CI; weitere Läufe dieses Repos warten.
+Ein Commit mit demselben Dateistand wie ein schon grüner wird nicht erneut
+geprüft (CI_FULL=1 erzwingt einen Lauf).
 EOF
 }
 
@@ -132,17 +136,15 @@ ci_melden() {
   echo "✓ Status „${CI_KONTEXT}\" für ${CI_SHA_KURZ} gemeldet: ${beschreibung}"
 }
 
-# ── Rechnerweite Sperre ───────────────────────────────────────────────────────
-# Der Docker-Rechner hat wenig Speicher; zwei Läufe nebeneinander bringen beide
-# zum Scheitern. mkdir ist atomar; ein Verzeichnis ohne lebenden Inhaber gilt
-# als verwaist.
+# ── Sperre je Repo ────────────────────────────────────────────────────────────
+# Zwei Läufe dieses Repos teilen Cache-Volumes und den Compose-Projektnamen;
+# der zweite wartet. Andere Repos sind davon völlig unabhängig. mkdir ist
+# atomar; ein Verzeichnis ohne lebenden Inhaber gilt als verwaist.
 
 CI_SPERRE=""
 
 ci_sperren() {
-  local basis="${CI_LOKAL_SPERRE:-${XDG_CACHE_HOME:-$HOME/.cache}/ci-lokal}"
-  mkdir -p "$basis"
-  local sperre="${basis}/sperre" gemeldet=0 inhaber pid
+  local sperre="${CI_ABLAGE}/sperre" gemeldet=0 inhaber pid
   until mkdir "$sperre" 2>/dev/null; do
     inhaber="$(cat "${sperre}/inhaber" 2>/dev/null || true)"
     pid="${inhaber%% *}"
@@ -151,7 +153,7 @@ ci_sperren() {
       continue
     fi
     if [ "$gemeldet" = 0 ]; then
-      echo "… warte auf eine andere lokale CI: ${inhaber#* }"
+      echo "… warte auf einen anderen CI-Lauf dieses Repos: ${inhaber#* }"
       gemeldet=1
     fi
     sleep 5
@@ -257,6 +259,33 @@ ci_image() {
   printf '%s' "$tag"
 }
 
+# ── Nichts doppelt prüfen ─────────────────────────────────────────────────────
+# Ein Commit mit demselben Dateistand (Git-Tree) wie ein schon grün geprüfter,
+# etwa der Merge-Commit eines PRs, übernimmt dessen Ergebnis statt neu zu laufen.
+
+ci_baum() {
+  git -C "$CI_WURZEL" rev-parse "${CI_SHA}^{tree}"
+}
+
+ci_schon_gruen() {
+  local datei quelle beschreibung
+  datei="${CI_ABLAGE}/baum-$(ci_baum)"
+  [ -f "$datei" ] || return 1
+  quelle="$(sed -n 1p "$datei")"
+  beschreibung="gleicher Stand wie ${quelle:0:7} · $(sed -n 2p "$datei")"
+  [ -n "$quelle" ] || return 1
+  printf 'ok\n%s\n' "$beschreibung" >"${CI_ABLAGE}/${CI_SHA}"
+  if [ "$CI_STATUS" = 1 ]; then
+    if ci_auf_github; then
+      ci_status_setzen success "$beschreibung"
+      echo "✓ ${CI_SHA_KURZ}: ${beschreibung} — Status „${CI_KONTEXT}\" gemeldet, nicht erneut geprüft"
+      return 0
+    fi
+    echo "  Commit ist noch nicht auf GitHub — Status danach mit --melden nachtragen."
+  fi
+  echo "✓ ${CI_SHA_KURZ}: ${beschreibung} — nicht erneut geprüft"
+}
+
 # ── Ablauf ────────────────────────────────────────────────────────────────────
 
 ci_main() {
@@ -265,6 +294,10 @@ ci_main() {
 
   if [ "$CI_NUR_MELDEN" = 1 ]; then
     ci_melden
+    return
+  fi
+
+  if [ -z "$CI_NUR" ] && [ "${CI_FULL:-0}" != 1 ] && ci_schon_gruen; then
     return
   fi
 
@@ -333,6 +366,7 @@ ci_main() {
     beschreibung="${gruen[*]} grün · ${dauer} · $(hostname)"
     if [ -z "$CI_NUR" ]; then
       printf 'ok\n%s\n' "$beschreibung" >"${CI_ABLAGE}/${CI_SHA}"
+      printf '%s\n%s\n' "$CI_SHA" "$beschreibung" >"${CI_ABLAGE}/baum-$(ci_baum)"
     fi
     if [ "$CI_STATUS" = 1 ] && [ "$CI_PENDING" = 1 ]; then
       ci_status_setzen success "$beschreibung"
