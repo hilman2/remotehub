@@ -26,12 +26,16 @@ notifications, audit descriptions).
 
 - Errors are RFC 9457 problem responses with a stable `ErrorCode` and typed parameters. The UI turns them
   into text with the message `error_<code>`.
-- `ErrorCode` is exported to TypeScript with ts-rs, so the UI knows every code at compile time.
+- `ErrorCode` is defined once in Rust (`crates/server/src/api/problem.rs`). The list of codes and the
+  `Problem` type are generated into `web/src/lib/api/generated/problem.ts`; a Rust test fails when the
+  checked-in file is stale. The UI indexes its messages with every code, so a missing message is a type
+  error in `svelte-check`.
 
 ### Server-rendered text: Project Fluent
 
 - Every user-facing string in Rust is a `Message` — key plus typed arguments — never a `String`.
-- Catalogs live in `crates/i18n/locales/{locale}/*.ftl` and are embedded in the binary. Fallback chain:
+- Catalogs live in `crates/i18n/locales/{locale}/*.ftl` and are embedded in the binary (arrives with the
+  first server-rendered text, #27). Fallback chain:
   requested locale → English.
 
 ### Guards (tests fail on untranslated text)

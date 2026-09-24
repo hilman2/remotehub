@@ -101,8 +101,11 @@ async fn serves_the_spa_for_routes_but_not_for_unknown_api_paths() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, b"console.log(1)");
 
-    let (status, _) = get(app, "/api/does-not-exist").await;
+    let (status, body) = get(app, "/api/does-not-exist").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    let problem: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(problem["code"], "not_found");
+    assert_eq!(problem["status"], 404);
 }
 
 #[tokio::test]

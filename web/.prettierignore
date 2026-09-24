@@ -10,3 +10,6 @@ bun.lockb
 
 # inlang project: generated files, managed by the paraglide compiler
 /project.inlang/
+
+# Generated from Rust (crates/server/src/api/problem.rs), checked by a Rust test
+/src/lib/api/generated/
