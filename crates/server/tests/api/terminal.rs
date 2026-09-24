@@ -256,6 +256,49 @@ async fn a_stored_credential_opens_a_shell_and_pins_the_host_key(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations")]
 #[ignore = "needs the test lab"]
+async fn a_device_behind_a_connector_opens_only_while_it_is_connected(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let (connector, secret) = crate::connectors::new_connector(&app, &token, "lab").await;
+    let credential = create(
+        &app,
+        &token,
+        "/api/credentials",
+        json!({ "folder_id": folder, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
+    )
+    .await;
+    let device = create(
+        &app,
+        &token,
+        "/api/devices",
+        json!({
+            "folder_id": folder, "name": "behind", "protocol": "ssh", "host": ssh_host(),
+            "port": 22, "auth_mode": "stored", "credential_id": credential, "connector_id": connector,
+        }),
+    )
+    .await;
+    let address = serve(state.clone()).await;
+
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({})).await;
+    assert_eq!(event(&mut socket).await["code"], "connector_offline");
+
+    let _connector =
+        crate::connectors::run_connector(&state, address, connector, &secret, "").await;
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({})).await;
+    expect_connected(&mut socket).await;
+    socket
+        .send(Message::Binary(
+            b"echo \"I am $(whoami)\"\n".to_vec().into(),
+        ))
+        .await
+        .unwrap();
+    output_until(&mut socket, "I am tester").await;
+    assert_eq!(crate::connectors::carried(&app, &token, 1).await, 1);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
 async fn a_changed_host_key_stops_the_connection(pool: PgPool) {
     let (state, app, token, folder) = setup(pool.clone()).await;
     let device = stored_device(&app, &token, &folder, "right", "Tester-Passw0rd!").await;

@@ -9,6 +9,8 @@ Remote Desktop Manager) combined with a multi-user password vault in the spirit 
 - See the devices you are allowed to reach — RDP, VNC, SSH, HTTPS web interfaces — organised in folders.
 - Click and work **in the browser**. The connection runs on the server and only picture, terminal output and
   input travel to your browser, so your client needs no network access to the targets.
+- Reach other sites and segments through a **site connector** that connects out to remotehub, without
+  inbound firewall rules.
 - Connect with the **credentials stored for the device**, with **personal credentials**, or with **your own AD account** —
   stored passwords can be used without ever being shown (`connect` and `reveal` are separate permissions).
 - Keep all other credentials in a **vault with folder permissions based on AD groups**, import existing

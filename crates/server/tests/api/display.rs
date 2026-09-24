@@ -657,11 +657,15 @@ async fn a_changed_https_certificate_stops_the_connection(pool: PgPool) {
         json!({ "auth_mode": "ask", "credential_id": null }),
     )
     .await;
-    let presented =
-        remotehub_gateway::tls::https_certificate(&web_host(), 443, Duration::from_secs(5))
-            .await
-            .unwrap()
-            .fingerprint;
+    let presented = remotehub_gateway::tls::https_certificate(
+        &web_host(),
+        &web_host(),
+        443,
+        Duration::from_secs(5),
+    )
+    .await
+    .unwrap()
+    .fingerprint;
     let other = format!("00:00{}", &presented[5..]);
     sqlx::query("UPDATE devices SET certificate_fingerprint = $1, certificate_pinned_at = now()")
         .bind(&other)
@@ -694,10 +698,11 @@ async fn the_browser_signs_in_only_where_the_pinned_key_is(_pool: PgPool) {
     use remotehub_browser::protocol::Reply;
 
     let host = web_host();
-    let right = remotehub_gateway::tls::https_certificate(&host, 443, Duration::from_secs(5))
-        .await
-        .unwrap()
-        .spki;
+    let right =
+        remotehub_gateway::tls::https_certificate(&host, &host, 443, Duration::from_secs(5))
+            .await
+            .unwrap()
+            .spki;
     let before = sign_ins().await["count"].clone();
     // Open until the form has been sent: the browser ends with its session.
     let mut sessions = Vec::new();
@@ -715,6 +720,7 @@ async fn the_browser_signs_in_only_where_the_pinned_key_is(_pool: PgPool) {
             &Request {
                 host: &host,
                 port: 443,
+                via: None,
                 spki,
                 width: 1024,
                 height: 768,
@@ -737,4 +743,85 @@ async fn the_browser_signs_in_only_where_the_pinned_key_is(_pool: PgPool) {
         before.as_u64().map(|n| n + 1),
         "one sign-in, with the right key: {after}"
     );
+}
+
+// ── Behind a site connector: guacd and the browser service use a forward ─────
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn an_rdp_desktop_behind_a_connector_opens_through_it(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let (connector, secret) = crate::connectors::new_connector(&app, &token, "lab").await;
+    let credential = create(
+        &app,
+        &token,
+        "/api/credentials",
+        json!({ "folder_id": folder, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
+    )
+    .await;
+    let rdp = device(
+        &app,
+        &token,
+        &folder,
+        json!({ "protocol": "rdp", "port": 3389, "auth_mode": "stored", "credential_id": credential,
+                "connector_id": connector }),
+    )
+    .await;
+    let address = serve(state.clone()).await;
+    let _connector =
+        crate::connectors::run_connector(&state, address, connector, &secret, "").await;
+
+    let mut socket = open(address, &rdp, &token, "display", ORIGIN)
+        .await
+        .unwrap();
+    start(&mut socket, json!({})).await;
+    let connected = connected(&mut socket).await;
+    assert_eq!(connected["type"], "connected", "{connected}");
+    assert_eq!(connected["certificate_fingerprint"], LAB_CERTIFICATE);
+    instructions_until(&mut socket, "3.img,").await;
+    // guacd's connection, not the certificate probe's, which has ended. Both
+    // went through the connector: the probe must see the certificate of the
+    // machine behind it, not of one with the same address elsewhere.
+    assert_eq!(crate::connectors::carried(&app, &token, 1).await, 1);
+    let listed = send(&app, get("/api/connectors", Some(&token)))
+        .await
+        .json();
+    assert_eq!(listed[0]["streams_carried"], 2, "{listed}");
+    leave(socket).await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn an_https_device_behind_a_connector_signs_in_through_it(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let (connector, secret) = crate::connectors::new_connector(&app, &token, "lab").await;
+    let web = web_device(
+        &app,
+        &token,
+        &folder,
+        json!({ "auth_mode": "ask", "credential_id": null, "connector_id": connector }),
+    )
+    .await;
+    let address = serve(state.clone()).await;
+    let _connector =
+        crate::connectors::run_connector(&state, address, connector, &secret, "").await;
+    let before = sign_ins().await;
+
+    let mut socket = open(address, &web, &token, "display", ORIGIN)
+        .await
+        .unwrap();
+    start(
+        &mut socket,
+        json!({ "username": "tester", "password": "Tester-Passw0rd!" }),
+    )
+    .await;
+    let connected = connected(&mut socket).await;
+    assert_eq!(connected["type"], "connected", "{connected}");
+    let signed_in = sign_in_after(&before["count"]).await;
+    assert_eq!(signed_in["ok"], true, "{signed_in}");
+    // Through a forward, the proxy still holds Chromium to the device.
+    assert_eq!(signed_in["escapes"], before["escapes"], "{signed_in}");
+    // Chromium keeps its connection to the page open.
+    assert!(crate::connectors::carried(&app, &token, 1).await >= 1);
+    leave(socket).await;
 }

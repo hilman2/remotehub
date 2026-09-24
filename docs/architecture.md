@@ -31,6 +31,8 @@ remotehub server (Rust, one binary: axum on tokio)
         │                                 │ internal Docker network, no published ports
 PostgreSQL (sqlx, migrations at start)    guacd 1.6 (own image with FreeRDP 3)
                                           browser service (Chromium on Xvnc, one per HTTPS session)
+
+Other networks: site connector (remotehub connector) ──WebSocket, outbound──▶ remotehub
 ```
 
 | Crate | Role |
@@ -166,6 +168,12 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   besides valid ones. The service types the credentials into the page's sign-in form through the DevTools
   Protocol; remotehub opens the display through guacd with the VNC password the service made up. One TCP
   connection to the service is the session: closing it ends Chromium.
+- **Site connectors** (ADR 0008) reach devices in networks remotehub cannot reach. A connector
+  (`remotehub connector`, `crates/server/src/connector_agent.rs`) keeps a control WebSocket open to
+  `/api/connectors/control`; for each connection remotehub asks for, it connects to the device and opens a
+  WebSocket of its own under `/api/connectors/streams/{id}`. The engines do not know: for a device with a
+  connector, `connect::route` opens a forward (`crates/server/src/connectors.rs`) that only the engine in
+  question may use, and hands its address to SSH, the certificate probes, guacd or the browser service.
 - All engines sit behind the trait `ProtocolEngine`, so an own RDP engine (IronRDP) can replace guacd later
   without changing API or UI.
 

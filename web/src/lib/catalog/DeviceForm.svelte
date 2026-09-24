@@ -11,6 +11,7 @@
 		type KeyboardLayout,
 		type Protocol
 	} from '$lib/api/catalog';
+	import type { Connector } from '$lib/api/connectors';
 	import { getLocale } from '$lib/i18n';
 	import { untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages';
@@ -20,12 +21,14 @@
 		folderId,
 		device = null,
 		credentials,
+		connectors = [],
 		onsubmit,
 		oncancel
 	}: {
 		folderId: string;
 		device?: Device | null;
 		credentials: Credential[];
+		connectors?: Connector[];
 		onsubmit: (input: DeviceInput) => void;
 		oncancel: () => void;
 	} = $props();
@@ -40,6 +43,7 @@
 	let credentialId = $state(start?.credential_id ?? '');
 	let description = $state(start?.description ?? '');
 	let keyboardLayout = $state<KeyboardLayout | ''>(start?.keyboard_layout ?? '');
+	let connectorId = $state(start?.connector_id ?? '');
 
 	// Layouts by name in the UI's language; Unicode last.
 	const layouts = $derived(
@@ -73,7 +77,8 @@
 			auth_mode: authMode,
 			credential_id: authMode === 'stored' ? credentialId || null : null,
 			description,
-			keyboard_layout: protocol === 'rdp' ? keyboardLayout || null : null
+			keyboard_layout: protocol === 'rdp' ? keyboardLayout || null : null,
+			connector_id: connectorId || null
 		});
 	}
 
@@ -123,6 +128,26 @@
 		spellcheck="false"
 		bind:value={host}
 	/>
+
+	{#if connectors.length > 0 || connectorId}
+		<label class={label} for="device-connector">{m.field_connector()}</label>
+		<select
+			id="device-connector"
+			class={field}
+			bind:value={connectorId}
+			aria-describedby="device-connector-hint"
+		>
+			<option value="">{m.connector_direct()}</option>
+			{#each connectors as connector (connector.id)}
+				<option value={connector.id}>{connector.name}</option>
+			{/each}
+			<!-- Kept as it is if the list did not load: saving must not move the device. -->
+			{#if connectorId && !connectors.some((c) => c.id === connectorId)}
+				<option value={connectorId}>{connectorId}</option>
+			{/if}
+		</select>
+		<p id="device-connector-hint" class="mt-1 text-xs text-ink-3">{m.connector_hint()}</p>
+	{/if}
 
 	{#if protocol === 'rdp'}
 		<label class={label} for="device-keyboard">{m.field_keyboard_layout()}</label>

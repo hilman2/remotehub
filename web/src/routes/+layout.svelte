@@ -83,6 +83,13 @@
 					</a>
 					{#if session.user.admin}
 						<a
+							href={resolve('/connectors')}
+							class="rounded-md px-2.5 py-1.5 hover:bg-surface-2 hover:text-ink aria-[current=page]:text-ink"
+							aria-current={page.url.pathname === resolve('/connectors') ? 'page' : undefined}
+						>
+							{m.nav_connectors()}
+						</a>
+						<a
 							href={resolve('/audit')}
 							class="rounded-md px-2.5 py-1.5 hover:bg-surface-2 hover:text-ink aria-[current=page]:text-ink"
 							aria-current={page.url.pathname === resolve('/audit') ? 'page' : undefined}

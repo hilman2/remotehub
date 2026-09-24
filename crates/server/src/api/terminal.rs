@@ -28,7 +28,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::connect::{
-    self, Credentials, Login, Target, entry, own_account, send_json, send_problem,
+    self, Credentials, Engine, Login, Target, entry, own_account, send_json, send_problem,
 };
 use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
@@ -121,12 +121,30 @@ async fn run(
         }
     };
 
-    // 3. Connect on the server.
+    // 3. Connect on the server, directly or through the device's connector.
     let port = u16::try_from(target.port).unwrap_or(22);
+    let route = match connect::route(&state, &target, Engine::Server).await {
+        Ok(route) => route,
+        Err(problem) => {
+            let _ = audit::record(
+                &state.db,
+                entry(
+                    &session,
+                    Action::ConnectionFailed,
+                    target.id,
+                    json!({ "protocol": "ssh", "reason": problem.code, "host": target.host }),
+                    &address,
+                ),
+            )
+            .await;
+            send_problem(&mut socket, &problem).await;
+            return;
+        }
+    };
     let opened = ssh::open(
         SshTarget {
-            host: &target.host,
-            port,
+            host: &route.host,
+            port: route.port,
             username: &username,
             auth: match &login {
                 Login::Password(password) => SshAuth::Password(password),

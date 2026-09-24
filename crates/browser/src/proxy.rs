@@ -14,24 +14,29 @@ const MAX_HEAD: usize = 8 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Listens on `127.0.0.1` for Chromium, allowing only `authority`
-/// (`host:port` as [`crate::protocol::Open::authority`] builds it). Returns
-/// the port and the task; aborting the task stops the proxy, tunnels already
-/// open end with the browser.
-pub async fn start(authority: String) -> std::io::Result<(u16, JoinHandle<()>)> {
+/// (`host:port` as [`crate::protocol::Open::authority`] builds it), and
+/// connects to `via` instead if given. Returns the port and the task;
+/// aborting the task stops the proxy, tunnels already open end with the
+/// browser.
+pub async fn start(
+    authority: String,
+    via: Option<String>,
+) -> std::io::Result<(u16, JoinHandle<()>)> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
     let port = listener.local_addr()?.port();
     let task = tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
             let authority = authority.clone();
+            let via = via.clone();
             tokio::spawn(async move {
-                let _ = serve(stream, &authority).await;
+                let _ = serve(stream, &authority, via.as_deref()).await;
             });
         }
     });
     Ok((port, task))
 }
 
-async fn serve(mut client: TcpStream, allowed: &str) -> std::io::Result<()> {
+async fn serve(mut client: TcpStream, allowed: &str, via: Option<&str>) -> std::io::Result<()> {
     let Ok(Some((head, rest))) = tokio::time::timeout(TIMEOUT, read_head(&mut client)).await else {
         return Ok(());
     };
@@ -46,7 +51,8 @@ async fn serve(mut client: TcpStream, allowed: &str) -> std::io::Result<()> {
             .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
             .await;
     }
-    let upstream = match tokio::time::timeout(TIMEOUT, TcpStream::connect(target)).await {
+    let destination = via.unwrap_or(target);
+    let upstream = match tokio::time::timeout(TIMEOUT, TcpStream::connect(destination)).await {
         Ok(Ok(upstream)) => upstream,
         _ => {
             return client
@@ -115,7 +121,7 @@ mod tests {
     #[tokio::test]
     async fn the_device_is_reachable() {
         let (authority, _device) = device().await;
-        let (proxy, _task) = start(authority.clone()).await.unwrap();
+        let (proxy, _task) = start(authority.clone(), None).await.unwrap();
         let answer = ask(
             proxy,
             &format!("CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n\r\n"),
@@ -124,11 +130,23 @@ mod tests {
         assert_eq!(answer, "HTTP/1.1 200 Connection Established\r\n\r\nhello");
     }
 
+    /// Behind a site connector: Chromium names the device, the proxy
+    /// connects to remotehub's forward.
+    #[tokio::test]
+    async fn a_forward_stands_in_for_the_device() {
+        let (forward, _forward) = device().await;
+        let (proxy, _task) = start("appliance.site:443".into(), Some(forward))
+            .await
+            .unwrap();
+        let answer = ask(proxy, "CONNECT appliance.site:443 HTTP/1.1\r\n\r\n").await;
+        assert_eq!(answer, "HTTP/1.1 200 Connection Established\r\n\r\nhello");
+    }
+
     #[tokio::test]
     async fn nothing_else_is() {
         let (authority, _device) = device().await;
         let (other, _other) = device().await;
-        let (proxy, _task) = start(authority.clone()).await.unwrap();
+        let (proxy, _task) = start(authority.clone(), None).await.unwrap();
         for request in [
             format!("CONNECT {other} HTTP/1.1\r\n\r\n"),
             format!("GET http://{authority}/ HTTP/1.1\r\n\r\n"),

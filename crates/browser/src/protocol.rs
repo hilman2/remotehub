@@ -17,6 +17,11 @@ pub const MAX_LINE: usize = 64 * 1024;
 pub struct Open {
     pub host: String,
     pub port: u16,
+    /// Where the proxy connects instead of `host:port` (`address:port`): a
+    /// forward of remotehub to a device behind a site connector (ADR 0008).
+    /// Chromium still sees the device's name.
+    #[serde(default)]
+    pub via: Option<String>,
     /// Base64 SHA-256 of the public key of the certificate remotehub pinned:
     /// Chromium accepts that certificate even when self-signed, and no other
     /// one that does not validate.
@@ -105,6 +110,7 @@ mod tests {
         Open {
             host: host.into(),
             port,
+            via: None,
             spki: String::new(),
             width: 1280,
             height: 800,

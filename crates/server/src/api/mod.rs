@@ -3,6 +3,7 @@
 mod audit;
 mod catalog;
 mod connect;
+mod connectors;
 mod display;
 pub mod health;
 mod origin;
@@ -72,6 +73,13 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/personal/entries/{id}",
             put(personal::save_entry).delete(personal::delete_entry),
         )
+        .route(
+            "/connectors",
+            get(connectors::list).post(connectors::create),
+        )
+        .route("/connectors/{id}", delete(connectors::delete))
+        .route("/connectors/control", get(connectors::control))
+        .route("/connectors/streams/{id}", get(connectors::stream))
         .route("/audit", get(audit::list))
         .route("/audit/verify", post(audit::verify))
         // Unknown API paths are a problem response, never the SPA's index.html.

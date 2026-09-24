@@ -33,6 +33,7 @@
 		type Tree
 	} from '$lib/api/catalog';
 	import type { ApiResult } from '$lib/api/client';
+	import { loadConnectors, type Connector } from '$lib/api/connectors';
 	import { createRequest, requestableRoles } from '$lib/api/requests';
 	import RequestForm from '$lib/catalog/RequestForm.svelte';
 	import { errorMessage, problemMessage } from '$lib/api/errors';
@@ -64,6 +65,7 @@
 		| { type: 'request'; kind: ObjectKind; id: string; name: string; role: Role };
 
 	let tree = $state<Tree | null>(null);
+	let connectors = $state<Connector[]>([]);
 	let query = $state('');
 	let selected = $state<Selection | null>(null);
 	const collapsed = new SvelteSet<string>();
@@ -89,10 +91,13 @@
 	);
 
 	async function load() {
-		const result = await loadTree();
+		const [result, sites] = await Promise.all([loadTree(), loadConnectors()]);
 		if (result.ok) tree = result.data;
 		else error = errorMessage(result.code);
+		if (sites.ok) connectors = sites.data;
 	}
+
+	const connectorOf = (device: Device) => connectors.find((c) => c.id === device.connector_id);
 
 	$effect(() => {
 		load();
@@ -372,6 +377,16 @@
 					<dd>{PROTOCOL_LABELS[device.protocol]()}</dd>
 					<dt class="text-ink-2">{m.field_host()}</dt>
 					<dd class="font-mono">{device.host}:{device.port}</dd>
+					{#if device.connector_id}
+						{@const connector = connectorOf(device)}
+						<dt class="text-ink-2">{m.field_connector()}</dt>
+						<dd>
+							{connector?.name ?? ''}
+							<span class="text-ink-3">
+								· {connector?.online ? m.connector_online() : m.connector_offline()}
+							</span>
+						</dd>
+					{/if}
 					<dt class="text-ink-2">{m.field_auth_mode()}</dt>
 					<dd>
 						{AUTH_MODE_LABELS[device.auth_mode]()}
@@ -610,6 +625,7 @@
 					folderId={open.folderId}
 					device={open.device}
 					credentials={tree.credentials}
+					{connectors}
 					onsubmit={saveDevice}
 					oncancel={() => (dialogOpen = false)}
 				/>

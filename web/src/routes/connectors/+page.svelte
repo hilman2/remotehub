@@ -1,0 +1,228 @@
+<script lang="ts">
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import Plus from '@lucide/svelte/icons/plus';
+	import {
+		createConnector,
+		deleteConnector,
+		loadConnectors,
+		type Connector,
+		type CreatedConnector
+	} from '$lib/api/connectors';
+	import { errorMessage } from '$lib/api/errors';
+	import Dialog from '$lib/components/Dialog.svelte';
+	import { formatLocale } from '$lib/i18n';
+	import { m } from '$lib/paraglide/messages';
+	import { session } from '$lib/session.svelte';
+
+	type Open =
+		| { type: 'create' }
+		| { type: 'created'; connector: CreatedConnector }
+		| { type: 'delete'; connector: Connector };
+
+	let connectors = $state<Connector[]>([]);
+	let error = $state<string | null>(null);
+	let open = $state<Open | null>(null);
+	let dialogOpen = $state(false);
+	let name = $state('');
+	let dialogError = $state<string | null>(null);
+
+	const time = new Intl.DateTimeFormat(formatLocale(), { dateStyle: 'short', timeStyle: 'short' });
+
+	async function load() {
+		const result = await loadConnectors();
+		if (result.ok) connectors = result.data;
+		else error = errorMessage(result.code);
+	}
+
+	$effect(() => {
+		if (session.user?.admin) load();
+	});
+
+	function show(next: Open) {
+		dialogError = null;
+		name = '';
+		open = next;
+		dialogOpen = true;
+	}
+
+	async function create(event: SubmitEvent) {
+		event.preventDefault();
+		const result = await createConnector(name);
+		if (!result.ok) {
+			dialogError = errorMessage(result.code);
+			return;
+		}
+		open = { type: 'created', connector: result.data };
+		await load();
+	}
+
+	async function remove(connector: Connector) {
+		const result = await deleteConnector(connector.id);
+		if (!result.ok) {
+			dialogError = errorMessage(result.code);
+			return;
+		}
+		dialogOpen = false;
+		await load();
+	}
+
+	/** The connector's environment (crates/server/src/connector_agent.rs). */
+	const settings = (connector: CreatedConnector) =>
+		`REMOTEHUB_URL=${window.location.origin}\nREMOTEHUB_CONNECTOR_TOKEN=${connector.token}`;
+
+	const title = $derived.by(() => {
+		switch (open?.type) {
+			case 'create':
+				return m.connectors_new();
+			case 'created':
+				return m.connectors_token_title({ name: open.connector.name });
+			case 'delete':
+				return m.catalog_delete();
+			default:
+				return '';
+		}
+	});
+</script>
+
+<div class="flex flex-wrap items-start justify-between gap-4">
+	<div>
+		<h1 class="text-2xl font-semibold tracking-tight">{m.connectors_title()}</h1>
+		<p class="mt-1 max-w-2xl text-sm text-ink-2">{m.connectors_intro()}</p>
+	</div>
+	{#if session.user?.admin}
+		<button
+			type="button"
+			class="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink"
+			onclick={() => show({ type: 'create' })}
+		>
+			<Plus size={16} aria-hidden="true" />
+			{m.connectors_new()}
+		</button>
+	{/if}
+</div>
+
+{#if !session.user?.admin}
+	<p class="mt-8 flex items-center gap-2 text-sm" role="alert">
+		<CircleAlert size={16} class="text-critical" aria-hidden="true" />
+		{errorMessage('forbidden')}
+	</p>
+{:else if error}
+	<p class="mt-8 flex items-center gap-2 text-sm" role="alert">
+		<CircleAlert size={16} class="text-critical" aria-hidden="true" />
+		{error}
+	</p>
+{:else if connectors.length === 0}
+	<p class="mt-8 text-sm text-ink-2">{m.connectors_empty()}</p>
+{:else}
+	<div class="mt-6 overflow-x-auto rounded-card border border-line bg-surface">
+		<table class="w-full text-left text-sm">
+			<thead class="border-b border-line text-ink-2">
+				<tr>
+					<th class="px-4 py-2 font-medium">{m.field_name()}</th>
+					<th class="px-4 py-2 font-medium">{m.connectors_col_state()}</th>
+					<th class="px-4 py-2 font-medium">{m.connectors_col_streams()}</th>
+					<th class="px-4 py-2 font-medium">{m.connectors_col_last_seen()}</th>
+					<th class="px-4 py-2"><span class="sr-only">{m.catalog_delete()}</span></th>
+				</tr>
+			</thead>
+			<tbody>
+				{#each connectors as connector (connector.id)}
+					<tr class="border-b border-line last:border-0">
+						<td class="px-4 py-2">{connector.name}</td>
+						<td class="px-4 py-2">
+							{connector.online ? m.connector_online() : m.connector_offline()}
+						</td>
+						<td class="px-4 py-2 text-ink-2 tabular-nums">
+							{m.connectors_streams({ open: connector.streams, total: connector.streams_carried })}
+						</td>
+						<td class="px-4 py-2 whitespace-nowrap text-ink-2 tabular-nums">
+							{connector.last_seen_at
+								? time.format(new Date(connector.last_seen_at))
+								: m.connectors_never()}
+						</td>
+						<td class="px-4 py-2 text-right">
+							<button
+								type="button"
+								class="rounded-md px-2 py-1 text-xs text-ink-2 hover:bg-surface-2 hover:text-ink"
+								onclick={() => show({ type: 'delete', connector })}
+							>
+								{m.catalog_delete()}
+							</button>
+						</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+	</div>
+{/if}
+
+<Dialog bind:open={dialogOpen} {title}>
+	{#if open?.type === 'create'}
+		<form onsubmit={create}>
+			<label class="block text-sm font-medium" for="connector-name">{m.field_name()}</label>
+			<input
+				id="connector-name"
+				class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
+				required
+				maxlength="200"
+				bind:value={name}
+			/>
+			<p class="mt-1 text-xs text-ink-3">{m.connectors_name_hint()}</p>
+			{#if dialogError}
+				<p class="mt-3 text-sm text-critical" role="alert">{dialogError}</p>
+			{/if}
+			<div class="mt-5 flex justify-end gap-2">
+				<button
+					type="button"
+					class="rounded-lg px-3 py-1.5 text-sm hover:bg-surface-2"
+					onclick={() => (dialogOpen = false)}
+				>
+					{m.action_cancel()}
+				</button>
+				<button
+					type="submit"
+					class="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink"
+				>
+					{m.action_create()}
+				</button>
+			</div>
+		</form>
+	{:else if open?.type === 'created'}
+		<p class="text-sm">{m.connectors_token_hint()}</p>
+		<pre
+			class="mt-3 overflow-x-auto rounded-lg border border-line bg-page p-3 font-mono text-xs select-all"
+			aria-label={m.connectors_token_settings()}>{settings(open.connector)}</pre>
+		<p class="mt-3 text-xs text-ink-3">{m.connectors_token_docs()}</p>
+		<div class="mt-5 flex justify-end">
+			<button
+				type="button"
+				class="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink"
+				onclick={() => (dialogOpen = false)}
+			>
+				{m.action_close()}
+			</button>
+		</div>
+	{:else if open?.type === 'delete'}
+		{@const connector = open.connector}
+		<p class="text-sm">{m.catalog_delete_confirm({ name: connector.name })}</p>
+		{#if dialogError}
+			<p class="mt-3 text-sm text-critical" role="alert">{dialogError}</p>
+		{/if}
+		<div class="mt-5 flex justify-end gap-2">
+			<button
+				type="button"
+				class="rounded-lg px-3 py-1.5 text-sm hover:bg-surface-2"
+				onclick={() => (dialogOpen = false)}
+			>
+				{m.action_cancel()}
+			</button>
+			<button
+				type="button"
+				class="rounded-lg bg-critical px-3 py-1.5 text-sm font-medium text-white"
+				onclick={() => remove(connector)}
+			>
+				{m.catalog_delete()}
+			</button>
+		</div>
+	{/if}
+</Dialog>

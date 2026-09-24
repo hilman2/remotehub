@@ -178,6 +178,33 @@ REMOTEHUB_BROWSER_MEMORY=6g
 
 All sessions of the service run as one Unix user. Why, and what that means: [ADR 0007](adr/0007-isolated-browser.md).
 
+## Reach devices in other networks
+
+A site connector runs in a network that remotehub cannot reach and opens the way from there. It needs outbound
+HTTPS to `REMOTEHUB_PUBLIC_URL` and nothing inbound. It is the remotehub image, started as `connector`.
+
+Create the connector under *Connectors* in remotehub. Its token is shown once. On a Linux host in that network,
+put the token into a file and start the connector:
+
+```bash
+sudo install -d -m 700 /opt/remotehub-connector
+sudo sh -c 'cat > /opt/remotehub-connector/token' # paste the token, then Ctrl+D
+sudo chown 65532 /opt/remotehub-connector/token && sudo chmod 400 /opt/remotehub-connector/token
+sudo docker run -d --name remotehub-connector --restart unless-stopped --read-only --no-healthcheck \
+  --cap-drop ALL --security-opt no-new-privileges \
+  -v /opt/remotehub-connector/token:/run/secrets/token:ro \
+  -e REMOTEHUB_URL=https://remotehub.example.com \
+  -e REMOTEHUB_CONNECTOR_TOKEN_FILE=/run/secrets/token \
+  ghcr.io/hilman2/remotehub:0.1.0 connector
+```
+
+The connectors page shows it as connected. Devices in that network then name it under *Reached through*. To
+keep the connector away from parts of its network, list the ranges it may reach in `REMOTEHUB_CONNECTOR_ALLOW`.
+
+A token cannot be shown again. If it is lost or leaked, delete the connector and create a new one; its
+devices must be moved to the new one first. Why the connector only carries connections and the engines stay
+with remotehub: [ADR 0008](adr/0008-site-connectors.md).
+
 ## Back up and restore
 
 Back up the database regularly, and `secrets/master_key` once, apart from it:

@@ -7,6 +7,8 @@ pub mod auth;
 pub mod break_glass;
 pub mod catalog;
 pub mod config;
+pub mod connector_agent;
+pub mod connectors;
 pub mod db;
 pub mod proxy;
 pub mod secrets;
@@ -37,6 +39,8 @@ pub struct AppState {
     pub limiter: Arc<SignInLimiter>,
     /// Seals and opens stored secrets (ADR 0004).
     pub vault: Arc<DynVault>,
+    /// Site connectors that are online, and streams through them (ADR 0008).
+    pub connectors: Arc<connectors::Connectors>,
 }
 
 /// Settings the request handlers need.
@@ -75,6 +79,7 @@ impl AppState {
             settings: Arc::new(settings),
             limiter: Arc::new(SignInLimiter::new(Duration::from_secs(5 * 60))),
             vault: Arc::new(vault),
+            connectors: Arc::default(),
         }
     }
 }
