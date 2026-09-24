@@ -13,6 +13,7 @@ mod catalog;
 mod display;
 mod generated;
 mod http;
+mod personal;
 mod requests;
 mod secrets;
 mod session;

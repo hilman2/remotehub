@@ -30,7 +30,12 @@ export const AUDIT_ACTIONS = [
 	'access.requested',
 	'access.approved',
 	'access.denied',
-	'access.cancelled'
+	'access.cancelled',
+	'personal.unlock_added',
+	'personal.unlock_removed',
+	'personal.entry_saved',
+	'personal.entry_deleted',
+	'personal.vault_reset'
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

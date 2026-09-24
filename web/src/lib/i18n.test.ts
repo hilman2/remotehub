@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import de from '../../messages/de.json';
 import en from '../../messages/en.json';
@@ -20,7 +21,9 @@ const IDENTICAL_IN_GERMAN = new Set<string>([
 	'protocol_ssh',
 	'protocol_vnc',
 	'credential_version',
-	'field_passphrase'
+	'field_passphrase',
+	'vault_kind_passkey',
+	'vault_kind_passphrase'
 ]);
 
 /** Every message as text; plural and select variants as their JSON. */
@@ -37,6 +40,17 @@ function placeholders(text: string): string[] {
 const textOf = (catalog: Catalog, key: string) => new Map(messages(catalog)).get(key) ?? '';
 
 describe('message catalogs', () => {
+	it('name every key once', () => {
+		// JSON.parse keeps the last of two equal keys without a word, so the
+		// raw files are read.
+		for (const locale of Object.keys(CATALOGS)) {
+			const raw = readFileSync(new URL(`../../messages/${locale}.json`, import.meta.url), 'utf8');
+			const keys = [...raw.matchAll(/^\t"([^"]+)":/gm)].map((match) => match[1]);
+			const twice = keys.filter((key, index) => keys.indexOf(key) !== index);
+			expect(twice, locale).toEqual([]);
+		}
+	});
+
 	it('have the same keys in every locale', () => {
 		const keys = (catalog: Catalog) => Object.keys(catalog).sort();
 		for (const catalog of Object.values(CATALOGS)) {
