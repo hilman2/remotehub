@@ -1,0 +1,150 @@
+# Architecture of remotehub
+
+## Context
+
+Administrators work with dozens to thousands of systems over RDP, VNC and SSH, plus web interfaces of
+appliances. Classic tools are desktop applications (mRemoteNG, Royal TS, Remote Desktop Manager) with
+credentials in a KeePass file or a proprietary server. remotehub moves both into one self-hosted web
+application:
+
+- Sign in with the directory account (Active Directory first, Entra ID later).
+- See the devices you may reach, organised in folders, and connect **in the browser**.
+- Use stored credentials **without seeing them**, personal credentials, or your own AD account.
+- Keep all other credentials in a multi-user vault with permissions based on directory groups.
+
+Decisions and their reasons are in [`docs/adr/`](adr/). This document describes the whole; it is updated in
+the same pull request as any change to it.
+
+## 1. Components
+
+```
+Browser: SvelteKit SPA (devices, vault, session tabs) · xterm.js · Guacamole JS client
+   │  HTTPS + WebSocket only — no route to the targets needed
+remotehub server (Rust, one binary: axum on tokio)
+   ├─ api        REST + WebSocket, RFC 9457 problems with ErrorCode, serves the SPA
+   ├─ directory  IdentityProvider: LDAP/AD (M1), OIDC/Entra ID (M4)
+   ├─ model      domain types and authorize() — the only place for permissions
+   ├─ vault      envelope encryption, KeyProvider (key file first)
+   ├─ gateway    ProtocolEngine: SSH (russh), RDP/VNC through the Guacamole tunnel
+   ├─ i18n       Message + Fluent catalogs for server-rendered text
+   └─ audit      append-only, hash-chained event log
+        │                                 │ internal Docker network, no published ports
+PostgreSQL (sqlx, migrations at start)    guacd 1.6 (own image with FreeRDP 3)
+```
+
+| Crate | Role |
+|---|---|
+| `crates/server` | Binary: configuration, HTTP/WebSocket API, sessions, static SPA |
+| `crates/model` | Domain types (folders, devices, credentials, grants) and `authorize()` |
+| `crates/vault` | Encryption of secrets, `KeyProvider`, credential storage |
+| `crates/directory` | `IdentityProvider` with the LDAP implementation |
+| `crates/gateway` | `ProtocolEngine`: SSH engine, Guacamole tunnel to guacd |
+| `crates/i18n` | `Message`, Fluent catalogs, locale negotiation |
+| `crates/kdbx` (M3) | KeePass import and emergency export, isolated because its dependency moves fast |
+
+Crates are created with the issue that first needs them.
+
+## 2. A connection, step by step
+
+1. The user clicks a device. The UI opens a WebSocket to `/api/sessions/{device}`.
+2. The server checks the session cookie and calls `authorize(user, Connect, device)`.
+3. It resolves the credentials according to the device's mode:
+   - **stored** — decrypted from the vault on the server (`connect` suffices, `reveal` is not needed);
+   - **ask** — entered by the user for this connection, never stored;
+   - **own AD account** — the sign-in password, kept encrypted with a key that only the user's cookie holds.
+4. The server starts the engine:
+   - **SSH:** russh connects, verifies the pinned host key, authenticates, opens a PTY. Only terminal
+     bytes and resize events cross the WebSocket; xterm.js renders them.
+   - **RDP/VNC:** the server opens a TCP connection to guacd, performs the Guacamole handshake
+     (`select → args → connect → ready`) and puts the credentials into `connect`. From then on it relays
+     Guacamole instructions between guacd and the browser, where the Guacamole JS client draws them.
+5. Start, end and outcome of the session are written to the audit log.
+
+The browser never talks to a target or to guacd, and never receives a stored password.
+
+## 3. Identity and permissions
+
+- **Sign-in (M1):** bind to AD via LDAPS as the user to verify the password; read attributes and all
+  nested groups through a service account from `tokenGroups` (fallback `LDAP_MATCHING_RULE_IN_CHAIN`).
+- **Identifiers:** users and groups are stored by `objectSid`/`objectGUID` (Entra object IDs later), never
+  by name, so renames do not change permissions.
+- **Sessions:** server-side in PostgreSQL; cookie HttpOnly, Secure, SameSite=Strict; CSRF protection.
+- **Break-glass:** local accounts (argon2id + TOTP), created only via CLI, work when AD is down.
+- **Permissions:** a folder tree holds devices and credentials. A grant gives an AD group or a user a role
+  on a folder or an entry: `list < connect < reveal < edit < manage`. Grants are inherited downwards and
+  only allow. `authorize()` is the single decision point and is tested table-driven.
+
+## 4. Vault
+
+- Own data model; KeePass files are only imported and written as emergency exports (ADR 0004).
+- Each entry version is encrypted with its own data key (XChaCha20-Poly1305). Associated data binds scheme,
+  entry, field and key version, so ciphertexts cannot be swapped between rows.
+- Data keys are wrapped by a versioned master key from a `KeyProvider` (first: a key file mounted as a Docker
+  secret; later Vault/OpenBao Transit, Azure Key Vault, PKCS#11). Rows record `scheme`, `kek_id` and
+  `kek_version` so keys can be rotated lazily.
+- The server must be able to decrypt stored credentials to inject them. That rules out zero knowledge for
+  shared entries; a personal end-to-end scheme (`e2e_user_v1`) is reserved for later.
+- Plaintext lives only in `secrecy`/`zeroize` types and never appears in logs, API responses (except the
+  audited `reveal`), environment variables or command lines. Core dumps are disabled.
+
+## 5. Protocol engines
+
+| Protocol | Engine | Browser | Recording (M5) |
+|---|---|---|---|
+| SSH | russh in `crates/gateway` | xterm.js | asciicast v2 on the server |
+| RDP | guacd 1.6, FreeRDP 3 | Guacamole JS client (vendored from guacamole-client 1.6.0) | `.guac` on the server |
+| VNC | guacd 1.6 | Guacamole JS client | `.guac` on the server |
+| HTTPS (later) | Chromium container shown through guacd | Guacamole JS client | `.guac` on the server |
+
+- guacd runs in its own container without published ports, as non-root, read-only, with resource limits
+  and a pinned version. It links GPL-licensed libvncclient and therefore stays a separate process.
+- guacd 1.6 authenticates RDP with NTLM only; Kerberos arrives with guacd 1.7 (GUACAMOLE-2057). Members of
+  *Protected Users* and domains without NTLM are not supported until then.
+- RDP certificates and SSH host keys are pinned on first use; a change aborts the connection.
+- All engines sit behind the trait `ProtocolEngine`, so an own RDP engine (IronRDP) can replace guacd later
+  without changing API or UI.
+
+## 6. Internationalisation
+
+English is the base locale, German the second; more can follow (ADR 0002).
+
+- **UI:** paraglide-js with `web/messages/{en,de}.json`, typed message functions.
+- **Server:** API errors are `ErrorCode`s with parameters, translated by the UI; server-rendered text
+  (exports, mails) uses Fluent catalogs via `Message`.
+- **Guards:** tests fail on words in components, missing or unused keys, mismatched placeholders, German
+  texts identical to English (unless allow-listed), error codes without messages, and Fluent catalogs whose
+  message IDs or variables differ between locales.
+
+## 7. Repository, development, operations
+
+- `crates/`, `web/`, `migrations/`, `deploy/`, `docs/`, `scripts/ci/`.
+- **Development** runs entirely in Docker (`deploy/compose.dev.yml`): PostgreSQL on `127.0.0.1:55440`, UI on
+  `127.0.0.1:5180`, the server rebuilt by watchexec, plus a test lab (Samba AD DC, SSH target; RDP and VNC
+  targets from M2) on the compose network.
+- **CI** runs locally (`scripts/ci/lokal.sh`) and reports the commit status `lokal`; `main` requires it.
+- **Operations (M2):** images on GHCR (`ghcr.io/hilman2/remotehub`, guacd image), an ops package with
+  compose file, install, update, backup and restore scripts; releases via `scripts/ci/release.sh`.
+
+## 8. Milestones
+
+| Milestone | Content |
+|---|---|
+| M0 Foundation | Workspace, local CI, development environment, SPA shell, i18n guards, ADRs |
+| M1 First connection | LDAP sign-in, sessions, break-glass, folders/devices/grants, vault core, SSH in the browser, audit log |
+| M2 RDP and VNC | guacd image, Guacamole tunnel, session tabs, clipboard, TOFU; first release 0.1.0 |
+| M3 Vault | Reveal with audit, history, personal vault, generator, TOTP fields, attachments, KDBX import and export |
+| M4 Identity | Entra ID via OIDC, second factor for directory sign-ins |
+| M5 Accountability | Session recording and playback, audit export, clipboard and file policies |
+
+Later ideas are GitHub issues with the label `backlog`.
+
+## 9. Looking left and right
+
+| Project | What we adopt | Why remotehub still exists |
+|---|---|---|
+| Apache Guacamole | guacd as RDP/VNC engine, its protocol and JS client | No vault; OIDC only via implicit flow; dated UI |
+| Warpgate | Reference for server-side IronRDP rendering and russh | A bastion without a password vault, folder permissions by AD group or KDBX |
+| Devolutions Server + Gateway | The feature set to aim for (credential injection, vault) | Proprietary |
+| JumpServer | — | SSO and rotation only in the enterprise edition |
+| Teleport | Smart-card emulation for passwordless RDP (later) | No vault; free edition restricted by license |
+| KeePass / KeePassXC | KDBX as import and emergency format | Single key per file, no per-entry permissions |
