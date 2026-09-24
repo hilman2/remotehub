@@ -100,6 +100,8 @@ cargo_run() { # tools script
     -e DATABASE_URL=postgres://ci:ci@db:5432/ci \
     -e REMOTEHUB_TEST_LDAP_URL=ldaps://dc.remotehub.test \
     -e REMOTEHUB_TEST_SSH_HOST=ssh-target \
+    -e REMOTEHUB_TEST_GUACD=guacd:4822 \
+    -e REMOTEHUB_TEST_DESKTOP_HOST=desktop-target \
     "$1" bash -euo pipefail -c "
       rsync -rlc --delete \\
         --exclude=/web/node_modules/ --exclude=/web/.svelte-kit/ \\

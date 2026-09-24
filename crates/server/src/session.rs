@@ -40,6 +40,9 @@ pub struct Session {
     /// The user's own SID (directory users only).
     #[serde(skip)]
     pub sid: Option<String>,
+    /// `userPrincipalName` (directory users only).
+    #[serde(skip)]
+    pub upn: Option<String>,
     /// Group SIDs from sign-in; they hold for the whole session.
     #[serde(skip)]
     pub groups: Vec<String>,
@@ -107,7 +110,7 @@ pub async fn lookup(
 ) -> Result<Option<Session>, sqlx::Error> {
     let token_hash = hash(token);
     let session: Option<Session> = sqlx::query_as(
-        "SELECT s.user_id, s.groups, u.username, u.display_name, u.kind, u.sid
+        "SELECT s.user_id, s.groups, u.username, u.display_name, u.kind, u.sid, u.upn
          FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = $1
            AND s.expires_at > now()

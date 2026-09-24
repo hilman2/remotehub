@@ -19,7 +19,7 @@ use crate::common::{ORIGIN, authed, send, sign_in_request, state};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-async fn serve(state: AppState) -> SocketAddr {
+pub async fn serve(state: AppState) -> SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let app = app(state, None);
@@ -96,14 +96,14 @@ async fn start(socket: &mut Socket, extra: Value) {
         .unwrap();
 }
 
-async fn create(app: &Router, token: &str, uri: &str, body: Value) -> String {
+pub async fn create(app: &Router, token: &str, uri: &str, body: Value) -> String {
     let response = send(app, authed("POST", uri, Some(body), token)).await;
     assert_eq!(response.status, 201, "{uri}: {}", response.json());
     response.json()["id"].as_str().unwrap().to_owned()
 }
 
 /// Alice's session and a folder for the devices.
-async fn setup(pool: PgPool) -> (AppState, Router, String, String) {
+pub async fn setup(pool: PgPool) -> (AppState, Router, String, String) {
     let state = state(pool);
     let app = app(state.clone(), None);
     let token = send(&app, sign_in_request("alice", "right"))

@@ -7,16 +7,27 @@
 	import { page } from '$app/state';
 	import { allows, loadTree, resetHostKey, type Device } from '$lib/api/catalog';
 	import { errorMessage } from '$lib/api/errors';
+	import DisplayView from '$lib/display/DisplayView.svelte';
+	import { failureOf, type Failure } from '$lib/display/tunnel';
 	import { m } from '$lib/paraglide/messages';
 	import TerminalView from '$lib/terminal/TerminalView.svelte';
 	import type { Credentials, ServerEvent } from '$lib/terminal/connection';
 
 	type Status =
 		| { kind: 'connecting' }
-		| { kind: 'connected'; fingerprint: string; pinned: boolean }
+		| { kind: 'connected'; fingerprint: string | null; pinned: boolean }
 		| { kind: 'closed'; exitStatus: number | null }
 		| { kind: 'lost' }
-		| { kind: 'error'; code: string; params: Record<string, unknown> };
+		| { kind: 'error'; code: string; params: Record<string, unknown> }
+		/** guacd ended an RDP or VNC session. */
+		| { kind: 'failed'; failure: Failure; detail: string };
+
+	const FAILURES: Record<Failure, () => string> = {
+		target: m.display_failed_target,
+		auth: m.display_failed_auth,
+		ended: m.display_ended,
+		failed: m.display_failed
+	};
 
 	let device = $state<Device | null>(null);
 	let error = $state<string | null>(null);
@@ -24,11 +35,12 @@
 	let username = $state('');
 	let password = $state('');
 	let status = $state<Status>({ kind: 'connecting' });
-	// Remounting the terminal starts a new connection.
+	// Remounting the view starts a new connection.
 	let attempt = $state(0);
 
+	const graphical = $derived(device?.protocol === 'rdp' || device?.protocol === 'vnc');
 	const needsCredentials = $derived(device?.auth_mode === 'ask' && credentials === null);
-	const running = $derived(device !== null && device.protocol === 'ssh' && !needsCredentials);
+	const running = $derived(device !== null && !needsCredentials);
 
 	$effect(() => {
 		const id = page.params.id;
@@ -46,14 +58,21 @@
 		if (device) document.title = `${device.name} · remotehub`;
 	});
 
-	function onevent(event: ServerEvent) {
+	function onevent(event: ServerEvent | { type: 'connected' }) {
 		if (event.type === 'connected') {
-			status = { kind: 'connected', fingerprint: event.host_key_fingerprint, pinned: event.pinned };
+			status =
+				'host_key_fingerprint' in event
+					? { kind: 'connected', fingerprint: event.host_key_fingerprint, pinned: event.pinned }
+					: { kind: 'connected', fingerprint: null, pinned: false };
 		} else if (event.type === 'closed') {
 			status = { kind: 'closed', exitStatus: event.exit_status };
 		} else {
 			status = { kind: 'error', code: event.code, params: event.params };
 		}
+	}
+
+	function onfailure(code: number, detail: string) {
+		status = { kind: 'failed', failure: failureOf(code), detail };
 	}
 
 	function onend() {
@@ -91,8 +110,6 @@
 		<CircleAlert size={16} class="text-critical" aria-hidden="true" />
 		{error}
 	</p>
-{:else if device && device.protocol !== 'ssh'}
-	<p class="text-sm text-ink-2">{m.terminal_ssh_only()}</p>
 {:else if device && needsCredentials}
 	<form
 		class="mx-auto mt-8 w-full max-w-sm rounded-card border border-line bg-surface p-6"
@@ -101,11 +118,14 @@
 	>
 		<h1 class="text-lg font-semibold">{m.terminal_credentials_title({ name: device.name })}</h1>
 		<p class="mt-1 text-sm text-ink-2">{m.terminal_credentials_hint()}</p>
-		<label class="mt-4 block text-sm font-medium" for="target-username">{m.field_username()}</label>
+		<!-- VNC servers mostly know only a password. -->
+		<label class="mt-4 block text-sm font-medium" for="target-username">
+			{device.protocol === 'vnc' ? m.credentials_username_optional() : m.field_username()}
+		</label>
 		<input
 			id="target-username"
 			class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
-			required
+			required={device.protocol !== 'vnc'}
 			spellcheck="false"
 			bind:value={username}
 		/>
@@ -135,9 +155,13 @@
 					{m.terminal_connecting({ name: device.name })}
 				{:else if status.kind === 'connected'}
 					<CircleCheck size={15} class="text-ok" aria-hidden="true" />
-					{status.pinned
-						? m.terminal_pinned({ fingerprint: status.fingerprint })
-						: m.terminal_connected({ fingerprint: status.fingerprint })}
+					{#if status.fingerprint === null}
+						{m.display_connected()}
+					{:else if status.pinned}
+						{m.terminal_pinned({ fingerprint: status.fingerprint })}
+					{:else}
+						{m.terminal_connected({ fingerprint: status.fingerprint })}
+					{/if}
 				{:else if status.kind === 'closed'}
 					{status.exitStatus === null
 						? m.terminal_closed()
@@ -145,6 +169,9 @@
 				{:else if status.kind === 'lost'}
 					<CircleAlert size={15} class="text-critical" aria-hidden="true" />
 					{m.terminal_lost()}
+				{:else if status.kind === 'failed'}
+					<CircleAlert size={15} class="text-critical" aria-hidden="true" />
+					{FAILURES[status.failure]()}
 				{:else}
 					<CircleAlert size={15} class="text-critical" aria-hidden="true" />
 					{errorMessage(status.code)}
@@ -157,6 +184,11 @@
 				</button>
 			{/if}
 		</div>
+
+		{#if status.kind === 'failed' && status.detail}
+			<!-- guacd's own words, for the administrator. -->
+			<p class="text-xs text-ink-3">{m.display_detail({ detail: status.detail })}</p>
+		{/if}
 
 		{#if status.kind === 'error' && status.code === 'host_key_changed'}
 			<div class="rounded-card border border-critical/50 bg-surface p-4 text-sm" role="alert">
@@ -181,7 +213,18 @@
 		{#if running}
 			<div class="min-h-0 flex-1">
 				{#key attempt}
-					<TerminalView deviceId={device.id} {credentials} {onevent} {onend} />
+					{#if graphical}
+						<DisplayView
+							deviceId={device.id}
+							name={device.name}
+							{credentials}
+							{onevent}
+							{onfailure}
+							{onend}
+						/>
+					{:else}
+						<TerminalView deviceId={device.id} {credentials} {onevent} {onend} />
+					{/if}
 				{/key}
 			</div>
 		{/if}

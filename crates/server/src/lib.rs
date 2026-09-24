@@ -48,6 +48,8 @@ pub struct Settings {
     pub admin_groups: Vec<String>,
     /// Whether devices may be opened with the own directory account (ADR 0005).
     pub own_account_connections: bool,
+    /// guacd for RDP and VNC (`host:port`).
+    pub guacd: String,
 }
 
 impl AppState {

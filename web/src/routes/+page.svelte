@@ -368,28 +368,16 @@
 				</p>
 				<div class="mt-5 flex flex-wrap gap-2">
 					{#if allows(device.role, 'connect')}
-						{#if device.protocol === 'ssh'}
-							<!-- A browser tab per session: several sessions side by side for free. -->
-							<a
-								href={resolve('/connect/[id]', { id: device.id })}
-								target="_blank"
-								rel="noopener"
-								class="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink"
-							>
-								<Plug size={16} aria-hidden="true" />
-								{m.device_connect()}
-							</a>
-						{:else}
-							<button
-								type="button"
-								disabled
-								title={m.terminal_ssh_only()}
-								class="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink disabled:opacity-50"
-							>
-								<Plug size={16} aria-hidden="true" />
-								{m.device_connect()}
-							</button>
-						{/if}
+						<!-- A browser tab per session: several sessions side by side for free. -->
+						<a
+							href={resolve('/connect/[id]', { id: device.id })}
+							target="_blank"
+							rel="noopener"
+							class="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink"
+						>
+							<Plug size={16} aria-hidden="true" />
+							{m.device_connect()}
+						</a>
 					{/if}
 					{#if allows(device.role, 'edit')}
 						<button

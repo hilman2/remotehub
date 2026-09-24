@@ -138,7 +138,6 @@
 	"device_host_key": "Host-Schlüssel",
 	"device_host_key_pending": "Wird bei der ersten Verbindung hinterlegt",
 	"device_forget_host_key": "Vergessen",
-	"terminal_ssh_only": "Im Browser geht bisher nur SSH; Remotedesktop und VNC folgen.",
 	"terminal_connecting": "Verbinde mit {name} …",
 	"terminal_connected": "Verbunden · Host-Schlüssel {fingerprint}",
 	"terminal_pinned": "Erste Verbindung: Der Host-Schlüssel {fingerprint} ist jetzt hinterlegt.",
@@ -177,5 +176,13 @@
 	"error_field_passphrase": "Die Passphrase des Schlüssels fehlt oder ist falsch.",
 	"error_field_certificate": "Das Zertifikat ist kein OpenSSH-Benutzerzertifikat zu diesem Schlüssel.",
 	"field_load_private_key": "Schlüssel aus Datei laden",
-	"field_load_certificate": "Zertifikat aus Datei laden"
+	"field_load_certificate": "Zertifikat aus Datei laden",
+	"display_label": "Entfernter Desktop von {name} — zum Tippen hineinklicken",
+	"display_connected": "Verbunden",
+	"display_failed_target": "Das Gerät war nicht erreichbar, hat die Anmeldung abgelehnt oder ein unerwartetes Zertifikat vorgelegt.",
+	"display_failed_auth": "Das Gerät hat die Anmeldung abgelehnt.",
+	"display_ended": "Die Sitzung wurde auf dem Gerät beendet.",
+	"display_failed": "Die Verbindung ist fehlgeschlagen.",
+	"display_detail": "Einzelheiten: {detail}",
+	"credentials_username_optional": "Benutzername (falls das Gerät einen verlangt)"
 }
