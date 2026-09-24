@@ -2,6 +2,9 @@
 //! caller's right to connect to it, the WebSocket's origin, the credentials
 //! resolved on the server, and the audit entries.
 
+use std::time::Duration;
+
+use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket};
 use axum::http::HeaderMap;
 use axum::http::header::ORIGIN;
@@ -140,6 +143,48 @@ pub async fn own_account(
         domain: String::new(),
         login: Login::Password(SecretString::from(password)),
     }))
+}
+
+/// How long a certificate from the SSH CA is valid. It only has to last
+/// until the target has accepted it; the session runs on after that.
+const CERTIFICATE_VALIDITY: Duration = Duration::from_secs(5 * 60);
+
+/// For the sign-in mode `certificate`: a fresh key with a certificate from
+/// remotehub's SSH CA, for the signed-in user as principal and login name.
+pub fn certificate(
+    state: &AppState,
+    session: &Session,
+    target: &Target,
+) -> Result<Credentials, Problem> {
+    let ca = state
+        .settings
+        .ssh_ca
+        .as_ref()
+        .ok_or(Problem::new(ErrorCode::SshCaUnavailable))?;
+    // The target logs the key ID with every sign-in.
+    let key_id = format!("remotehub {} device {}", session.username, target.id);
+    let key = ca
+        .issue(&session.username, &key_id, CERTIFICATE_VALIDITY)
+        .map_err(|error| {
+            tracing::error!(%error, "cannot issue an SSH certificate");
+            Problem::new(ErrorCode::Internal)
+        })?;
+    Ok(Credentials {
+        username: session.username.clone(),
+        domain: String::new(),
+        login: Login::Key(Box::new(key)),
+    })
+}
+
+/// `GET /api/ssh-ca.pub`: the SSH CA's public key for `TrustedUserCAKeys`
+/// on the targets. It is public, so no session is needed to fetch it.
+pub async fn ssh_ca_public_key(State(state): State<AppState>) -> Result<String, Problem> {
+    state
+        .settings
+        .ssh_ca
+        .as_ref()
+        .map(|ca| format!("{}\n", ca.public_key()))
+        .ok_or(Problem::new(ErrorCode::NotFound))
 }
 
 /// A sealed field of the credential's current version as text.

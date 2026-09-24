@@ -1,7 +1,7 @@
 <script lang="ts">
 	import {
-		AUTH_MODES,
 		DEFAULT_PORTS,
+		authModesFor,
 		KEYBOARD_LAYOUTS,
 		PROTOCOLS,
 		allows,
@@ -59,6 +59,7 @@
 	function changeProtocol(next: Protocol) {
 		if (port === DEFAULT_PORTS[protocol]) port = DEFAULT_PORTS[next];
 		protocol = next;
+		if (!authModesFor(next).includes(authMode)) authMode = 'ask';
 	}
 
 	function submit(event: SubmitEvent) {
@@ -141,12 +142,17 @@
 
 	<label class={label} for="device-auth">{m.field_auth_mode()}</label>
 	<select id="device-auth" class={field} bind:value={authMode}>
-		{#each AUTH_MODES as mode (mode)}
+		{#each authModesFor(protocol) as mode (mode)}
 			<option value={mode} disabled={mode === 'stored' && usable.length === 0}>
 				{AUTH_MODE_LABELS[mode]()}
 			</option>
 		{/each}
 	</select>
+	{#if authMode === 'certificate'}
+		<p class="mt-1 text-xs break-words text-ink-3">
+			{m.auth_certificate_hint({ url: new URL('/api/ssh-ca.pub', window.location.href).href })}
+		</p>
+	{/if}
 
 	{#if authMode === 'stored'}
 		<label class={label} for="device-credential">{m.field_credential()}</label>

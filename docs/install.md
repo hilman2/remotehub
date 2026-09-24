@@ -47,13 +47,18 @@ After a few seconds all three services are up, and remotehub reports `healthy`. 
 |---|---|---|
 | `master_key` | The key that encrypts every stored credential. | 65532, 0400 |
 | `db_password` | The database password, read by PostgreSQL and remotehub. | 65532:999, 0440 |
+| `ssh_ca_key` | The key of remotehub's SSH certificate authority. | 65532, 0400 |
 | `ldap_bind_password` | The directory service account's password. Empty until you fill it in. | 65532, 0400 |
 
 remotehub runs as user 65532 and PostgreSQL as 999, so the files belong to them; `secrets/` itself is open
 to root only. Keep these owners and modes when you edit a file, e.g. with `sudo tee secrets/ldap_bind_password`.
 
 Without `master_key`, the credentials in the database cannot be read by anyone. Keep a copy of it apart from
-the database backups.
+the database backups. The same goes for `ssh_ca_key`: a new one means every device must trust the new
+public key.
+
+An installation from 0.1.0 has no `ssh_ca_key` yet; running `sudo sh init.sh` again creates it and keeps the
+other files.
 
 ## Reverse proxy
 
@@ -122,6 +127,21 @@ sudo docker compose exec remotehub remotehub break-glass create emergency
 
 Its password and TOTP secret are shown only this once. Keep them offline, e.g. in a safe. It signs in at
 `/sign-in/break-glass`.
+
+## Sign in to SSH devices without stored passwords
+
+A device set to sign in with "A certificate from remotehub" needs no credential. At every connection
+remotehub signs a fresh key for the user's name, valid for five minutes. The device accepts it once its
+sshd trusts remotehub's certificate authority:
+
+```bash
+curl -fsS https://remotehub.example.com/api/ssh-ca.pub | sudo tee /etc/ssh/remotehub_ca.pub
+echo 'TrustedUserCAKeys /etc/ssh/remotehub_ca.pub' | sudo tee /etc/ssh/sshd_config.d/remotehub.conf
+sudo systemctl reload ssh
+```
+
+The certificate's principal is the remotehub user name, e.g. `alice`, and the device needs an account of that
+name. The target's log names the key as `remotehub <user> device <id>`.
 
 ## Back up and restore
 

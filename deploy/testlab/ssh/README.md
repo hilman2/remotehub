@@ -6,6 +6,8 @@
 - Key `tester_ed25519_cert` is **not** in `authorized_keys`; it only gets in with its certificate
   `tester_ed25519_cert-cert.pub`, signed by the test user CA `user_ca.pub` (principal `tester`, valid until
   2046), which the target trusts (`TrustedUserCAKeys`). The CA's private key was deleted after signing.
+- User `alice` has neither password nor key. She gets in only with a certificate from `remotehub_ca`, the
+  test key for remotehub's own SSH CA (`REMOTEHUB_SSH_CA_KEY_FILE`), which the target trusts as well.
 - Password, public-key, certificate and keyboard-interactive authentication are enabled.
 - Host keys are generated when the image is built and stay the same for the image's lifetime.
 

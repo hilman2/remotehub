@@ -43,6 +43,9 @@ pub struct Config {
     /// File with the vault's master keys (a Docker secret), never an
     /// environment variable.
     pub master_key_file: PathBuf,
+    /// File with the SSH CA's private key (a Docker secret); without it no
+    /// device signs in with a certificate.
+    pub ssh_ca_key_file: Option<PathBuf>,
     /// Keep the sign-in password, encrypted with a key only in the user's
     /// cookie, so devices can be opened with the own directory account.
     pub own_account_connections: bool,
@@ -170,6 +173,10 @@ impl Config {
                 .filter(|p| !p.is_empty())
                 .ok_or(ConfigError::MissingFile("REMOTEHUB_MASTER_KEY_FILE"))?,
         );
+        // Like the master key: only as a path.
+        let ssh_ca_key_file = lookup("REMOTEHUB_SSH_CA_KEY_FILE")
+            .filter(|p| !p.is_empty())
+            .map(PathBuf::from);
 
         let admin_groups = setting("REMOTEHUB_ADMIN_GROUPS")?
             .map(|list| {
@@ -225,6 +232,7 @@ impl Config {
             session,
             ldap,
             master_key_file,
+            ssh_ca_key_file,
             own_account_connections,
             admin_groups,
             guacd,
@@ -302,6 +310,7 @@ impl fmt::Debug for Config {
             .field("session", &self.session)
             .field("ldap", &self.ldap.as_ref().map(|l| &l.url))
             .field("master_key_file", &self.master_key_file)
+            .field("ssh_ca_key_file", &self.ssh_ca_key_file)
             .field("admin_groups", &self.admin_groups)
             .field("guacd", &self.guacd)
             .field("rdp_keyboard_layout", &self.rdp_keyboard_layout)

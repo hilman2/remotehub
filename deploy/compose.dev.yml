@@ -64,6 +64,8 @@ services:
       REMOTEHUB_PUBLIC_URL: http://localhost:5180
       # Development key, public on purpose (see the file).
       REMOTEHUB_MASTER_KEY_FILE: /work/deploy/dev/master.key
+      # The lab's CA key, which the SSH target trusts (deploy/testlab/ssh).
+      REMOTEHUB_SSH_CA_KEY_FILE: /work/deploy/testlab/ssh/remotehub_ca
       REMOTEHUB_LDAP_URL: ldaps://dc.remotehub.test
       REMOTEHUB_LDAP_CA_FILE: /work/deploy/testlab/dc/tls/ca.crt
       REMOTEHUB_LDAP_BIND_DN: svc-remotehub@remotehub.test

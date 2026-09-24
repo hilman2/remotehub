@@ -11,8 +11,13 @@ export type Protocol = 'ssh' | 'rdp' | 'vnc';
 export const PROTOCOLS: readonly Protocol[] = ['ssh', 'rdp', 'vnc'];
 export const DEFAULT_PORTS: Record<Protocol, number> = { ssh: 22, rdp: 3389, vnc: 5900 };
 
-export type AuthMode = 'stored' | 'ask' | 'own';
-export const AUTH_MODES: readonly AuthMode[] = ['stored', 'ask', 'own'];
+export type AuthMode = 'stored' | 'ask' | 'own' | 'certificate';
+export const AUTH_MODES: readonly AuthMode[] = ['stored', 'ask', 'own', 'certificate'];
+
+/** Sign-in modes a protocol offers: certificates are SSH's own. */
+export function authModesFor(protocol: Protocol): readonly AuthMode[] {
+	return protocol === 'ssh' ? AUTH_MODES : AUTH_MODES.filter((mode) => mode !== 'certificate');
+}
 
 export type ObjectKind = 'folder' | 'device' | 'credential';
 

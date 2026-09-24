@@ -16,7 +16,12 @@ RUN cat /tmp/keys/*.pub >/home/tester/.ssh/authorized_keys \
   && chown -R tester:tester /home/tester/.ssh \
   && chmod 700 /home/tester/.ssh \
   && chmod 600 /home/tester/.ssh/authorized_keys
-COPY user_ca.pub /etc/ssh/remotehub-testlab-user-ca.pub
+# alice has no password and no key: she signs in only with a certificate
+# from remotehub's CA (remotehub_ca, principal "alice").
+RUN useradd --create-home --shell /bin/bash alice \
+  && usermod --password '*' alice
+COPY user_ca.pub remotehub_ca.pub /tmp/cas/
+RUN cat /tmp/cas/*.pub >/etc/ssh/remotehub-testlab-user-ca.pub && rm -rf /tmp/cas
 COPY sshd.conf /etc/ssh/sshd_config.d/remotehub-testlab.conf
 
 EXPOSE 22

@@ -33,6 +33,7 @@ pub fn settings() -> Settings {
         guacd: std::env::var("REMOTEHUB_TEST_GUACD").unwrap_or_else(|_| "guacd:4822".to_owned()),
         rdp_keyboard_layout: "en-us-qwerty".to_owned(),
         trusted_proxies: Vec::new(),
+        ssh_ca: None,
     }
 }
 

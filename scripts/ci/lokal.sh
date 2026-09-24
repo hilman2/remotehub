@@ -258,6 +258,7 @@ part_e2e() { # tools
     -e REMOTEHUB_DATABASE_URL=postgres://ci:ci@db-e2e:5432/e2e \
     -e REMOTEHUB_PUBLIC_URL=http://localhost:8080 \
     -e REMOTEHUB_MASTER_KEY_FILE="${CI_SRC}/deploy/dev/master.key" \
+    -e REMOTEHUB_SSH_CA_KEY_FILE="${CI_SRC}/deploy/testlab/ssh/remotehub_ca" \
     -e REMOTEHUB_WEB_DIR="${CI_SRC}/web/build" \
     -e REMOTEHUB_LDAP_URL=ldaps://dc.remotehub.test \
     -e REMOTEHUB_LDAP_CA_FILE="${CI_SRC}/deploy/testlab/dc/tls/ca.crt" \

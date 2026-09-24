@@ -23,6 +23,7 @@ services:
       REMOTEHUB_DATABASE_URL: postgres://remotehub@db:5432/remotehub
       REMOTEHUB_DATABASE_PASSWORD_FILE: /run/secrets/db_password
       REMOTEHUB_MASTER_KEY_FILE: /run/secrets/master_key
+      REMOTEHUB_SSH_CA_KEY_FILE: /run/secrets/ssh_ca_key
       REMOTEHUB_GUACD: guacd:4822
       REMOTEHUB_LOG_FORMAT: ${REMOTEHUB_LOG_FORMAT:-text}
       REMOTEHUB_ADMIN_GROUPS: ${REMOTEHUB_ADMIN_GROUPS:-}
@@ -42,7 +43,7 @@ services:
       # The reverse proxy on this host reaches remotehub through the gateway
       # of the network below; it names the client in X-Forwarded-For.
       REMOTEHUB_TRUSTED_PROXIES: ${REMOTEHUB_GATEWAY:-10.213.213.1}
-    secrets: [db_password, master_key, ldap_bind_password]
+    secrets: [db_password, master_key, ssh_ca_key, ldap_bind_password]
     volumes:
       - ./certs:/run/certs:ro
     ports:
@@ -105,5 +106,7 @@ secrets:
     file: ./secrets/db_password
   master_key:
     file: ./secrets/master_key
+  ssh_ca_key:
+    file: ./secrets/ssh_ca_key
   ldap_bind_password:
     file: ./secrets/ldap_bind_password

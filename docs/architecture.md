@@ -121,6 +121,10 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 | VNC | guacd 1.6 | Guacamole JS client | `.guac` on the server |
 | HTTPS (later) | Chromium container shown through guacd | Guacamole JS client | `.guac` on the server |
 
+- SSH signs in with a stored password or key, asked credentials, the own account, or a certificate from
+  remotehub's own CA (`crates/gateway/src/ssh_ca.rs`): a fresh Ed25519 key per connection, signed for the
+  user's name as principal and valid for five minutes. Targets trust the CA's public key
+  (`/api/ssh-ca.pub`); the CA key is a file like the master key.
 - guacd runs in its own container without published ports, as non-root, read-only, with resource limits
   and a pinned version. It links GPL-licensed libvncclient and therefore stays a separate process.
 - The guacd image (`deploy/guacd`) is built from the Apache source release (checksum pinned) against

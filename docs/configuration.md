@@ -66,6 +66,7 @@ Without `REMOTEHUB_LDAP_URL`, only break-glass accounts can sign in.
 |---|---|---|
 | `REMOTEHUB_OWN_ACCOUNT_CONNECTIONS` | `true` | Keep the sign-in password, encrypted with a key held only in the user's cookie, so devices can be opened with the user's own directory account. |
 | `REMOTEHUB_GUACD` | `guacd:4822` | guacd for RDP and VNC, as `host:port`. |
+| `REMOTEHUB_SSH_CA_KEY_FILE` | – | Path of the SSH CA's private key (Ed25519, OpenSSH format, from `remotehub generate-ssh-ca`). Only as a path. With it, SSH devices can sign in with a certificate, and `/api/ssh-ca.pub` serves the public key. |
 | `REMOTEHUB_RDP_KEYBOARD_LAYOUT` | `en-us-qwerty` | Keyboard layout of RDP sessions for devices without their own. |
 
 Keyboard layouts: `cs-cz-qwertz`, `da-dk-qwerty`, `de-ch-qwertz`, `de-de-qwertz`, `en-gb-qwerty`,
@@ -84,6 +85,7 @@ verify-audit`.
 | Command | Does |
 |---|---|
 | `generate-key [--version N]` | Prints a new line for the master key file. |
+| `generate-ssh-ca` | Prints a new SSH CA key for `REMOTEHUB_SSH_CA_KEY_FILE`. |
 | `break-glass create NAME` | Creates a local emergency account and prints its password and TOTP secret once. |
 | `break-glass reset NAME` | Replaces both; the account's open sessions end. |
 | `break-glass delete NAME` | Deletes the account. |

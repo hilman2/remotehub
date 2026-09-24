@@ -95,6 +95,17 @@ impl SshKey {
     pub fn has_certificate(&self) -> bool {
         self.certificate.is_some()
     }
+
+    pub(crate) fn with_certificate(key: Arc<PrivateKey>, certificate: Certificate) -> SshKey {
+        SshKey {
+            key,
+            certificate: Some(certificate),
+        }
+    }
+
+    pub fn certificate(&self) -> Option<&Certificate> {
+        self.certificate.as_ref()
+    }
 }
 
 /// An unreadable key that at least has the armour of one is probably
