@@ -7,6 +7,7 @@
 	import { page } from '$app/state';
 	import favicon from '$lib/assets/favicon.svg';
 	import LocaleSwitch from '$lib/components/LocaleSwitch.svelte';
+	import Logo from '$lib/components/Logo.svelte';
 	import ServerStatus from '$lib/components/ServerStatus.svelte';
 	import ThemeSwitch from '$lib/components/ThemeSwitch.svelte';
 	import { getLocale } from '$lib/i18n';
@@ -16,6 +17,32 @@
 	let { children } = $props();
 
 	const signInPage = $derived(page.url.pathname.startsWith(resolve('/sign-in')));
+	// The devices page and sessions fill the window and scroll inside; the
+	// other pages sit in a column and scroll as a whole.
+	const fullBleed = $derived(
+		page.url.pathname === resolve('/') || page.url.pathname.startsWith(`${resolve('/connect')}/`)
+	);
+
+	const links = $derived([
+		{ href: resolve('/'), label: m.nav_devices },
+		{ href: resolve('/vault'), label: m.nav_vault },
+		{ href: resolve('/requests'), label: m.nav_requests },
+		...(session.user?.admin
+			? [
+					{ href: resolve('/connectors'), label: m.nav_connectors },
+					{ href: resolve('/audit'), label: m.nav_audit }
+				]
+			: [])
+	]);
+
+	/** Up to two letters for the avatar: "Alice Admin" → "AA". */
+	const initials = (name: string) =>
+		name
+			.split(/\s+/)
+			.filter(Boolean)
+			.slice(0, 2)
+			.map((word) => word[0].toUpperCase())
+			.join('');
 
 	$effect(() => {
 		document.documentElement.lang = getLocale();
@@ -52,62 +79,40 @@
 		{m.skip_to_content()}
 	</a>
 
-	<div class="flex min-h-dvh flex-col">
-		<header class="sticky top-0 z-10 border-b border-line bg-page/85 backdrop-blur">
-			<div class="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4 sm:px-6">
-				<a href={resolve('/')} class="flex items-center gap-2 font-semibold tracking-tight">
-					<img src={favicon} alt="" class="size-6" />
-					remotehub
+	<div class="flex flex-col {fullBleed ? 'h-dvh' : 'min-h-dvh'}">
+		<header class="sticky top-0 z-10 border-b border-line bg-sunken/90 backdrop-blur">
+			<div class="flex h-15 items-center gap-7 px-4 sm:px-6">
+				<a href={resolve('/')} class="flex items-center gap-2.5">
+					<Logo />
+					<span class="font-display text-lg font-bold tracking-tight">remotehub</span>
 				</a>
 				<nav class="flex items-center gap-1 text-sm text-ink-2" aria-label={m.nav_label()}>
-					<a
-						href={resolve('/')}
-						class="rounded-md px-2.5 py-1.5 hover:bg-surface-2 hover:text-ink aria-[current=page]:text-ink"
-						aria-current={page.url.pathname === resolve('/') ? 'page' : undefined}
-					>
-						{m.nav_devices()}
-					</a>
-					<a
-						href={resolve('/vault')}
-						class="rounded-md px-2.5 py-1.5 hover:bg-surface-2 hover:text-ink aria-[current=page]:text-ink"
-						aria-current={page.url.pathname === resolve('/vault') ? 'page' : undefined}
-					>
-						{m.nav_vault()}
-					</a>
-					<a
-						href={resolve('/requests')}
-						class="rounded-md px-2.5 py-1.5 hover:bg-surface-2 hover:text-ink aria-[current=page]:text-ink"
-						aria-current={page.url.pathname === resolve('/requests') ? 'page' : undefined}
-					>
-						{m.nav_requests()}
-					</a>
-					{#if session.user.admin}
+					{#each links as link (link.href)}
 						<a
-							href={resolve('/connectors')}
-							class="rounded-md px-2.5 py-1.5 hover:bg-surface-2 hover:text-ink aria-[current=page]:text-ink"
-							aria-current={page.url.pathname === resolve('/connectors') ? 'page' : undefined}
+							href={link.href}
+							class="rounded-lg px-3 py-2 hover:bg-surface-2 hover:text-ink aria-[current=page]:bg-surface-2 aria-[current=page]:font-medium aria-[current=page]:text-ink"
+							aria-current={page.url.pathname === link.href ? 'page' : undefined}
 						>
-							{m.nav_connectors()}
+							{link.label()}
 						</a>
-						<a
-							href={resolve('/audit')}
-							class="rounded-md px-2.5 py-1.5 hover:bg-surface-2 hover:text-ink aria-[current=page]:text-ink"
-							aria-current={page.url.pathname === resolve('/audit') ? 'page' : undefined}
-						>
-							{m.nav_audit()}
-						</a>
-					{/if}
+					{/each}
 				</nav>
 				<div class="ml-auto flex items-center gap-2">
 					<span
-						class="hidden text-sm text-ink-2 md:inline"
+						class="hidden h-9 items-center gap-2.5 rounded-full border border-line bg-surface py-1 pr-3.5 pl-1 text-sm md:inline-flex"
 						title={m.signed_in_as({ name: session.user.username })}
 					>
+						<span
+							class="flex size-7 items-center justify-center rounded-full bg-surface-2 text-xs font-semibold"
+							aria-hidden="true"
+						>
+							{initials(session.user.display_name)}
+						</span>
 						{session.user.display_name}
 					</span>
 					<button
 						type="button"
-						class="rounded-lg border border-line bg-surface p-1.5 text-ink-2 hover:text-ink"
+						class="rounded-lg border border-line bg-surface p-2 text-ink-2 hover:text-ink"
 						title={m.sign_out()}
 						onclick={leave}
 					>
@@ -130,12 +135,18 @@
 			</div>
 		{/if}
 
-		<main id="main" class="mx-auto w-full max-w-7xl flex-1 px-4 pt-8 pb-16 sm:px-6">
-			{@render children()}
-		</main>
+		{#if fullBleed}
+			<main id="main" class="flex min-h-0 flex-1 flex-col">
+				{@render children()}
+			</main>
+		{:else}
+			<main id="main" class="mx-auto w-full max-w-7xl flex-1 px-4 pt-10 pb-16 sm:px-8">
+				{@render children()}
+			</main>
+		{/if}
 
-		<footer class="border-t border-line">
-			<div class="mx-auto max-w-7xl px-4 py-3 sm:px-6">
+		<footer class="border-t border-line bg-sunken">
+			<div class="px-4 py-2.5 sm:px-6">
 				<ServerStatus />
 			</div>
 		</footer>

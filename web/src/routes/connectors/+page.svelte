@@ -1,6 +1,7 @@
 <script lang="ts">
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import Plus from '@lucide/svelte/icons/plus';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import {
 		createConnector,
 		deleteConnector,
@@ -86,8 +87,7 @@
 
 <div class="flex flex-wrap items-start justify-between gap-4">
 	<div>
-		<h1 class="text-2xl font-semibold tracking-tight">{m.connectors_title()}</h1>
-		<p class="mt-1 max-w-2xl text-sm text-ink-2">{m.connectors_intro()}</p>
+		<h1 class="text-4xl font-semibold">{m.connectors_title()}</h1>
 	</div>
 	{#if session.user?.admin}
 		<button
@@ -130,7 +130,14 @@
 					<tr class="border-b border-line last:border-0">
 						<td class="px-4 py-2">{connector.name}</td>
 						<td class="px-4 py-2">
-							{connector.online ? m.connector_online() : m.connector_offline()}
+							<span class="inline-flex items-center gap-2">
+								{#if connector.online}
+									<span class="size-2 rounded-full bg-ok" aria-hidden="true"></span>
+								{:else}
+									<TriangleAlert size={13} class="text-warning" aria-hidden="true" />
+								{/if}
+								{connector.online ? m.connector_online() : m.connector_offline()}
+							</span>
 						</td>
 						<td class="px-4 py-2 text-ink-2 tabular-nums">
 							{m.connectors_streams({ open: connector.streams, total: connector.streams_carried })}
@@ -167,7 +174,6 @@
 				maxlength="200"
 				bind:value={name}
 			/>
-			<p class="mt-1 text-xs text-ink-3">{m.connectors_name_hint()}</p>
 			{#if dialogError}
 				<p class="mt-3 text-sm text-critical" role="alert">{dialogError}</p>
 			{/if}

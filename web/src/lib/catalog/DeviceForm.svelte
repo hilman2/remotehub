@@ -131,12 +131,7 @@
 
 	{#if connectors.length > 0 || connectorId}
 		<label class={label} for="device-connector">{m.field_connector()}</label>
-		<select
-			id="device-connector"
-			class={field}
-			bind:value={connectorId}
-			aria-describedby="device-connector-hint"
-		>
+		<select id="device-connector" class={field} bind:value={connectorId}>
 			<option value="">{m.connector_direct()}</option>
 			{#each connectors as connector (connector.id)}
 				<option value={connector.id}>{connector.name}</option>
@@ -146,23 +141,16 @@
 				<option value={connectorId}>{connectorId}</option>
 			{/if}
 		</select>
-		<p id="device-connector-hint" class="mt-1 text-xs text-ink-3">{m.connector_hint()}</p>
 	{/if}
 
 	{#if protocol === 'rdp'}
 		<label class={label} for="device-keyboard">{m.field_keyboard_layout()}</label>
-		<select
-			id="device-keyboard"
-			class={field}
-			bind:value={keyboardLayout}
-			aria-describedby="device-keyboard-hint"
-		>
+		<select id="device-keyboard" class={field} bind:value={keyboardLayout}>
 			<option value="">{m.keyboard_layout_default()}</option>
 			{#each layouts as { layout, label: text } (layout)}
 				<option value={layout}>{text}</option>
 			{/each}
 		</select>
-		<p id="device-keyboard-hint" class="mt-1 text-xs text-ink-3">{m.keyboard_layout_hint()}</p>
 	{/if}
 
 	<label class={label} for="device-auth">{m.field_auth_mode()}</label>

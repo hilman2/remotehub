@@ -2,13 +2,11 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import FolderClosed from '@lucide/svelte/icons/folder-closed';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
-	import Globe from '@lucide/svelte/icons/globe';
 	import KeyRound from '@lucide/svelte/icons/key-round';
-	import Monitor from '@lucide/svelte/icons/monitor';
-	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
 	import type { ObjectKind } from '$lib/api/catalog';
 	import { m } from '$lib/paraglide/messages';
 	import FolderNodeView from './FolderNodeView.svelte';
+	import ProtocolChip from './ProtocolChip.svelte';
 	import type { FolderNode } from './tree';
 
 	let {
@@ -31,7 +29,7 @@
 	const isSelected = (kind: ObjectKind, id: string) =>
 		selected?.kind === kind && selected.id === id;
 	const row =
-		'flex w-full min-w-0 items-center gap-2 rounded-md py-1 pl-1 pr-2 text-left text-sm hover:bg-surface-2 data-[selected=true]:bg-surface-2 data-[selected=true]:font-medium';
+		'flex w-full min-w-0 items-center gap-2.5 rounded-lg py-1.5 pl-1.5 pr-2.5 text-left text-sm text-ink-2 hover:bg-surface-2 hover:text-ink data-[selected=true]:bg-surface-2 data-[selected=true]:text-ink data-[selected=true]:ring-1 data-[selected=true]:ring-line-strong';
 	const indent = (level: number) => `padding-left: ${0.5 + level * 1.1}rem`;
 </script>
 
@@ -58,11 +56,11 @@
 			ondblclick={() => ontoggle(node.folder.id)}
 		>
 			{#if open}
-				<FolderOpen size={16} class="shrink-0 text-accent" aria-hidden="true" />
+				<FolderOpen size={16} class="shrink-0 text-ink-3" aria-hidden="true" />
 			{:else}
-				<FolderClosed size={16} class="shrink-0 text-accent" aria-hidden="true" />
+				<FolderClosed size={16} class="shrink-0 text-ink-3" aria-hidden="true" />
 			{/if}
-			<span class="truncate" class:text-ink-2={node.folder.role === null}>{node.folder.name}</span>
+			<span class="truncate" class:text-ink-3={node.folder.role === null}>{node.folder.name}</span>
 		</button>
 	</div>
 
@@ -87,13 +85,7 @@
 						data-selected={isSelected('device', device.id)}
 						onclick={() => onselect('device', device.id)}
 					>
-						{#if device.protocol === 'ssh'}
-							<SquareTerminal size={16} class="shrink-0 text-ink-2" aria-hidden="true" />
-						{:else if device.protocol === 'https'}
-							<Globe size={16} class="shrink-0 text-ink-2" aria-hidden="true" />
-						{:else}
-							<Monitor size={16} class="shrink-0 text-ink-2" aria-hidden="true" />
-						{/if}
+						<ProtocolChip protocol={device.protocol} />
 						<span class="truncate">{device.name}</span>
 						<span class="ml-auto truncate font-mono text-xs text-ink-3">{device.host}</span>
 					</button>

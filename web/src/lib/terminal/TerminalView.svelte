@@ -22,10 +22,18 @@
 	$effect(() => {
 		const terminal = new Terminal({
 			cursorBlink: true,
-			fontFamily: "'Cascadia Mono', 'JetBrains Mono', ui-monospace, Consolas, monospace",
+			fontFamily: "'JetBrains Mono Variable', ui-monospace, Consolas, monospace",
 			fontSize: 14,
+			lineHeight: 1.25,
 			scrollback: 5000,
-			theme: { background: '#0d0d0d', foreground: '#e8e8e3', cursor: '#3987e5' }
+			// Night Ops in both themes: a terminal stays dark.
+			theme: {
+				background: '#07090c',
+				foreground: '#c9d1db',
+				cursor: '#5eead4',
+				cursorAccent: '#04201b',
+				selectionBackground: '#1e3a36'
+			}
 		});
 		const fit = new FitAddon();
 		terminal.loadAddon(fit);
@@ -59,4 +67,4 @@
 	});
 </script>
 
-<div bind:this={container} class="h-full w-full overflow-hidden rounded-lg bg-[#0d0d0d] p-2"></div>
+<div bind:this={container} class="h-full w-full overflow-hidden bg-[#07090c] p-3"></div>

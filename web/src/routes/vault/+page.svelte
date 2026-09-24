@@ -282,7 +282,7 @@
 {/snippet}
 
 <div class="flex flex-wrap items-center gap-3">
-	<h1 class="text-2xl font-semibold tracking-tight">{m.vault_title()}</h1>
+	<h1 class="text-4xl font-semibold">{m.vault_title()}</h1>
 	{#if stage === 'open'}
 		<button type="button" class="{button} ml-auto" onclick={lock}>
 			<Lock size={16} aria-hidden="true" />
@@ -290,7 +290,10 @@
 		</button>
 	{/if}
 </div>
-<p class="mt-1 text-sm text-ink-2">{m.vault_intro()}</p>
+<p class="mt-3 flex items-center gap-2 text-sm text-ink-2">
+	<Lock size={14} aria-hidden="true" />
+	{m.vault_intro()}
+</p>
 
 {#if stage === 'setup'}
 	<form class="mt-6 max-w-md rounded-card border border-line bg-surface p-6" onsubmit={create}>

@@ -7,6 +7,7 @@
 	import { page } from '$app/state';
 	import { allows, isGraphical, loadTree, resetHostKey, type Device } from '$lib/api/catalog';
 	import { errorMessage } from '$lib/api/errors';
+	import ProtocolChip from '$lib/catalog/ProtocolChip.svelte';
 	import DisplayView from '$lib/display/DisplayView.svelte';
 	import { failureOf, type Failure } from '$lib/display/tunnel';
 	import { m } from '$lib/paraglide/messages';
@@ -118,17 +119,17 @@
 </script>
 
 {#if error}
-	<p class="flex items-center gap-2 text-sm" role="alert">
+	<p class="flex items-center gap-2 px-6 py-10 text-sm" role="alert">
 		<CircleAlert size={16} class="text-critical" aria-hidden="true" />
 		{error}
 	</p>
 {:else if device && needsCredentials}
 	<form
-		class="mx-auto mt-8 w-full max-w-sm rounded-card border border-line bg-surface p-6"
+		class="mx-auto mt-16 w-full max-w-sm rounded-card border border-line bg-surface p-7"
 		onsubmit={signIn}
 		autocomplete="off"
 	>
-		<h1 class="text-lg font-semibold">{m.terminal_credentials_title({ name: device.name })}</h1>
+		<h1 class="text-2xl font-semibold">{m.terminal_credentials_title({ name: device.name })}</h1>
 		<p class="mt-1 text-sm text-ink-2">{m.terminal_credentials_hint()}</p>
 		<!-- VNC servers mostly know only a password. -->
 		<label class="mt-4 block text-sm font-medium" for="target-username">
@@ -151,15 +152,19 @@
 		/>
 		<button
 			type="submit"
-			class="mt-5 w-full rounded-lg bg-accent px-4 py-2 font-medium text-accent-ink"
+			class="mt-6 h-12 w-full rounded-xl bg-accent font-display text-lg font-semibold text-accent-ink hover:brightness-110"
 		>
 			{m.terminal_connect()}
 		</button>
 	</form>
 {:else if device}
-	<div class="flex h-[calc(100dvh-11rem)] min-h-80 flex-col gap-3">
-		<div class="flex flex-wrap items-center gap-3 text-sm" role="status">
-			<h1 class="font-semibold">{device.name}</h1>
+	<div class="flex min-h-80 flex-1 flex-col">
+		<div
+			class="flex min-h-12 flex-wrap items-center gap-3 border-b border-line bg-sunken px-4 py-2 text-sm sm:px-6"
+			role="status"
+		>
+			<ProtocolChip protocol={device.protocol} />
+			<h1 class="text-base font-semibold">{device.name}</h1>
 			<span class="font-mono text-xs text-ink-3">{device.host}:{device.port}</span>
 			<span class="ml-auto inline-flex items-center gap-1.5 text-ink-2">
 				{#if status.kind === 'connecting'}
@@ -203,11 +208,16 @@
 
 		{#if status.kind === 'failed' && status.detail}
 			<!-- guacd's own words, for the administrator. -->
-			<p class="text-xs text-ink-3">{m.display_detail({ detail: status.detail })}</p>
+			<p class="px-4 pt-3 text-xs text-ink-3 sm:px-6">
+				{m.display_detail({ detail: status.detail })}
+			</p>
 		{/if}
 
 		{#if status.kind === 'error' && (status.code === 'host_key_changed' || status.code === 'certificate_changed')}
-			<div class="rounded-card border border-critical/50 bg-surface p-4 text-sm" role="alert">
+			<div
+				class="m-4 rounded-card border border-critical/50 bg-surface p-5 text-sm sm:mx-6"
+				role="alert"
+			>
 				<p class="flex items-start gap-2">
 					<ShieldAlert size={18} class="mt-0.5 shrink-0 text-critical" aria-hidden="true" />
 					<span>

@@ -57,8 +57,7 @@
 
 <div class="flex flex-wrap items-start justify-between gap-4">
 	<div>
-		<h1 class="text-2xl font-semibold tracking-tight">{m.audit_title()}</h1>
-		<p class="mt-1 text-sm text-ink-2">{m.audit_intro()}</p>
+		<h1 class="text-4xl font-semibold">{m.audit_title()}</h1>
 	</div>
 	{#if session.user?.admin}
 		<button
