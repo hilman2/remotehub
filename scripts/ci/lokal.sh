@@ -182,6 +182,7 @@ part_web() { # tools
       for name in svelte-check lint vitest build; do
         echo "── $name: $(cat "/tmp/$name.result")"
         cat "/tmp/$name.log"
+        echo
         grep -q "^ok" "/tmp/$name.result" || failed=1
       done
       [ "$failed" = 0 ]
