@@ -1,0 +1,13 @@
+{
+  // rust-analyzer inside the Rust container instead of on Windows.
+  "name": "remotehub",
+  "dockerComposeFile": ["../deploy/compose.dev.yml"],
+  "service": "workbench",
+  "runServices": ["workbench", "db"],
+  "workspaceFolder": "/work",
+  "customizations": {
+    "vscode": {
+      "extensions": ["rust-lang.rust-analyzer", "tamasfe.even-better-toml", "svelte.svelte-vscode"]
+    }
+  }
+}

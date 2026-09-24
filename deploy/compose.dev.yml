@@ -1,0 +1,77 @@
+# Development environment — everything runs in Docker:
+#   docker compose -f deploy/compose.dev.yml up --build
+#   Database: 127.0.0.1:55440 (user, password and database: remotehub)
+#
+# Other projects on the development machine already publish 5173, 8025,
+# 55432 and 55433; remotehub only publishes 55440 (database) and 5180 (UI).
+#
+# The source is mounted from the repository (/work); builds go to named
+# volumes (target/, cargo registry) because bind mounts are slow on Windows.
+# The server is rebuilt and restarted on changes (watchexec with --poll, see
+# deploy/dev/rust.Dockerfile).
+name: remotehub-dev
+
+x-rust: &rust
+  build:
+    context: dev
+    dockerfile: rust.Dockerfile
+  image: remotehub-dev-rust
+  init: true
+  volumes:
+    - ..:/work
+    - target:/target
+    - cargo-registry:/usr/local/cargo/registry
+    - cargo-git:/usr/local/cargo/git
+  environment:
+    TZ: Europe/Berlin
+    RUST_LOG: info,remotehub_server=debug,tower_http=debug
+    REMOTEHUB_DATABASE_URL: postgres://remotehub:remotehub@db:5432/remotehub
+    # For #[sqlx::test]: creates a fresh database per test on this server.
+    DATABASE_URL: postgres://remotehub:remotehub@db:5432/remotehub
+
+services:
+  db:
+    image: postgres:18.6-trixie
+    environment:
+      TZ: Europe/Berlin
+      POSTGRES_DB: remotehub
+      POSTGRES_USER: remotehub
+      POSTGRES_PASSWORD: remotehub
+    ports:
+      - "127.0.0.1:55440:5432"
+    volumes:
+      # Since PostgreSQL 18, PGDATA lives in a versioned directory below /var/lib/postgresql.
+      - db:/var/lib/postgresql
+    healthcheck:
+      # TCP, not the socket: during initdb the entrypoint runs a socket-only
+      # temporary server that would report ready too early.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "remotehub", "-d", "remotehub"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  server:
+    # API on http://server:8080 inside the compose network; the UI reaches it through Vite.
+    <<: *rust
+    command: >
+      watchexec --poll 1000ms --restart --watch crates --watch migrations --watch Cargo.toml
+      --exts rs,toml,sql,ftl -- cargo run --package remotehub-server
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Workbench for a shell, tests and rust-analyzer (dev container, .devcontainer/):
+  #   docker compose -f deploy/compose.dev.yml run --rm workbench cargo nextest run
+  workbench:
+    <<: *rust
+    command: sleep infinity
+    profiles: [workbench]
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db:
+  target:
+  cargo-registry:
+  cargo-git:

@@ -1,0 +1,18 @@
+# Version updates in batches: one PR per month and ecosystem. Security alerts
+# arrive immediately regardless. A new version is only offered after seven
+# days, so withdrawn or compromised releases do not come in.
+#
+# Groups only bundle minor and patch updates; a major update arrives as its
+# own PR so it can be checked on its own.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    groups:
+      rust:
+        update-types: [minor, patch]
