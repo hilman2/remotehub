@@ -1,0 +1,28 @@
+name: Feature request
+description: An improvement or a new feature.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Which problem should be solved?
+      description: What is missing in day-to-day administration today, what costs time or goes wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - User interface
+        - Connections (RDP, VNC, SSH)
+        - Vault (credentials, import, export)
+        - Sign-in and permissions
+        - API and database
+        - Translations
+        - Operations (install, update, backup)
+        - Other

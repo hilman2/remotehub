@@ -1,0 +1,48 @@
+name: Bug report
+description: Something does not work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security issues do not belong here — please report them privately (see SECURITY.md).
+        Never paste passwords, keys or other secrets into an issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Error message, screenshot or log excerpt, if available.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open folder …
+        2. Connect to device …
+        3. …
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - User interface
+        - Connections (RDP, VNC, SSH)
+        - Vault (credentials, import, export)
+        - Sign-in and permissions
+        - API and database
+        - Translations
+        - Operations (install, update, backup)
+        - Other
+  - type: input
+    id: version
+    attributes:
+      label: remotehub version
+      description: Shown in the UI footer and at `/api/health`.

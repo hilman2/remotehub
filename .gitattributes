@@ -1,0 +1,14 @@
+# Line endings: LF everywhere, also in a Windows working copy — everything
+# here is built and run in Linux containers. Automatic text/binary detection.
+* text=auto eol=lf
+
+# Binary (auto-detection would otherwise treat pure-ASCII PDFs as text).
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.kdbx binary
+*.guac binary

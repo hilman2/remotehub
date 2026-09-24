@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Build and tests
+/dist/
+/build/
+/coverage/
+/target/
+
+# Environment (only the template belongs in the repository)
+.env*
+!.env.example
+
+# Operating system and editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
