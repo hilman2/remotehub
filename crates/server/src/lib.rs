@@ -8,6 +8,7 @@ pub mod break_glass;
 pub mod catalog;
 pub mod config;
 pub mod db;
+pub mod proxy;
 pub mod secrets;
 pub mod session;
 
@@ -52,6 +53,8 @@ pub struct Settings {
     pub guacd: String,
     /// Keyboard layout of RDP sessions for devices without one of their own.
     pub rdp_keyboard_layout: String,
+    /// Reverse proxies whose `X-Forwarded-For` names the client.
+    pub trusted_proxies: Vec<proxy::Network>,
 }
 
 impl AppState {

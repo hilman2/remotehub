@@ -96,6 +96,24 @@ docker compose -p "$project" up -d --wait --wait-timeout 120 || fail "remotehub 
 docker compose -p "$project" exec -T remotehub remotehub break-glass list | grep -qx check ||
   fail "the break-glass account is gone after a restart"
 
+echo "── The client's address behind a proxy"
+# A failed break-glass sign-in logs the address remotehub took for the
+# client. Through the published port, as a proxy on the host connects, the
+# forwarded address counts; from anywhere else, it does not.
+break_glass_attempt() { # forwarded-for url
+  curl -s -o /dev/null -X POST -H 'Content-Type: application/json' -H "X-Forwarded-For: $1" \
+    -d '{"username":"nobody","password":"x","code":"000000"}' "$2/api/session/break-glass"
+}
+published="$(docker compose -p "$project" port remotehub 8080)"
+docker run --rm --network host "$(docker inspect -f '{{.Config.Image}}' "$(hostname)")" \
+  bash -c "$(declare -f break_glass_attempt); break_glass_attempt 203.0.113.9 http://${published}"
+break_glass_attempt 203.0.113.10 "http://${remotehub}:8080"
+failures="$(docker compose -p "$project" logs remotehub | grep "break-glass sign-in failed")"
+grep -q "203.0.113.9" <<<"$failures" || fail "the proxy's forwarded address was not taken: ${failures}"
+if grep -q "203.0.113.10" <<<"$failures"; then
+  fail "a forwarded address from an untrusted peer was taken"
+fi
+
 echo "── Backup and restore (docs/install.md)"
 docker compose -p "$project" exec -T db pg_dump -U remotehub -Fc remotehub >/tmp/remotehub.dump
 docker compose -p "$project" exec -T remotehub remotehub break-glass delete check >/dev/null

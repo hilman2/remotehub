@@ -16,6 +16,8 @@ use remotehub_gateway::guacamole::KEYBOARD_LAYOUTS;
 use secrecy::SecretString;
 use thiserror::Error;
 
+use crate::proxy::Network;
+
 const DEFAULT_LISTEN: &str = "0.0.0.0:8080";
 /// The guacd service of the ops package's compose file.
 const DEFAULT_GUACD: &str = "guacd:4822";
@@ -52,6 +54,8 @@ pub struct Config {
     pub guacd: String,
     /// Keyboard layout of RDP sessions for devices without one of their own.
     pub rdp_keyboard_layout: String,
+    /// Reverse proxies whose `X-Forwarded-For` names the client.
+    pub trusted_proxies: Vec<Network>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -197,6 +201,20 @@ impl Config {
             ));
         }
 
+        let trusted_proxies = setting("REMOTEHUB_TRUSTED_PROXIES")?
+            .map(|list| {
+                list.split([',', ' '])
+                    .filter(|entry| !entry.is_empty())
+                    .map(|entry| {
+                        entry
+                            .parse()
+                            .map_err(|()| invalid("REMOTEHUB_TRUSTED_PROXIES", entry))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+
         Ok(Config {
             listen,
             database_url,
@@ -211,6 +229,7 @@ impl Config {
             admin_groups,
             guacd,
             rdp_keyboard_layout,
+            trusted_proxies,
         })
     }
 }
@@ -286,6 +305,7 @@ impl fmt::Debug for Config {
             .field("admin_groups", &self.admin_groups)
             .field("guacd", &self.guacd)
             .field("rdp_keyboard_layout", &self.rdp_keyboard_layout)
+            .field("trusted_proxies", &self.trusted_proxies)
             .finish()
     }
 }
@@ -346,6 +366,32 @@ mod tests {
                 ConfigError::Missing(name)
             );
         }
+    }
+
+    #[test]
+    fn lists_trusted_proxies() {
+        let config = Config::from_lookup(lookup(&[(
+            "REMOTEHUB_TRUSTED_PROXIES",
+            "10.213.213.1, fd00::/8,,",
+        )]))
+        .unwrap();
+        let listed: Vec<String> = config
+            .trusted_proxies
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        assert_eq!(listed, ["10.213.213.1/32", "fd00::/8"]);
+        assert!(
+            Config::from_lookup(lookup(&[]))
+                .unwrap()
+                .trusted_proxies
+                .is_empty()
+        );
+        assert_eq!(
+            Config::from_lookup(lookup(&[("REMOTEHUB_TRUSTED_PROXIES", "10.0.0.1,proxy")]))
+                .unwrap_err(),
+            invalid("REMOTEHUB_TRUSTED_PROXIES", "proxy")
+        );
     }
 
     #[test]

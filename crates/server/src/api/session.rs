@@ -19,6 +19,7 @@ use super::problem::{ErrorCode, Problem};
 use crate::audit::{self, Action, Actor, Entry};
 use crate::auth::{PER_ADDRESS, PER_USER};
 use crate::break_glass;
+use crate::proxy;
 use crate::session::{self, Session};
 use crate::{AppState, Settings};
 
@@ -49,18 +50,29 @@ impl Me {
     }
 }
 
-/// The client's address as seen by this server (a reverse proxy's address
-/// when there is one).
+/// The client's address: the connection's, or behind a trusted reverse proxy
+/// the one it forwards (see `crate::proxy`).
 pub struct ClientAddress(pub String);
 
-impl<S: Send + Sync> FromRequestParts<S> for ClientAddress {
+impl FromRequestParts<AppState> for ClientAddress {
     type Rejection = std::convert::Infallible;
 
-    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         let address = parts
             .extensions
             .get::<ConnectInfo<SocketAddr>>()
-            .map(|ConnectInfo(addr)| addr.ip().to_string())
+            .map(|ConnectInfo(peer)| {
+                let forwarded = parts
+                    .headers
+                    .get_all("x-forwarded-for")
+                    .iter()
+                    .filter_map(|value| value.to_str().ok());
+                proxy::client_address(peer.ip(), forwarded, &state.settings.trusted_proxies)
+                    .to_string()
+            })
             .unwrap_or_else(|| "unknown".to_owned());
         Ok(ClientAddress(address))
     }
