@@ -45,4 +45,4 @@ and credentials never leave the server.
   into the AGPL Rust server.
 - Recording (M5) happens on the server and cannot be forged by the client.
 - An own RDP engine (IronRDP on the server, streaming Guacamole `img` instructions) can replace guacd later
-  behind the same trait; it is a backlog item, estimated at several person-months.
+  behind the same trait; it is a backlog item, estimated at several person-months. Evaluated in ADR 0006.
