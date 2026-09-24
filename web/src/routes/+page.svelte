@@ -8,9 +8,11 @@
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import Lock from '@lucide/svelte/icons/lock';
 	import PanelLeftOpen from '@lucide/svelte/icons/panel-left-open';
+	import Pencil from '@lucide/svelte/icons/pencil';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Search from '@lucide/svelte/icons/search';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { resolve } from '$app/paths';
 	import {
@@ -59,6 +61,7 @@
 	} from '$lib/catalog/labels';
 	import { nest, pathTo } from '$lib/catalog/tree';
 	import Dialog from '$lib/components/Dialog.svelte';
+	import SettingsMenu, { type MenuItem } from '$lib/components/SettingsMenu.svelte';
 	import { getLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
 	import { SvelteSet } from 'svelte/reactivity';
@@ -254,6 +257,40 @@
 
 	const toggle = (id: string) => setOpen(id, !openFolders.has(id));
 
+	/** A double-click on a device in a list connects, where the user may. */
+	function connectTo(id: string) {
+		const target = tree?.devices.find((d) => d.id === id);
+		if (target && allows(target.role, 'connect')) tabs.open(target);
+	}
+
+	/** Behind the gear: changing, permissions and deleting, as far as `role` allows. */
+	function settings(
+		kind: ObjectKind,
+		id: string,
+		name: string,
+		role: Role | null,
+		edit: MenuItem
+	): MenuItem[] {
+		// Folders are changed by who manages them, the rest by who may edit it.
+		const change = allows(role, kind === 'folder' ? 'manage' : 'edit');
+		const permissions: MenuItem = {
+			label: m.catalog_permissions(),
+			icon: ShieldCheck,
+			onselect: () => show({ type: 'grants', kind, id, name })
+		};
+		const remove: MenuItem = {
+			label: m.catalog_delete(),
+			icon: Trash2,
+			danger: true,
+			onselect: () => show({ type: 'delete', kind, id, name })
+		};
+		return [
+			...(change ? [edit] : []),
+			...(allows(role, 'manage') ? [permissions] : []),
+			...(change ? [remove] : [])
+		];
+	}
+
 	const dialogTitle = $derived.by(() => {
 		switch (open?.type) {
 			case 'folder':
@@ -279,8 +316,6 @@
 
 	const button =
 		'inline-flex h-10 items-center gap-2 rounded-xl border border-line-strong bg-surface px-3.5 text-sm hover:bg-surface-2';
-	const danger =
-		'inline-flex h-10 items-center gap-2 rounded-xl px-3.5 text-sm text-critical hover:bg-surface-2';
 	const card = 'flex flex-col gap-3 rounded-card border border-line bg-surface p-5';
 </script>
 
@@ -316,6 +351,7 @@
 			data-active={highlighted || isSelected}
 			aria-current={isSelected ? 'true' : undefined}
 			onclick={() => choose(hit.kind, hit.id)}
+			ondblclick={() => hit.kind === 'device' && connectTo(hit.id)}
 		>
 			<span class="flex w-full min-w-0 items-center gap-2.5">
 				{#if hit.protocol}
@@ -443,6 +479,7 @@
 							expanded={(id) => openFolders.has(id)}
 							onselect={choose}
 							ontoggle={toggle}
+							onopen={connectTo}
 						/>
 					{/each}
 				</ul>
@@ -464,14 +501,27 @@
 		{#if tree && tree.folders.length === 0}
 			<p class="font-display text-2xl text-ink-2">{m.devices_empty_title()}</p>
 		{:else if folder}
-			{@render heading(path(folder.parent_id), folder.name)}
+			<div class="flex flex-wrap items-end gap-6">
+				<div class="min-w-0 flex-1">{@render heading(path(folder.parent_id), folder.name)}</div>
+				<div class="flex items-center gap-2">
+					{@render requestAccess('folder', folder.id, folder.name, folder.role)}
+					<SettingsMenu
+						label={m.catalog_settings()}
+						items={settings('folder', folder.id, folder.name, folder.role, {
+							label: m.catalog_rename(),
+							icon: Pencil,
+							onselect: () => show({ type: 'folder', parent: folder.parent_id, folder })
+						})}
+					/>
+				</div>
+			</div>
 			{#if folder.role}
 				<div class="flex flex-wrap gap-2">
 					<span class="chip">{m.catalog_access({ role: ROLE_LABELS[folder.role]() })}</span>
 				</div>
 			{/if}
-			<div class="flex flex-wrap gap-2">
-				{#if allows(folder.role, 'edit')}
+			{#if allows(folder.role, 'edit')}
+				<div class="flex flex-wrap gap-2">
 					<button
 						type="button"
 						class={button}
@@ -488,43 +538,18 @@
 						<KeyRound size={16} aria-hidden="true" />
 						{m.catalog_new_credential()}
 					</button>
-				{/if}
-				{#if allows(folder.role, 'manage')}
-					<button
-						type="button"
-						class={button}
-						onclick={() => show({ type: 'folder', parent: folder.id, folder: null })}
-					>
-						<FolderPlus size={16} aria-hidden="true" />
-						{m.catalog_new_subfolder()}
-					</button>
-					<button
-						type="button"
-						class={button}
-						onclick={() => show({ type: 'folder', parent: folder.parent_id, folder })}
-					>
-						{m.catalog_rename()}
-					</button>
-					<button
-						type="button"
-						class={button}
-						onclick={() =>
-							show({ type: 'grants', kind: 'folder', id: folder.id, name: folder.name })}
-					>
-						<ShieldCheck size={16} aria-hidden="true" />
-						{m.catalog_permissions()}
-					</button>
-					<button
-						type="button"
-						class={danger}
-						onclick={() =>
-							show({ type: 'delete', kind: 'folder', id: folder.id, name: folder.name })}
-					>
-						{m.catalog_delete()}
-					</button>
-				{/if}
-				{@render requestAccess('folder', folder.id, folder.name, folder.role)}
-			</div>
+					{#if allows(folder.role, 'manage')}
+						<button
+							type="button"
+							class={button}
+							onclick={() => show({ type: 'folder', parent: folder.id, folder: null })}
+						>
+							<FolderPlus size={16} aria-hidden="true" />
+							{m.catalog_new_subfolder()}
+						</button>
+					{/if}
+				</div>
+			{/if}
 			{@render requestedNotice(folder.id)}
 		{:else if device}
 			<div class="flex flex-wrap items-end gap-6">
@@ -551,15 +576,28 @@
 						<span class="chip">{m.catalog_access({ role: ROLE_LABELS[device.role]() })}</span>
 					</div>
 				</div>
-				{#if allows(device.role, 'connect')}
-					<div class="flex flex-col items-end gap-2">
-						<button
-							type="button"
-							class="inline-flex h-14 items-center rounded-2xl bg-accent px-8 font-display text-lg font-semibold text-accent-ink hover:brightness-110"
-							onclick={() => device && tabs.open(device)}
-						>
-							{m.device_connect()}
-						</button>
+				<div class="flex flex-col items-end gap-2">
+					<div class="flex items-center gap-2">
+						{@render requestAccess('device', device.id, device.name, device.role)}
+						<SettingsMenu
+							label={m.catalog_settings()}
+							items={settings('device', device.id, device.name, device.role, {
+								label: m.catalog_edit(),
+								icon: Pencil,
+								onselect: () => show({ type: 'device', folderId: device.folder_id, device })
+							})}
+						/>
+						{#if allows(device.role, 'connect')}
+							<button
+								type="button"
+								class="inline-flex h-14 items-center rounded-2xl bg-accent px-8 font-display text-lg font-semibold text-accent-ink hover:brightness-110"
+								onclick={() => device && tabs.open(device)}
+							>
+								{m.device_connect()}
+							</button>
+						{/if}
+					</div>
+					{#if allows(device.role, 'connect')}
 						<!-- A window of its own, e.g. for a second screen. -->
 						<a
 							href={resolve('/connect/[id]', { id: device.id })}
@@ -570,8 +608,8 @@
 							<ExternalLink size={14} aria-hidden="true" />
 							{m.session_new_window()}
 						</a>
-					</div>
-				{/if}
+					{/if}
+				</div>
 			</div>
 
 			<div class="grid gap-4 md:grid-cols-3">
@@ -618,42 +656,25 @@
 				{/if}
 			</div>
 
-			<div class="flex flex-wrap gap-2">
-				{#if allows(device.role, 'edit')}
-					<button
-						type="button"
-						class={button}
-						onclick={() => show({ type: 'device', folderId: device.folder_id, device })}
-					>
-						{m.catalog_edit()}
-					</button>
-				{/if}
-				{#if allows(device.role, 'manage')}
-					<button
-						type="button"
-						class={button}
-						onclick={() =>
-							show({ type: 'grants', kind: 'device', id: device.id, name: device.name })}
-					>
-						<ShieldCheck size={16} aria-hidden="true" />
-						{m.catalog_permissions()}
-					</button>
-				{/if}
-				{#if allows(device.role, 'edit')}
-					<button
-						type="button"
-						class={danger}
-						onclick={() =>
-							show({ type: 'delete', kind: 'device', id: device.id, name: device.name })}
-					>
-						{m.catalog_delete()}
-					</button>
-				{/if}
-				{@render requestAccess('device', device.id, device.name, device.role)}
-			</div>
 			{@render requestedNotice(device.id)}
 		{:else if credential}
-			{@render heading(path(credential.folder_id), credential.name)}
+			<div class="flex flex-wrap items-end gap-6">
+				<div class="min-w-0 flex-1">
+					{@render heading(path(credential.folder_id), credential.name)}
+				</div>
+				<div class="flex items-center gap-2">
+					{@render requestAccess('credential', credential.id, credential.name, credential.role)}
+					<SettingsMenu
+						label={m.catalog_settings()}
+						items={settings('credential', credential.id, credential.name, credential.role, {
+							label: m.catalog_edit(),
+							icon: Pencil,
+							onselect: () =>
+								show({ type: 'credential', folderId: credential.folder_id, credential })
+						})}
+					/>
+				</div>
+			</div>
 			<div class="flex flex-wrap gap-2">
 				<span class="chip font-mono">
 					{credential.domain ? `${credential.domain}\\${credential.username}` : credential.username}
@@ -688,49 +709,6 @@
 						</p>
 					</section>
 				{/if}
-			</div>
-			<div class="flex flex-wrap gap-2">
-				{#if allows(credential.role, 'edit')}
-					<button
-						type="button"
-						class={button}
-						onclick={() => show({ type: 'credential', folderId: credential.folder_id, credential })}
-					>
-						{m.catalog_edit()}
-					</button>
-				{/if}
-				{#if allows(credential.role, 'manage')}
-					<button
-						type="button"
-						class={button}
-						onclick={() =>
-							show({
-								type: 'grants',
-								kind: 'credential',
-								id: credential.id,
-								name: credential.name
-							})}
-					>
-						<ShieldCheck size={16} aria-hidden="true" />
-						{m.catalog_permissions()}
-					</button>
-				{/if}
-				{#if allows(credential.role, 'edit')}
-					<button
-						type="button"
-						class={danger}
-						onclick={() =>
-							show({
-								type: 'delete',
-								kind: 'credential',
-								id: credential.id,
-								name: credential.name
-							})}
-					>
-						{m.catalog_delete()}
-					</button>
-				{/if}
-				{@render requestAccess('credential', credential.id, credential.name, credential.role)}
 			</div>
 			{@render requestedNotice(credential.id)}
 		{:else if tree}

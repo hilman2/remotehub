@@ -161,7 +161,11 @@ test('an SSH device signs in with a certificate from remotehub', async ({ page }
 	await dialog.getByRole('button', { name: 'Create' }).click();
 	await expect(page.getByRole('heading', { name })).toBeVisible();
 
-	await page.getByRole('button', { name: 'Connect', exact: true }).click();
+	// A double-click in the tree connects as well.
+	await page
+		.getByRole('tree')
+		.getByRole('button', { name: new RegExp(name) })
+		.dblclick();
 	await expect(page.getByText(/host key/)).toBeVisible();
 	await page.locator('.xterm').click();
 	await page.keyboard.type('echo "ca says $(whoami)"');
@@ -182,7 +186,8 @@ test('access asked for just in time is approved by someone else', async ({ page,
 	await dialog.getByLabel('Host name or IP address').fill(sshHost);
 	await dialog.getByRole('button', { name: 'Create' }).click();
 	await expect(page.getByRole('heading', { name })).toBeVisible();
-	await page.getByRole('button', { name: 'Permissions' }).click();
+	await page.getByRole('button', { name: 'Settings' }).click();
+	await page.getByRole('menuitem', { name: 'Permissions' }).click();
 	await dialog.getByLabel('Search users and groups').fill('Bob');
 	await dialog.getByRole('button', { name: /Bob Helpdesk/ }).click();
 	await dialog.locator('select').selectOption({ label: 'See' });

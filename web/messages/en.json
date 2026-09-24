@@ -128,6 +128,7 @@
 	"catalog_delete": "Delete",
 	"catalog_delete_confirm": "Delete {name}? This cannot be undone.",
 	"catalog_permissions": "Permissions",
+	"catalog_settings": "Settings",
 	"catalog_select_hint": "Select a device, a credential or a folder.",
 	"catalog_no_match": "Nothing matches your search.",
 	"catalog_access": "Access: {role}",
