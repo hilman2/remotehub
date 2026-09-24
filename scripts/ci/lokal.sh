@@ -13,12 +13,13 @@
 #   Rust compiles, and its tests reuse the test binaries just built.
 
 CI_REPO_KURZ="remotehub"
-CI_JOBS=(base code)
+CI_JOBS=(base code image)
 
 # shellcheck source=scripts/ci/gemeinsam.sh
 source "$(dirname "${BASH_SOURCE[0]}")/gemeinsam.sh"
 
-# Keep in sync with deploy/compose.dev.yml (and web/package.json for Playwright).
+# Keep in sync with deploy/compose.dev.yml and deploy/ops/compose.yml (the job
+# `base` checks both), and web/package.json for Playwright.
 POSTGRES_IMAGE="postgres:18.6-trixie"
 E2E_IMAGE="mcr.microsoft.com/playwright:v1.63.0-noble"
 
@@ -26,6 +27,9 @@ E2E_IMAGE="mcr.microsoft.com/playwright:v1.63.0-noble"
 RUST_INPUTS=(crates/ migrations/ Cargo.toml Cargo.lock rust-toolchain.toml deploy/dev/rust.Dockerfile)
 WEB_INPUTS=(web/ deploy/dev/web.Dockerfile)
 LAB_INPUTS=("${RUST_INPUTS[@]}" deploy/testlab/ deploy/guacd/)
+# The production images build a release binary; they are tried when they or
+# the ops package change, and in full runs (every commit on main, releases).
+IMAGE_INPUTS=(deploy/Dockerfile .dockerignore deploy/ops/ deploy/guacd/)
 
 # Files changed between the merge base with main and the commit under test.
 # Fails when everything has to run: CI_FULL=1, no merge base, or a commit
@@ -66,19 +70,60 @@ job_base() {
       exit 1
     fi
 
-    echo "── Compose (development)"
+    echo "── Compose (development, ops package)"
     docker compose -f deploy/compose.dev.yml --profile workbench config --quiet
+    REMOTEHUB_VERSION=0 REMOTEHUB_PUBLIC_URL=https://x \
+      docker compose -f deploy/ops/compose.yml config --quiet --no-path-resolution
 
     echo "── Rust version"
     wanted="$(sed -n "s/^channel = \"\(.*\)\"/\1/p" rust-toolchain.toml)"
     echo "rust-toolchain.toml: ${wanted}"
-    for file in scripts/ci/tools.Dockerfile deploy/dev/rust.Dockerfile; do
+    for file in scripts/ci/tools.Dockerfile deploy/dev/rust.Dockerfile deploy/Dockerfile; do
       grep -q "^FROM rust:${wanted}-" "$file" || {
         echo "${file} does not use rust:${wanted}"
         exit 1
       }
     done
+
+    echo "── Node and PostgreSQL versions"
+    same() { # what pattern files...
+      local what="$1" pattern="$2"
+      shift 2
+      local found
+      found="$(grep -ho "$pattern" "$@" | sort -u)"
+      echo "${what}: ${found}"
+      [ "$(wc -l <<<"$found")" = 1 ] || {
+        echo "$* disagree on ${what}"
+        exit 1
+      }
+    }
+    same node "FROM node:[^ ]*" deploy/dev/web.Dockerfile deploy/Dockerfile scripts/ci/tools.Dockerfile
+    same pnpm "pnpm@[0-9.]*" deploy/dev/web.Dockerfile deploy/Dockerfile scripts/ci/tools.Dockerfile
+    same postgres "postgres:[0-9][^ \"]*" deploy/compose.dev.yml deploy/ops/compose.yml scripts/ci/lokal.sh
   '
+}
+
+# The production images (deploy/Dockerfile, deploy/guacd) with the ops
+# package (deploy/ops), tried the way an installation uses them: see
+# scripts/ci/image-check.sh. The ops directory is copied into the run's
+# volume, whose path the Docker daemon sees too: compose bind-mounts the
+# secrets from it.
+job_image() {
+  if ! needed "${IMAGE_INPUTS[@]}"; then
+    echo "skipped: nothing under ${IMAGE_INPUTS[*]} changed"
+    return 0
+  fi
+  local tools version
+  tools="$(ci_image scripts/ci/tools.Dockerfile)"
+  version="$(git -C "$CI_WURZEL" show "${CI_SHA}:Cargo.toml" | sed -n 's/^version = "\(.*\)"/\1/p' | head -n 1)"
+  ci_docker_run "$tools" bash -euo pipefail -c '
+    echo "── docker build (version $1)"
+    docker build --quiet --file deploy/Dockerfile --build-arg VERSION="$1" --tag remotehub-ci-image:ci .
+    docker build --quiet --tag remotehub-ci-guacd:ci deploy/guacd
+    cp -r deploy/ops .image-check
+    REMOTEHUB_IMAGE=remotehub-ci-image GUACD_IMAGE=remotehub-ci-guacd REMOTEHUB_VERSION=ci \
+      EXPECT_VERSION="$1" bash scripts/ci/image-check.sh "${PWD}/.image-check"
+  ' _ "$version"
 }
 
 # Runs a script in the Rust tools container with the cargo caches, a fresh

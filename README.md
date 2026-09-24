@@ -30,6 +30,7 @@ remotehub (Rust: API, sign-in, permissions, vault, audit, SSH engine, Guacamole 
 ```
 
 Everything runs in Docker. Details: [`docs/architecture.md`](docs/architecture.md), decisions in [`docs/adr/`](docs/adr/).
+Installing: [`docs/install.md`](docs/install.md), settings: [`docs/configuration.md`](docs/configuration.md).
 
 ## Roadmap
 

@@ -162,8 +162,12 @@ English is the base locale, German the second; more can follow (ADR 0002).
   `127.0.0.1:5180`, the server rebuilt by watchexec, plus a test lab (Samba AD DC, SSH target, a desktop
   target with RDP and VNC) and guacd on the compose network.
 - **CI** runs locally (`scripts/ci/lokal.sh`) and reports the commit status `lokal`; `main` requires it.
-- **Operations (M2):** images on GHCR (`ghcr.io/hilman2/remotehub`, guacd image), an ops package with
-  compose file, install, update, backup and restore scripts; releases via `scripts/ci/release.sh`.
+- **Operations:** two images on GHCR, `ghcr.io/hilman2/remotehub` (`deploy/Dockerfile`: the binary and the
+  built UI on distroless, user 65532, read-only) and `ghcr.io/hilman2/remotehub-guacd` (`deploy/guacd`). The
+  ops package `deploy/ops` runs them with PostgreSQL: `compose.yml`, `init.sh` for `.env` and the secrets
+  as files. PostgreSQL sits on an internal network that only remotehub reaches. Installing, backup and
+  upgrades: [`docs/install.md`](install.md). The CI job `image` tries both images with the package
+  (`scripts/ci/image-check.sh`); releases via `scripts/ci/release.sh`.
 
 ## 8. Milestones
 
