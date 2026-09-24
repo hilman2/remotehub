@@ -183,6 +183,79 @@ async fn administrators_see_everything_others_only_what_is_granted(pool: PgPool)
     assert_eq!(names(&some, "credentials"), Vec::<String>::new());
 }
 
+/// Every folder starts closed; what a user opens stays open for that user
+/// only, and only folders they see (#83).
+#[sqlx::test(migrations = "../../migrations")]
+async fn each_user_keeps_their_own_open_folders(pool: PgPool) {
+    let f = fixture(pool).await;
+    let open = |token: String| {
+        let app = f.app.clone();
+        async move {
+            let tree = tree(&app, &token).await;
+            let mut ids: Vec<String> = tree["open"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|id| id.as_str().unwrap().to_owned())
+                .collect();
+            ids.sort();
+            ids
+        }
+    };
+    let set = |token: String, folder: String, value: bool| {
+        let app = f.app.clone();
+        async move {
+            call(
+                &app,
+                &token,
+                "PUT",
+                &format!("/api/folders/{folder}/open"),
+                Some(json!({ "open": value })),
+            )
+            .await
+            .status
+        }
+    };
+    assert_eq!(open(f.alice.clone()).await, Vec::<String>::new());
+
+    for folder in [&f.servers, &f.linux, &f.linux] {
+        assert_eq!(
+            set(f.alice.clone(), folder.clone(), true).await,
+            StatusCode::NO_CONTENT
+        );
+    }
+    let mut both = vec![f.servers.clone(), f.linux.clone()];
+    both.sort();
+    assert_eq!(open(f.alice.clone()).await, both);
+    assert_eq!(
+        set(f.alice.clone(), f.linux.clone(), false).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        open(f.alice.clone()).await,
+        std::slice::from_ref(&f.servers)
+    );
+
+    // bob sees none of these folders: none of them opens for bob, and
+    // alice's choice is not bob's.
+    let bob = sign_in(&f.app, "bob").await;
+    assert_eq!(
+        set(bob.clone(), f.windows.clone(), true).await,
+        StatusCode::NOT_FOUND
+    );
+    grant(
+        &f.app, &f.alice, "device", &f.web01, BOB_SID, "user", "connect",
+    )
+    .await;
+    assert_eq!(open(bob.clone()).await, Vec::<String>::new());
+    // A folder bob sees only on the way to web01 opens.
+    assert_eq!(
+        set(bob.clone(), f.linux.clone(), true).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(open(bob).await, std::slice::from_ref(&f.linux));
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn group_grants_hold_for_everything_below(pool: PgPool) {
     let f = fixture(pool).await;

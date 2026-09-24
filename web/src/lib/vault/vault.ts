@@ -3,7 +3,7 @@
  * unlock (crypto.ts has the cryptography, crates/server/src/api/personal.rs
  * the storage). The vault key lives only in memory while unlocked.
  */
-import { api } from '$lib/api/client';
+import { api, lasting } from '$lib/api/client';
 import type { Pick } from '$lib/search/rank';
 import {
 	PBKDF2_ITERATIONS,
@@ -280,10 +280,12 @@ export async function readPicks(key: CryptoKey, vault: StoredVault): Promise<Pic
 /** Seals the picks and stores them in place of the last ones. */
 export async function savePicks(key: CryptoKey, picks: Pick[]) {
 	const { nonce, ciphertext } = await seal(key, SEARCH_ID, { picks });
-	return api('PUT', '/api/personal/search', {
-		nonce: toBase64(nonce),
-		ciphertext: toBase64(ciphertext)
-	});
+	return api(
+		'PUT',
+		'/api/personal/search',
+		{ nonce: toBase64(nonce), ciphertext: toBase64(ciphertext) },
+		lasting
+	);
 }
 
 /** Encrypts and stores an entry; a new one gets a new ID. */

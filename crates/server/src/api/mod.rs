@@ -37,6 +37,7 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/folders/{id}",
             patch(catalog::update_folder).delete(catalog::delete_folder),
         )
+        .route("/folders/{id}/open", put(catalog::set_folder_open))
         .route("/devices", post(catalog::create_device))
         .route(
             "/devices/{id}",

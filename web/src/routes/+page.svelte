@@ -22,6 +22,7 @@
 		loadTree,
 		renameFolder,
 		resetHostKey,
+		setFolderOpen,
 		updateCredential,
 		updateDevice,
 		type Credential,
@@ -72,7 +73,9 @@
 	let connectors = $state<Connector[]>([]);
 	let query = $state('');
 	let selected = $state<Selection | null>(null);
-	const collapsed = new SvelteSet<string>();
+	/** Folders open in the tree; the server keeps them per user (#83). */
+	const openFolders = new SvelteSet<string>();
+	let saving: Promise<unknown> = Promise.resolve();
 	let open = $state<Open | null>(null);
 	let dialogOpen = $state(false);
 	let error = $state<string | null>(null);
@@ -138,9 +141,14 @@
 	);
 
 	async function load() {
+		await saving;
 		const [result, sites, picked] = await Promise.all([loadTree(), loadConnectors(), loadPicks()]);
-		if (result.ok) tree = result.data;
-		else error = errorMessage(result.code);
+		if (result.ok) {
+			tree = result.data;
+			// The server's word; a toggle meanwhile is stored by then anyway.
+			openFolders.clear();
+			for (const id of result.data.open) openFolders.add(id);
+		} else error = errorMessage(result.code);
 		if (sites.ok) connectors = sites.data;
 		if (picked.ok) picks = picked.data;
 	}
@@ -177,9 +185,11 @@
 		await load();
 	}
 
-	const created = (kind: ObjectKind) => (data: unknown) => {
+	/** Selects what was just created, and opens the folder it went into. */
+	const created = (kind: ObjectKind, parent: string | null) => (data: unknown) => {
 		const id = (data as { id?: string } | undefined)?.id;
 		if (id) selected = { kind, id };
+		if (parent) setOpen(parent, true);
 	};
 
 	function saveFolder(event: SubmitEvent) {
@@ -190,7 +200,7 @@
 			target.folder
 				? renameFolder(target.folder.id, folderName)
 				: createFolder(target.parent, folderName),
-			target.folder ? undefined : created('folder')
+			target.folder ? undefined : created('folder', target.parent)
 		);
 	}
 
@@ -199,7 +209,7 @@
 		const target = open;
 		run(
 			target.device ? updateDevice(target.device.id, input) : createDevice(input),
-			target.device ? undefined : created('device')
+			target.device ? undefined : created('device', input.folder_id)
 		);
 	}
 
@@ -208,7 +218,7 @@
 		const target = open;
 		run(
 			target.credential ? updateCredential(target.credential.id, input) : createCredential(input),
-			target.credential ? undefined : created('credential')
+			target.credential ? undefined : created('credential', input.folder_id)
 		);
 	}
 
@@ -230,10 +240,16 @@
 		run(createRequest({ kind, id }, role, minutes, reason), () => (requested = id));
 	}
 
-	function toggle(id: string) {
-		if (collapsed.has(id)) collapsed.delete(id);
-		else collapsed.add(id);
+	function setOpen(id: string, open: boolean) {
+		if (open === openFolders.has(id)) return;
+		if (open) openFolders.add(id);
+		else openFolders.delete(id);
+		// A preference: if it is not stored, the tree still works. The next
+		// load waits for it, or it would read the tree from before.
+		saving = Promise.all([saving, setFolderOpen(id, open)]);
 	}
+
+	const toggle = (id: string) => setOpen(id, !openFolders.has(id));
 
 	const dialogTitle = $derived.by(() => {
 		switch (open?.type) {
@@ -400,7 +416,7 @@
 						<FolderNodeView
 							{node}
 							{selected}
-							expanded={(id) => !collapsed.has(id)}
+							expanded={(id) => openFolders.has(id)}
 							onselect={choose}
 							ontoggle={toggle}
 						/>

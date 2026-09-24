@@ -398,6 +398,33 @@ test('an RDP desktop opens in the browser', async ({ page, context }) => {
 	await desktop.close();
 });
 
+test('folders start closed and stay as the user left them', async ({ page }) => {
+	await signIn(page);
+	const parent = `outer ${run}`;
+	const child = `inner ${run}`;
+	await newFolder(page, parent);
+	await page.getByRole('button', { name: 'New subfolder' }).click();
+	await page.getByRole('dialog').getByLabel('Name', { exact: true }).fill(child);
+	await page.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
+
+	const tree = page.getByRole('tree');
+	const item = (name: string) => tree.getByRole('treeitem').filter({ hasText: name }).first();
+	const inner = tree.getByRole('button', { name: child, exact: true });
+	// A new subfolder opens its parent, so it is visible.
+	await expect(inner).toBeVisible();
+
+	await item(parent).getByRole('button', { name: 'Collapse' }).click();
+	await expect(inner).toHaveCount(0);
+	await page.reload();
+	await expect(tree.getByRole('button', { name: parent, exact: true })).toBeVisible();
+	await expect(inner).toHaveCount(0);
+
+	await item(parent).getByRole('button', { name: 'Expand' }).click();
+	await expect(inner).toBeVisible();
+	await page.reload();
+	await expect(inner).toBeVisible();
+});
+
 test('the search puts first what was picked for the same query before', async ({ page }) => {
 	await signIn(page);
 	await newFolder(page, `pick one ${run}`);
