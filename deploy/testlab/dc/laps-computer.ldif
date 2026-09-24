@@ -1,0 +1,13 @@
+# Computers may hold the LAPS attributes of laps.ldif.
+dn: CN=Computer,CN=Schema,CN=Configuration,DC=remotehub,DC=test
+changetype: modify
+add: mayContain
+mayContain: msLAPS-PasswordExpirationTime
+mayContain: msLAPS-Password
+-
+
+dn:
+changetype: modify
+add: schemaUpdateNow
+schemaUpdateNow: 1
+-

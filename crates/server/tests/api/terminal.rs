@@ -563,3 +563,82 @@ async fn only_ssh_devices_sign_in_with_a_certificate(pool: PgPool) {
     assert_eq!(response.status, 400);
     assert_eq!(response.json()["params"]["field"], "auth_mode");
 }
+
+async fn laps_device(app: &Router, token: &str, folder: &str, host: &str) -> String {
+    create(
+        app,
+        token,
+        "/api/devices",
+        json!({
+            "folder_id": folder, "name": format!("laps {host}"), "protocol": "ssh", "host": host,
+            "port": 22, "auth_mode": "laps", "credential_id": null,
+        }),
+    )
+    .await
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn the_laps_password_signs_in_as_the_local_account(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let device = laps_device(&app, &token, &folder, &ssh_host()).await;
+    let address = serve(state).await;
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({})).await;
+    assert_eq!(event(&mut socket).await["type"], "connected");
+    socket
+        .send(Message::Binary(
+            b"echo \"laps: $(whoami)\"\n".to_vec().into(),
+        ))
+        .await
+        .unwrap();
+    output_until(&mut socket, "laps: tester").await;
+    drop(socket);
+
+    let log = send(&app, crate::common::get("/api/audit", Some(&token)))
+        .await
+        .json();
+    let opened = log
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["action"] == "connection.opened")
+        .unwrap();
+    assert_eq!(opened["details"]["auth_mode"], "laps");
+    assert_eq!(opened["details"]["username"], "tester");
+    assert!(!log.to_string().contains("Tester-Passw0rd!"));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn without_a_laps_password_there_is_no_connection(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let mut devices = Vec::new();
+    for host in ["nolaps", "nowhere.example.com", "offline"] {
+        devices.push(laps_device(&app, &token, &folder, host).await);
+    }
+    let address = serve(state).await;
+    for (device, code) in devices.iter().zip([
+        "laps_unavailable",
+        "laps_unavailable",
+        "directory_unavailable",
+    ]) {
+        let mut socket = open(address, device, &token, ORIGIN).await.unwrap();
+        start(&mut socket, json!({})).await;
+        assert_eq!(event(&mut socket).await["code"], code);
+    }
+    // VNC has a password of its own, which LAPS does not keep.
+    let response = send(
+        &app,
+        authed(
+            "POST",
+            "/api/devices",
+            Some(json!({
+                "folder_id": folder, "name": "vnc", "protocol": "vnc", "host": "x",
+                "port": 5900, "auth_mode": "laps", "credential_id": null,
+            })),
+            &token,
+        ),
+    )
+    .await;
+    assert_eq!(response.json()["params"]["field"], "auth_mode");
+}

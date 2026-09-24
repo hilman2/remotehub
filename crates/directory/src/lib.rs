@@ -5,6 +5,7 @@
 //! including nested ones. The first implementation is [`ldap::LdapDirectory`]
 //! for Active Directory; Entra ID (OIDC) follows in M4.
 
+pub mod laps;
 pub mod ldap;
 mod sid;
 
@@ -96,4 +97,10 @@ pub trait IdentityProvider: Send + Sync {
         query: &str,
         limit: i32,
     ) -> impl Future<Output = Result<Vec<Principal>, AuthError>> + Send;
+
+    /// The LAPS password of the computer that `host` names, read now.
+    fn laps_password(
+        &self,
+        host: &str,
+    ) -> impl Future<Output = Result<laps::LapsPassword, laps::LapsError>> + Send;
 }

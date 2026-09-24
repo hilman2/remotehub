@@ -459,3 +459,25 @@ async fn an_rdp_desktop_follows_the_browser_window(pool: PgPool) {
         .unwrap();
     instructions_until(&mut socket, "4.size,1.0,4.1280,3.720;").await;
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn an_rdp_desktop_opens_with_its_laps_password(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    // The fake directory knows the lab desktop's LAPS password by its name.
+    let rdp = device(
+        &app,
+        &token,
+        &folder,
+        json!({ "host": "desktop-target", "protocol": "rdp", "port": 3389, "auth_mode": "laps", "credential_id": null }),
+    )
+    .await;
+    let address = serve(state).await;
+    let mut socket = open(address, &rdp, &token, "display", ORIGIN)
+        .await
+        .unwrap();
+    start(&mut socket, json!({})).await;
+    assert_eq!(connected(&mut socket).await["type"], "connected");
+    let seen = instructions_until(&mut socket, "3.img,").await;
+    assert!(!seen.contains("5.error,"), "{seen:.300}");
+}

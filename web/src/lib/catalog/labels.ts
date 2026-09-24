@@ -28,7 +28,8 @@ export const AUTH_MODE_LABELS: Record<AuthMode, () => string> = {
 	stored: m.auth_stored,
 	ask: m.auth_ask,
 	own: m.auth_own,
-	certificate: m.auth_certificate
+	certificate: m.auth_certificate,
+	laps: m.auth_laps
 };
 
 export const KIND_LABELS: Record<ObjectKind, () => string> = {
