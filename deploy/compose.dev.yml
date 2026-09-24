@@ -1,6 +1,6 @@
 # Development environment — everything runs in Docker:
 #   docker compose -f deploy/compose.dev.yml up --build
-#   Database: 127.0.0.1:55440 (user, password and database: remotehub)
+#   UI: http://localhost:5180 · Database: 127.0.0.1:55440 (user, password and database: remotehub)
 #
 # Other projects on the development machine already publish 5173, 8025,
 # 55432 and 55433; remotehub only publishes 55440 (database) and 5180 (UI).
@@ -70,8 +70,29 @@ services:
       db:
         condition: service_healthy
 
+  web:
+    # SvelteKit with Vite: http://localhost:5180 (API and WebSocket go to the server)
+    build:
+      context: dev
+      dockerfile: web.Dockerfile
+    image: remotehub-dev-web
+    init: true
+    command: sh -c 'pnpm install --frozen-lockfile && pnpm dev'
+    environment:
+      TZ: Europe/Berlin
+      VITE_POLLING: "1"
+      REMOTEHUB_SERVER: http://server:8080
+      # Store inside the node_modules volume so pnpm can hard-link.
+      pnpm_config_store_dir: /work/web/node_modules/.pnpm-store
+    volumes:
+      - ..:/work
+      - web-node-modules:/work/web/node_modules
+    ports:
+      - "127.0.0.1:5180:5180"
+
 volumes:
   db:
   target:
   cargo-registry:
   cargo-git:
+  web-node-modules:

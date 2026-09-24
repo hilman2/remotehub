@@ -7,7 +7,7 @@
 # to remotehub.
 
 CI_REPO_KURZ="remotehub"
-CI_JOBS=(base rust)
+CI_JOBS=(base rust web)
 
 # shellcheck source=scripts/ci/gemeinsam.sh
 source "$(dirname "${BASH_SOURCE[0]}")/gemeinsam.sh"
@@ -75,6 +75,33 @@ job_rust() {
 
       echo "── cargo nextest"
       cargo nextest run --workspace --locked --no-tests=warn
+    '
+}
+
+# User interface: types, formatting and lint, tests (including the
+# translation guards) and the static build. The pnpm store stays between runs
+# in a volume without a label.
+job_web() {
+  local tools
+  tools="$(ci_image scripts/ci/tools.Dockerfile)"
+  ci_docker_run \
+    -v remotehub-ci-pnpm-store:/pnpm-store \
+    -e pnpm_config_store_dir=/pnpm-store \
+    "$tools" bash -euo pipefail -c '
+      cd web
+      pnpm install --frozen-lockfile
+
+      echo "── svelte-check"
+      pnpm check
+
+      echo "── prettier and eslint"
+      pnpm lint
+
+      echo "── vitest"
+      pnpm test
+
+      echo "── build"
+      pnpm build
     '
 }
 

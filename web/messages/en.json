@@ -1,0 +1,18 @@
+{
+	"$schema": "https://inlang.com/schema/inlang-message-format",
+	"skip_to_content": "Skip to content",
+	"nav_label": "Main navigation",
+	"nav_devices": "Devices",
+	"locale_label": "Language",
+	"theme_label": "Colour scheme",
+	"theme_system": "Automatic",
+	"theme_light": "Light",
+	"theme_dark": "Dark",
+	"devices_title": "Devices",
+	"devices_empty_title": "No devices yet",
+	"devices_empty_text": "All devices with a grant for your account will appear here.",
+	"server_ok": "Server reachable",
+	"server_unreachable": "Server not reachable",
+	"server_database_unavailable": "Database not reachable",
+	"footer_version": "Version {version}"
+}

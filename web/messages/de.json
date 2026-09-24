@@ -1,0 +1,18 @@
+{
+	"$schema": "https://inlang.com/schema/inlang-message-format",
+	"skip_to_content": "Zum Inhalt springen",
+	"nav_label": "Hauptnavigation",
+	"nav_devices": "Geräte",
+	"locale_label": "Sprache",
+	"theme_label": "Farbschema",
+	"theme_system": "Automatisch",
+	"theme_light": "Hell",
+	"theme_dark": "Dunkel",
+	"devices_title": "Geräte",
+	"devices_empty_title": "Noch keine Geräte",
+	"devices_empty_text": "Hier erscheinen alle Geräte, für die eine Freigabe besteht.",
+	"server_ok": "Server erreichbar",
+	"server_unreachable": "Server nicht erreichbar",
+	"server_database_unavailable": "Datenbank nicht erreichbar",
+	"footer_version": "Version {version}"
+}
