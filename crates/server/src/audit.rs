@@ -63,6 +63,8 @@ audit_actions! {
     PersonalEntrySaved = "personal.entry_saved",
     PersonalEntryDeleted = "personal.entry_deleted",
     PersonalVaultReset = "personal.vault_reset",
+    ConnectorCreated = "connector.created",
+    ConnectorDeleted = "connector.deleted",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).

@@ -293,7 +293,7 @@ fn parse_or<T: FromStr>(
 
 /// `NAME_FILE` (trimmed file content) takes precedence over `NAME`; empty
 /// values count as unset.
-fn read_setting(
+pub(crate) fn read_setting(
     lookup: &impl Fn(&str) -> Option<String>,
     name: &'static str,
 ) -> Result<Option<String>, ConfigError> {

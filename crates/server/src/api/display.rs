@@ -36,7 +36,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::connect::{
-    self, Credentials, Login, Target, entry, own_account, send_json, send_problem,
+    self, Credentials, Engine, Login, Target, entry, own_account, send_json, send_problem,
 };
 use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
@@ -100,16 +100,18 @@ pub async fn display(
         .on_upgrade(move |socket| run(socket, state, session, target, own, address)))
 }
 
-/// guacd's parameters for the device. Holds the password.
+/// guacd's parameters for the device at `host:port` (its own address, or a
+/// forward to it). Holds the password.
 fn parameters<'a>(
     target: &'a Target,
+    host: &'a str,
     port: &'a str,
     credentials: &'a Credentials,
     password: &'a str,
     default_layout: &'a str,
     certificate: &'a str,
 ) -> Vec<(&'static str, &'a str)> {
-    let mut parameters = vec![("hostname", target.host.as_str()), ("port", port)];
+    let mut parameters = vec![("hostname", host), ("port", port)];
     if target.protocol == "rdp" {
         // `DOMAIN\user` as typed, unless the domain is given separately.
         let (domain, username) = match credentials.username.split_once('\\') {
@@ -211,19 +213,30 @@ async fn run(
     // 3. RDP and HTTPS: the certificate the device presents must be the
     // pinned one, or becomes it (trust on first use, like SSH host keys).
     let port = u16::try_from(target.port).unwrap_or_default();
-    let probed = match target.protocol.as_str() {
-        "rdp" => Some(
-            rdp::certificate_fingerprint(&target.host, port, PROBE_TIMEOUT)
+    let probe_route = match target.protocol.as_str() {
+        "rdp" | "https" => match connect::route(&state, &target, Engine::Server).await {
+            Ok(route) => Some(route),
+            Err(problem) => {
+                fail(&mut socket, &state, &session, &target, &problem, &address).await;
+                return;
+            }
+        },
+        _ => None,
+    };
+    let probed = match (target.protocol.as_str(), &probe_route) {
+        ("rdp", Some(route)) => Some(
+            rdp::certificate_fingerprint(&route.host, route.port, PROBE_TIMEOUT)
                 .await
                 .map(|fingerprint| (fingerprint, None)),
         ),
-        "https" => Some(
-            tls::https_certificate(&target.host, port, PROBE_TIMEOUT)
+        ("https", Some(route)) => Some(
+            tls::https_certificate(&target.host, &route.host, route.port, PROBE_TIMEOUT)
                 .await
                 .map(|presented| (presented.fingerprint, Some(presented.spki))),
         ),
         _ => None,
     };
+    drop(probe_route);
     let (certificate, spki) = match probed {
         None => (None, None),
         Some(Ok((presented, spki))) => match &target.certificate_fingerprint {
@@ -256,12 +269,29 @@ async fn run(
     };
     let zone = timezone(zone);
 
-    // 4. HTTPS: a browser on the device, signing in with the credentials.
+    // 4. Where the engine reaches the device: guacd for RDP and VNC, the
+    // browser service for HTTPS.
+    let engine = if spki.is_some() {
+        &state.settings.browser
+    } else {
+        &state.settings.guacd
+    };
+    let route = match connect::route(&state, &target, Engine::Service(engine)).await {
+        Ok(route) => route,
+        Err(problem) => {
+            fail(&mut socket, &state, &session, &target, &problem, &address).await;
+            return;
+        }
+    };
+
+    // 5. HTTPS: a browser on the device, signing in with the credentials.
     let mut browser = match &spki {
         Some(spki) => {
+            let via = route.forwarded().then(|| route.authority());
             let request = browser::Request {
                 host: &target.host,
                 port,
+                via: via.as_deref(),
                 spki,
                 width,
                 height,
@@ -295,8 +325,8 @@ async fn run(
         None => None,
     };
 
-    // 5. Connect through guacd: to the device, or to the browser's display.
-    let port = target.port.to_string();
+    // 6. Connect through guacd: to the device, or to the browser's display.
+    let port = route.port.to_string();
     let opened = {
         let vnc_port = browser.as_ref().map(|b| b.vnc_port.to_string());
         let parameters = match (&browser, &vnc_port) {
@@ -307,6 +337,7 @@ async fn run(
             ],
             _ => parameters(
                 &target,
+                &route.host,
                 &port,
                 &credentials,
                 password,
@@ -604,6 +635,7 @@ mod tests {
             host_key: None,
             keyboard_layout: None,
             certificate_fingerprint: None,
+            connector_id: None,
         };
         let credentials = Credentials {
             username: r"EXAMPLE\alice".into(),
@@ -613,6 +645,7 @@ mod tests {
         let value = |target: &Target, name: &str| {
             parameters(
                 target,
+                "desktop",
                 "3389",
                 &credentials,
                 "secret",

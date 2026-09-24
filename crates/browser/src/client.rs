@@ -27,6 +27,7 @@ pub enum BrowserError {
 pub struct Request<'a> {
     pub host: &'a str,
     pub port: u16,
+    pub via: Option<&'a str>,
     pub spki: &'a str,
     pub width: u32,
     pub height: u32,
@@ -66,7 +67,7 @@ async fn start(agent: &str, request: &Request<'_>) -> Result<Session, BrowserErr
         .map(|(username, password)| json!({ "username": username, "password": password }));
     let mut line = Zeroizing::new(
         json!({
-            "host": request.host, "port": request.port, "spki": request.spki,
+            "host": request.host, "port": request.port, "via": request.via, "spki": request.spki,
             "width": request.width, "height": request.height,
             "timezone": request.timezone, "login": login,
         })
@@ -154,6 +155,7 @@ mod tests {
             &Request {
                 host: "web-target",
                 port: 8443,
+                via: Some("10.0.0.9:40000"),
                 spki: "c3BraQ==",
                 width: 1280,
                 height: 800,
@@ -171,6 +173,7 @@ mod tests {
         assert_eq!(session.vnc_password.as_str(), "abcdefgh");
         let open = server.await.unwrap();
         assert_eq!(open.authority(), "web-target:8443");
+        assert_eq!(open.via.as_deref(), Some("10.0.0.9:40000"));
         assert_eq!(open.spki, "c3BraQ==");
         assert_eq!(open.timezone.as_deref(), Some("Europe/Berlin"));
         let login = open.login.unwrap();

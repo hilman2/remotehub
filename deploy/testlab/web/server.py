@@ -37,6 +37,9 @@ lock = threading.Lock()
 
 
 class Handler(BaseHTTPRequestHandler):
+    # Keeps connections open like a real appliance: tests count them.
+    protocol_version = "HTTP/1.1"
+
     def do_GET(self):
         if self.path == "/":
             self.reply(200, "text/html", FORM)

@@ -63,7 +63,7 @@ pub(super) fn invalid(field: &str) -> Problem {
 }
 
 /// A trimmed, non-empty name of at most 200 characters.
-fn name(value: &str, field: &str) -> Result<String, Problem> {
+pub(super) fn name(value: &str, field: &str) -> Result<String, Problem> {
     let value = value.trim();
     if value.is_empty() || value.chars().count() > 200 || value.chars().any(char::is_control) {
         return Err(invalid(field));
@@ -144,8 +144,11 @@ struct DeviceRow {
     description: String,
     /// RDP only; `None` uses the instance's default.
     keyboard_layout: Option<String>,
-    /// RDP: SHA-256 fingerprint of the pinned certificate, if one is pinned.
+    /// RDP and HTTPS: SHA-256 fingerprint of the pinned certificate, if one
+    /// is pinned.
     certificate_fingerprint: Option<String>,
+    /// The site connector the device is reached through; none: directly.
+    connector_id: Option<Uuid>,
     #[serde(skip)]
     host_key: Option<String>,
 }
@@ -191,7 +194,7 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
             .await?;
     let devices: Vec<DeviceRow> = sqlx::query_as(
         "SELECT id, folder_id, name, protocol, host, port, auth_mode, credential_id, description,
-                keyboard_layout, certificate_fingerprint, host_key
+                keyboard_layout, certificate_fingerprint, connector_id, host_key
          FROM devices ORDER BY lower(name)",
     )
     .fetch_all(&state.db)
@@ -403,6 +406,9 @@ pub struct DeviceInput {
     /// RDP only: one of guacd's layouts, or none for the instance's default.
     #[serde(default)]
     keyboard_layout: Option<String>,
+    /// The site connector the device is reached through; none: directly.
+    #[serde(default)]
+    connector_id: Option<Uuid>,
 }
 
 struct ValidDevice {
@@ -415,6 +421,7 @@ struct ValidDevice {
     credential_id: Option<Uuid>,
     description: String,
     keyboard_layout: Option<&'static str>,
+    connector_id: Option<Uuid>,
 }
 
 impl DeviceInput {
@@ -476,7 +483,25 @@ impl DeviceInput {
             credential_id: self.credential_id,
             description: self.description.trim().to_owned(),
             keyboard_layout,
+            connector_id: self.connector_id,
         })
+    }
+}
+
+/// A connector the device names must exist; the foreign key would only say
+/// that something is missing.
+async fn require_connector(state: &AppState, connector: Option<Uuid>) -> Result<(), Problem> {
+    let Some(connector) = connector else {
+        return Ok(());
+    };
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM connectors WHERE id = $1)")
+        .bind(connector)
+        .fetch_one(&state.db)
+        .await?;
+    if exists {
+        Ok(())
+    } else {
+        Err(invalid("connector_id"))
     }
 }
 
@@ -504,12 +529,14 @@ pub async fn create_device(
             ObjectId::Credential(credential),
         )?;
     }
+    require_connector(&state, device.connector_id).await?;
 
     let mut tx = state.db.begin().await?;
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO devices
-             (folder_id, name, protocol, host, port, auth_mode, credential_id, description, keyboard_layout)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
+             (folder_id, name, protocol, host, port, auth_mode, credential_id, description, keyboard_layout,
+              connector_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id",
     )
     .bind(device.folder_id)
     .bind(&device.name)
@@ -520,13 +547,14 @@ pub async fn create_device(
     .bind(device.credential_id)
     .bind(&device.description)
     .bind(device.keyboard_layout)
+    .bind(device.connector_id)
     .fetch_one(&mut *tx)
     .await
     .map_err(database)?;
     let details = json!({
         "name": device.name, "protocol": device.protocol, "host": device.host, "port": device.port,
         "auth_mode": device.auth_mode, "credential_id": device.credential_id,
-        "keyboard_layout": device.keyboard_layout,
+        "keyboard_layout": device.keyboard_layout, "connector_id": device.connector_id,
     });
     audit::record(
         &mut *tx,
@@ -561,15 +589,19 @@ pub async fn update_device(
             ObjectId::Folder(device.folder_id),
         )?;
     }
-    let before: (String, String, i32, Option<Uuid>) =
-        sqlx::query_as("SELECT protocol, host, port, credential_id FROM devices WHERE id = $1")
-            .bind(id)
-            .fetch_one(&state.db)
-            .await?;
+    let before: (String, String, i32, Option<Uuid>, Option<Uuid>) = sqlx::query_as(
+        "SELECT protocol, host, port, credential_id, connector_id FROM devices WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await?;
     // A credential may only be linked, or sent to a changed target, by
-    // someone who may use it (see create_device).
-    let target_changed =
-        before.0 != device.protocol || before.1 != device.host || before.2 != device.port;
+    // someone who may use it (see create_device). Another connector is
+    // another target: the same address may be another machine at its site.
+    let target_changed = before.0 != device.protocol
+        || before.1 != device.host
+        || before.2 != device.port
+        || before.4 != device.connector_id;
     if let Some(credential) = device.credential_id
         && (before.3 != Some(credential) || target_changed)
     {
@@ -580,12 +612,13 @@ pub async fn update_device(
             ObjectId::Credential(credential),
         )?;
     }
+    require_connector(&state, device.connector_id).await?;
 
     let mut tx = state.db.begin().await?;
     sqlx::query(
         "UPDATE devices SET folder_id = $2, name = $3, protocol = $4, host = $5, port = $6,
              auth_mode = $7, credential_id = $8, description = $9, keyboard_layout = $11,
-             updated_at = now(),
+             connector_id = $12, updated_at = now(),
              host_key = CASE WHEN $10 THEN NULL ELSE host_key END,
              host_key_pinned_at = CASE WHEN $10 THEN NULL ELSE host_key_pinned_at END,
              certificate_fingerprint = CASE WHEN $10 THEN NULL ELSE certificate_fingerprint END,
@@ -603,13 +636,14 @@ pub async fn update_device(
     .bind(&device.description)
     .bind(target_changed)
     .bind(device.keyboard_layout)
+    .bind(device.connector_id)
     .execute(&mut *tx)
     .await
     .map_err(database)?;
     let details = json!({
         "name": device.name, "protocol": device.protocol, "host": device.host, "port": device.port,
         "auth_mode": device.auth_mode, "credential_id": device.credential_id, "folder_id": device.folder_id,
-        "keyboard_layout": device.keyboard_layout,
+        "keyboard_layout": device.keyboard_layout, "connector_id": device.connector_id,
     });
     audit::record(
         &mut *tx,

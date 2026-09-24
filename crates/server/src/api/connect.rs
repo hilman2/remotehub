@@ -2,6 +2,7 @@
 //! caller's right to connect to it, the WebSocket's origin, the credentials
 //! resolved on the server, and the audit entries.
 
+use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 
 use axum::extract::State;
@@ -18,6 +19,7 @@ use uuid::Uuid;
 
 use super::problem::{ErrorCode, Problem};
 use crate::audit::{Action, Actor, Entry};
+use crate::connectors::{Forward, towards};
 use crate::session::Session;
 use crate::{AppState, catalog, secrets};
 
@@ -38,6 +40,88 @@ pub struct Target {
     pub host_key: Option<String>,
     pub keyboard_layout: Option<String>,
     pub certificate_fingerprint: Option<String>,
+    pub connector_id: Option<Uuid>,
+}
+
+/// Who opens the connection to the device.
+pub enum Engine<'a> {
+    /// remotehub itself: SSH and certificate probes.
+    Server,
+    /// A service next to remotehub, `host:port`: guacd or the browser
+    /// service.
+    Service(&'a str),
+}
+
+/// Where an engine reaches the device: the device's own host and port, or,
+/// behind a site connector, a forward that lives as long as the route.
+pub struct Route {
+    pub host: String,
+    pub port: u16,
+    _forward: Option<Forward>,
+}
+
+impl Route {
+    /// Whether the engine connects to a forward rather than the device.
+    pub fn forwarded(&self) -> bool {
+        self._forward.is_some()
+    }
+
+    /// `host:port`, IPv6 addresses in brackets.
+    pub fn authority(&self) -> String {
+        authority(&self.host, self.port)
+    }
+}
+
+fn authority(host: &str, port: u16) -> String {
+    if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    }
+}
+
+/// The way `engine` reaches the device (ADR 0008).
+pub async fn route(
+    state: &AppState,
+    target: &Target,
+    engine: Engine<'_>,
+) -> Result<Route, Problem> {
+    let port = u16::try_from(target.port).unwrap_or_default();
+    let Some(connector) = target.connector_id else {
+        return Ok(Route {
+            host: target.host.clone(),
+            port,
+            _forward: None,
+        });
+    };
+    if !state.connectors.is_online(connector) {
+        return Err(Problem::new(ErrorCode::ConnectorOffline));
+    }
+    let loopback = IpAddr::from(Ipv4Addr::LOCALHOST);
+    let (bind, peers) = match engine {
+        Engine::Server => (loopback, vec![loopback]),
+        Engine::Service(service) => towards(service).await.map_err(|error| {
+            tracing::warn!(service, %error, "no route to the service");
+            Problem::new(ErrorCode::ConnectionFailed)
+        })?,
+    };
+    let forward = Forward::open(
+        state.connectors.clone(),
+        connector,
+        authority(&target.host, port),
+        bind,
+        peers,
+    )
+    .await
+    .map_err(|error| {
+        tracing::warn!(%error, "cannot open a forward");
+        Problem::new(ErrorCode::ConnectionFailed)
+    })?;
+    Ok(Route {
+        host: forward.address.ip().to_string(),
+        port: forward.address.port(),
+        _forward: Some(forward),
+    })
 }
 
 /// Browsers send `Origin` with every WebSocket handshake; without this check
@@ -67,7 +151,7 @@ pub async fn target(
     }
     let target: Target = sqlx::query_as(
         "SELECT id, name, protocol, host, port, auth_mode, credential_id, host_key, keyboard_layout,
-                certificate_fingerprint
+                certificate_fingerprint, connector_id
          FROM devices WHERE id = $1",
     )
     .bind(id)

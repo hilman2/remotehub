@@ -113,7 +113,9 @@ async fn run(
     write_vnc_password(&settings.vncpasswd, &password, &dir.join("passwd")).await?;
 
     let mut xvnc = start_xvnc(settings, number, open, dir).await?;
-    let (proxy_port, proxy) = proxy::start(open.authority()).await.map_err(|_| "proxy")?;
+    let (proxy_port, proxy) = proxy::start(open.authority(), open.via.clone())
+        .await
+        .map_err(|_| "proxy")?;
     let _proxy = AbortOnDrop(proxy);
     let mut chromium = start_chromium(settings, number, open, dir, proxy_port)?;
     let group = chromium.id();

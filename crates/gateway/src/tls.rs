@@ -41,8 +41,11 @@ pub struct Certificate {
     pub spki: String,
 }
 
-/// The certificate the HTTPS server at `host:port` presents.
+/// The certificate the HTTPS server `name` presents, reached at
+/// `host:port`: the device's own address, or a forward to it. `name` goes
+/// into the handshake (SNI) as a browser sends it.
 pub async fn https_certificate(
+    name: &str,
     host: &str,
     port: u16,
     timeout: Duration,
@@ -51,7 +54,7 @@ pub async fn https_certificate(
         let stream = TcpStream::connect((host, port))
             .await
             .map_err(ProbeError::Unreachable)?;
-        let tls = handshake(host, stream).await?;
+        let tls = handshake(name, stream).await?;
         let der = leaf(&tls)?;
         Ok(Certificate {
             fingerprint: fingerprint(der),

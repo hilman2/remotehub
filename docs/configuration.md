@@ -86,6 +86,18 @@ Settings of the `remotehub-browser` container, which opens web interfaces in Chr
 | `REMOTEHUB_BROWSER_LISTEN` | `0.0.0.0:4823` | Address and port for remotehub. |
 | `REMOTEHUB_BROWSER_MEMORY` | `3g` | Ops package only: the container's memory limit. |
 
+## Site connector
+
+Settings of `remotehub connector`, which runs in another network and reaches devices there for remotehub.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `REMOTEHUB_URL` | required | remotehub's public address, e.g. `https://remotehub.example.com`. |
+| `REMOTEHUB_CONNECTOR_TOKEN` | required | The token shown when the connector was created. Better as `REMOTEHUB_CONNECTOR_TOKEN_FILE`. |
+| `REMOTEHUB_CONNECTOR_CA_FILE` | system CAs | PEM file with the CA of remotehub's certificate. |
+| `REMOTEHUB_CONNECTOR_ALLOW` | – | Address ranges the connector may connect to, separated by commas, e.g. `10.20.0.0/16`. Without it, every address. |
+| `REMOTEHUB_LOG_FORMAT` | `text` | `text` or `json`. |
+
 ## Command line
 
 `remotehub` alone runs the server. In the ops package, run the other commands with
@@ -102,4 +114,5 @@ verify-audit`.
 | `break-glass delete NAME` | Deletes the account. |
 | `break-glass list` | Lists the accounts. |
 | `verify-audit` | Checks the audit log's hash chain; exits with 1 if it is broken. |
+| `connector` | Runs as a site connector (see above) instead of the server. |
 | `healthcheck` | Asks the running server for `/api/health`; exits with 1 unless it answers 200. |

@@ -56,10 +56,12 @@ export interface Device {
 	description: string;
 	/** RDP only; null uses the instance's default. */
 	keyboard_layout: KeyboardLayout | null;
-	/** RDP: SHA-256 fingerprint of the pinned certificate, if pinned. */
+	/** RDP and HTTPS: SHA-256 fingerprint of the pinned certificate, if pinned. */
 	certificate_fingerprint: string | null;
 	/** SHA-256 fingerprint of the pinned host key (SSH), if pinned. */
 	host_key_fingerprint: string | null;
+	/** The site connector the device is reached through; null: directly. */
+	connector_id: string | null;
 	role: Role;
 }
 
@@ -97,6 +99,7 @@ export interface DeviceInput {
 	credential_id: string | null;
 	description: string;
 	keyboard_layout: KeyboardLayout | null;
+	connector_id: string | null;
 }
 
 export interface CredentialInput {

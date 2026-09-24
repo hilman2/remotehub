@@ -28,6 +28,8 @@ export const ERROR_CODES = [
 	'request_decided',
 	'own_request',
 	'last_unlock',
+	'connector_in_use',
+	'connector_offline',
 	'directory_unavailable',
 	'database_unavailable',
 	'internal'
