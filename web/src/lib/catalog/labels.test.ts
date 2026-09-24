@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { KEYBOARD_LAYOUTS } from '$lib/api/catalog';
+import { AUTH_MODES, KEYBOARD_LAYOUTS, authModesFor } from '$lib/api/catalog';
 import { locales } from '$lib/i18n';
-import { durationLabel, keyboardLayoutLabel } from './labels';
+import { AUTH_MODE_LABELS, durationLabel, keyboardLayoutLabel } from './labels';
+
+describe('sign-in modes', () => {
+	it('fit the protocol', () => {
+		expect(authModesFor('ssh')).toEqual(AUTH_MODES);
+		expect(authModesFor('rdp')).toEqual(['stored', 'ask', 'own', 'laps']);
+		expect(authModesFor('vnc')).toEqual(['stored', 'ask', 'own']);
+		for (const mode of AUTH_MODES) expect(AUTH_MODE_LABELS[mode]()).not.toBe('');
+	});
+});
 
 describe('duration labels', () => {
 	it('count hours in the UI language', () => {

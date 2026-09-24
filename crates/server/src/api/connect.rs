@@ -8,6 +8,8 @@ use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket};
 use axum::http::HeaderMap;
 use axum::http::header::ORIGIN;
+use remotehub_directory::AuthError;
+use remotehub_directory::laps::LapsError;
 use remotehub_gateway::ssh::SshKey;
 use remotehub_model::{ObjectId, Role};
 use secrecy::{ExposeSecret, SecretString};
@@ -206,7 +208,7 @@ async fn stored_text(
         .map_err(|_| Problem::new(ErrorCode::Internal))
 }
 
-/// Credentials for the device's sign-in mode `stored` or `ask`.
+/// Credentials for the device's sign-in mode `stored`, `laps` or `ask`.
 pub async fn credentials(
     state: &AppState,
     target: &Target,
@@ -251,6 +253,30 @@ pub async fn credentials(
                 username,
                 domain,
                 login,
+            })
+        }
+        "laps" => {
+            let directory = state
+                .directory
+                .as_ref()
+                .ok_or(Problem::new(ErrorCode::DirectoryUnavailable))?;
+            let laps = directory
+                .laps_password(&target.host)
+                .await
+                .map_err(|error| {
+                    tracing::warn!(device = %target.id, %error, "no LAPS password");
+                    match error {
+                        LapsError::Directory(AuthError::Unavailable(_)) => {
+                            Problem::new(ErrorCode::DirectoryUnavailable)
+                        }
+                        _ => Problem::new(ErrorCode::LapsUnavailable),
+                    }
+                })?;
+            // The computer's name as the domain makes it a local account.
+            Ok(Credentials {
+                username: laps.account,
+                domain: laps.computer,
+                login: Login::Password(laps.password),
             })
         }
         "ask" => {

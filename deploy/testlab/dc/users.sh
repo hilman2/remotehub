@@ -7,6 +7,11 @@
 #                  member of "RH Operators" (nested)
 #   carol          disabled                               Carol-Passw0rd!
 #   dave           no groups besides Domain Users         Dave-Passw0rd!
+#
+# Computers with a Windows LAPS password (msLAPS-Password) that works on the
+# lab target of the same name: desktop-target (RDP) and ssh-target (SSH),
+# both for the account tester. nolaps has a computer account but no LAPS
+# password.
 set -eu
 
 user() { # name password given surname
@@ -29,3 +34,29 @@ samba-tool group addmembers "Helpdesk" bob
 samba-tool group addmembers "RH Operators" Helpdesk
 
 samba-tool user disable carol
+
+# LAPS: the schema first, in two steps (see laps.ldif), then the computers.
+sam=/var/lib/samba/private/sam.ldb
+ldbmodify -H "$sam" --option="dsdb:schema update allowed=true" /usr/local/share/testlab/laps.ldif
+ldbmodify -H "$sam" --option="dsdb:schema update allowed=true" \
+  /usr/local/share/testlab/laps-computer.ldif
+
+computer() { # name [laps-json]
+  samba-tool computer create "$1"
+  {
+    echo "dn: CN=$1,CN=Computers,DC=remotehub,DC=test"
+    echo "changetype: modify"
+    echo "replace: dNSHostName"
+    echo "dNSHostName: $1.remotehub.test"
+    echo "-"
+    if [ -n "${2:-}" ]; then
+      echo "replace: msLAPS-Password"
+      echo "msLAPS-Password: $2"
+      echo "-"
+    fi
+  } | ldbmodify -H "$sam"
+}
+
+computer desktop-target '{"n":"tester","t":"1dc2f4d1e4a5b00","p":"Tester-Passw0rd!"}'
+computer ssh-target '{"n":"tester","t":"1dc2f4d1e4a5b00","p":"Tester-Passw0rd!"}'
+computer nolaps

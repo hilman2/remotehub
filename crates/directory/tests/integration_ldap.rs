@@ -187,3 +187,35 @@ async fn groups_can_be_searched_by_part_of_their_name() {
         .collect();
     assert_eq!(names, ["RH Admins", "RH Operators"]);
 }
+
+#[tokio::test]
+#[ignore = "needs the test lab"]
+async fn laps_passwords_are_found_by_host_name() {
+    use remotehub_directory::laps::LapsError;
+    use secrecy::ExposeSecret;
+
+    let directory = directory();
+    for host in [
+        "desktop-target",
+        "desktop-target.remotehub.test",
+        "DESKTOP-TARGET.",
+    ] {
+        let laps = directory.laps_password(host).await.unwrap();
+        assert_eq!(laps.account, "tester", "{host}");
+        assert_eq!(laps.password.expose_secret(), "Tester-Passw0rd!");
+        assert_eq!(laps.computer, "desktop-target");
+    }
+    assert!(matches!(
+        directory.laps_password("nolaps").await,
+        Err(LapsError::NoPassword(_))
+    ));
+    for host in ["nowhere", "10.0.0.5", "*"] {
+        assert!(
+            matches!(
+                directory.laps_password(host).await,
+                Err(LapsError::ComputerNotFound(_))
+            ),
+            "{host}"
+        );
+    }
+}

@@ -431,6 +431,8 @@ impl DeviceInput {
             "own" => "own",
             // Certificates are SSH's own; RDP and VNC know nothing like it.
             "certificate" if protocol == "ssh" => "certificate",
+            // VNC has its own password, which LAPS does not keep.
+            "laps" if protocol != "vnc" => "laps",
             _ => return Err(invalid("auth_mode")),
         };
         // A stored credential is exactly what "stored" means, and nothing else.

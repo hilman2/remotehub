@@ -209,6 +209,47 @@ test('access asked for just in time is approved by someone else', async ({ page,
 	await bobs.close();
 });
 
+test('an RDP desktop opens with the password LAPS keeps in the directory', async ({
+	page,
+	context
+}) => {
+	await signIn(page);
+	const dialog = page.getByRole('dialog');
+	const folder = `E2E laps ${run}`;
+	await newFolder(page, folder);
+	// No credential: the lab's directory holds a LAPS password for desktop-target.
+	const name = `lab rdp laps ${run}`;
+	await page.getByRole('tree').getByRole('button', { name: folder, exact: true }).click();
+	await page.getByRole('button', { name: 'New device' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(name);
+	await dialog.getByLabel('Protocol').selectOption({ label: 'Remote Desktop (RDP)' });
+	await dialog.getByLabel('Host name or IP address').fill(desktopHost);
+	await dialog
+		.getByLabel('Sign in with')
+		.selectOption({ label: 'The local administrator from LAPS' });
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name })).toBeVisible();
+
+	const [desktop] = await Promise.all([
+		context.waitForEvent('page'),
+		page.getByRole('link', { name: 'Connect' }).click()
+	]);
+	await expect(desktop.getByRole('application')).toBeVisible();
+	// The lab desktop's background (#1e5b8c): the sign-in worked.
+	await expect
+		.poll(
+			() =>
+				desktop.evaluate(() => {
+					const canvas = document.querySelector<HTMLCanvasElement>('[role=application] canvas');
+					const pixel = canvas?.getContext('2d')?.getImageData(4, 4, 1, 1).data;
+					return pixel ? [pixel[0], pixel[1], pixel[2]] : null;
+				}),
+			{ timeout: 15_000 }
+		)
+		.toEqual([30, 91, 140]);
+	await desktop.close();
+});
+
 test('an RDP desktop opens in the browser', async ({ page, context }) => {
 	// Chromium asks before a page reads the clipboard; the test says yes.
 	await context.grantPermissions(['clipboard-read', 'clipboard-write']);

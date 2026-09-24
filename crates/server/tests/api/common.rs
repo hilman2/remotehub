@@ -8,6 +8,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
+use remotehub_directory::laps::{LapsError, LapsPassword};
 use remotehub_directory::{AuthError, Identity, IdentityProvider, Principal, PrincipalKind, Sid};
 use remotehub_server::config::SessionConfig;
 use remotehub_server::{AppState, Settings};
@@ -131,6 +132,22 @@ impl IdentityProvider for FakeDirectory {
             ("carol", _) => Err(AuthError::AccountDisabled),
             ("offline", _) => Err(AuthError::Unavailable("connection refused".into())),
             _ => Err(AuthError::InvalidCredentials),
+        }
+    }
+
+    /// The lab's SSH and desktop targets have LAPS passwords, as in the lab's
+    /// directory (deploy/testlab/dc/users.sh); "nolaps" has none; "offline"
+    /// makes the directory unreachable.
+    async fn laps_password(&self, host: &str) -> Result<LapsPassword, LapsError> {
+        match host {
+            "ssh-target" | "desktop-target" => Ok(LapsPassword {
+                account: "tester".into(),
+                password: SecretString::from("Tester-Passw0rd!"),
+                computer: host.to_uppercase(),
+            }),
+            "nolaps" => Err(LapsError::NoPassword(host.into())),
+            "offline" => Err(AuthError::Unavailable("connection refused".into()).into()),
+            _ => Err(LapsError::ComputerNotFound(host.into())),
         }
     }
 }

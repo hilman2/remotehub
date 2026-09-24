@@ -62,6 +62,7 @@ error_codes! {
     ConnectionFailed = ("connection_failed", BAD_GATEWAY, "The connection failed"),
     OwnAccountUnavailable = ("own_account_unavailable", CONFLICT, "The own sign-in password is not available in this session"),
     SshCaUnavailable = ("ssh_ca_unavailable", CONFLICT, "No SSH certificate authority is configured"),
+    LapsUnavailable = ("laps_unavailable", CONFLICT, "No readable LAPS password for this device"),
     RequestPending = ("request_pending", CONFLICT, "The same request is already waiting for a decision"),
     RequestDecided = ("request_decided", CONFLICT, "The request has been decided already"),
     OwnRequest = ("own_request", FORBIDDEN, "Nobody approves their own request"),

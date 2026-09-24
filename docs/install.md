@@ -143,6 +143,22 @@ sudo systemctl reload ssh
 The certificate's principal is the remotehub user name, e.g. `alice`, and the device needs an account of that
 name. The target's log names the key as `remotehub <user> device <id>`.
 
+## Sign in with LAPS passwords
+
+A device set to sign in with "The local administrator from LAPS" uses the password that Windows LAPS or legacy
+Microsoft LAPS keeps on the device's computer account. remotehub reads it at every connection with its
+service account and stores it nowhere. It finds the computer account by the device's host name, so the host
+must be the computer's DNS name or its first label, not an IP address.
+
+Allow the service account to read the passwords of the computers in question, for Windows LAPS:
+
+```powershell
+Set-LapsADReadPasswordPermission -Identity "OU=Servers,DC=example,DC=com" -AllowedPrincipals "svc-remotehub"
+```
+
+and for legacy LAPS `Set-AdmPwdReadPasswordPermission` likewise. remotehub reads the plain-text
+`msLAPS-Password` and `ms-Mcs-AdmPwd`; encrypted Windows LAPS passwords and Entra LAPS are not supported yet.
+
 ## Back up and restore
 
 Back up the database regularly, and `secrets/master_key` once, apart from it:

@@ -148,6 +148,9 @@
 			</option>
 		{/each}
 	</select>
+	{#if authMode === 'laps'}
+		<p class="mt-1 text-xs text-ink-3">{m.auth_laps_hint()}</p>
+	{/if}
 	{#if authMode === 'certificate'}
 		<p class="mt-1 text-xs break-words text-ink-3">
 			{m.auth_certificate_hint({ url: new URL('/api/ssh-ca.pub', window.location.href).href })}

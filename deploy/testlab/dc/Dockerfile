@@ -29,6 +29,7 @@ RUN rm -f /etc/samba/smb.conf \
 COPY tls/ca.crt tls/dc.crt tls/dc.key /etc/samba/tls/
 RUN chmod 600 /etc/samba/tls/dc.key
 
+COPY laps.ldif laps-computer.ldif /usr/local/share/testlab/
 COPY users.sh /usr/local/bin/users.sh
 RUN sh /usr/local/bin/users.sh
 

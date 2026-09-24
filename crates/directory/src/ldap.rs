@@ -25,6 +25,7 @@ use rustls_pki_types::pem::PemObject;
 use secrecy::{ExposeSecret, SecretString};
 use uuid::Uuid;
 
+use crate::laps::{self, LapsError, LapsPassword};
 use crate::{AuthError, Group, Identity, IdentityProvider, Principal, PrincipalKind, Sid};
 
 /// LDAP result codes.
@@ -259,6 +260,42 @@ impl LdapDirectory {
 }
 
 impl IdentityProvider for LdapDirectory {
+    async fn laps_password(&self, host: &str) -> Result<LapsPassword, LapsError> {
+        let filter = laps::filter(host).ok_or_else(|| LapsError::ComputerNotFound(host.into()))?;
+        let mut ldap = self.service().await?;
+        let SearchResult(entries, result) = ldap
+            .with_timeout(self.config.timeout)
+            .search(
+                &self.config.base_dn,
+                Scope::Subtree,
+                &filter,
+                laps::ATTRIBUTES.to_vec(),
+            )
+            .await
+            .map_err(unavailable)?;
+        let _ = ldap.unbind().await;
+        if result.rc != 0 {
+            return Err(AuthError::Directory(format!(
+                "computer search failed with code {}: {}",
+                result.rc, result.text
+            ))
+            .into());
+        }
+        let entries: Vec<SearchEntry> = entries.into_iter().map(SearchEntry::construct).collect();
+        let dns_names: Vec<Option<String>> = entries
+            .iter()
+            .map(|entry| first_text(entry, "dNSHostName"))
+            .collect();
+        let entry = &entries[laps::choose(&dns_names, host)?];
+        let computer = first_text(entry, "sAMAccountName").unwrap_or_default();
+        laps::password(
+            first_text(entry, "msLAPS-Password").as_deref(),
+            first_text(entry, "ms-Mcs-AdmPwd").as_deref(),
+            &computer,
+        )
+        .ok_or_else(|| LapsError::NoPassword(host.into()))
+    }
+
     async fn search(&self, query: &str, limit: i32) -> Result<Vec<Principal>, AuthError> {
         if query.trim().chars().count() < 2 {
             return Ok(Vec::new());

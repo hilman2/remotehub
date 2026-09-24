@@ -1,0 +1,33 @@
+# The two attributes of Windows LAPS that remotehub reads, with their names
+# and syntaxes, added to the schema as Update-LapsADSchema does in a real
+# domain; Samba has no LAPS schema of its own. laps-computer.ldif then lets
+# computers hold them; it needs a second run, after the schema has reloaded.
+dn: CN=ms-LAPS-PasswordExpirationTime,CN=Schema,CN=Configuration,DC=remotehub,DC=test
+changetype: add
+objectClass: top
+objectClass: attributeSchema
+cn: ms-LAPS-PasswordExpirationTime
+attributeID: 1.2.840.113556.1.6.44.1.1
+attributeSyntax: 2.5.5.16
+omSyntax: 65
+isSingleValued: TRUE
+lDAPDisplayName: msLAPS-PasswordExpirationTime
+systemOnly: FALSE
+
+dn: CN=ms-LAPS-Password,CN=Schema,CN=Configuration,DC=remotehub,DC=test
+changetype: add
+objectClass: top
+objectClass: attributeSchema
+cn: ms-LAPS-Password
+attributeID: 1.2.840.113556.1.6.44.1.2
+attributeSyntax: 2.5.5.12
+omSyntax: 64
+isSingleValued: TRUE
+lDAPDisplayName: msLAPS-Password
+systemOnly: FALSE
+
+dn:
+changetype: modify
+add: schemaUpdateNow
+schemaUpdateNow: 1
+-
