@@ -36,3 +36,22 @@ fn generated_error_codes_are_up_to_date() {
 fn generated_audit_actions_are_up_to_date() {
     check("web/src/lib/api/generated/audit.ts", &audit::typescript());
 }
+
+#[test]
+fn generated_keyboard_layouts_are_up_to_date() {
+    let layouts: String = remotehub_gateway::guacamole::KEYBOARD_LAYOUTS
+        .iter()
+        .map(|layout| format!("\t'{layout}',\n"))
+        .collect();
+    let typescript = format!(
+        "// Generated from crates/gateway/src/guacamole.rs — do not edit.\n\
+         // Regenerate: REMOTEHUB_BLESS=1 cargo nextest run -p remotehub-server generated\n\
+         \n\
+         /** guacd's keyboard layouts for RDP sessions (`server-layout`). */\n\
+         export const KEYBOARD_LAYOUTS = [\n{}] as const;\n\
+         \n\
+         export type KeyboardLayout = (typeof KEYBOARD_LAYOUTS)[number];\n",
+        layouts.trim_end_matches(",\n").to_owned() + "\n"
+    );
+    check("web/src/lib/api/generated/keyboard.ts", &typescript);
+}

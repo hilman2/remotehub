@@ -214,6 +214,36 @@ pub fn allowed_from_browser(opcode: &str) -> bool {
     )
 }
 
+/// guacd 1.6's keyboard layouts for RDP (`server-layout`): the layout of the
+/// target's session, into whose scancodes guacd translates the browser's keys.
+/// `failsafe` sends characters as Unicode instead, whatever the layout, at
+/// the cost of some shortcuts.
+pub const KEYBOARD_LAYOUTS: &[&str] = &[
+    "cs-cz-qwertz",
+    "da-dk-qwerty",
+    "de-ch-qwertz",
+    "de-de-qwertz",
+    "en-gb-qwerty",
+    "en-us-qwerty",
+    "es-es-qwerty",
+    "es-latam-qwerty",
+    "fr-be-azerty",
+    "fr-ca-qwerty",
+    "fr-ch-qwertz",
+    "fr-fr-azerty",
+    "hu-hu-qwertz",
+    "it-it-qwerty",
+    "ja-jp-qwerty",
+    "no-no-qwerty",
+    "pl-pl-qwerty",
+    "pt-br-qwerty",
+    "pt-pt-qwerty",
+    "ro-ro-qwerty",
+    "sv-se-qwerty",
+    "tr-tr-qwerty",
+    "failsafe",
+];
+
 /// What to open: the protocol, its parameters (by guacd's names) and the
 /// browser's display.
 pub struct Handshake<'a> {

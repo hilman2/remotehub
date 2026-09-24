@@ -608,6 +608,58 @@ async fn devices_are_validated(pool: PgPool) {
     }
 }
 
+#[sqlx::test(migrations = "../../migrations")]
+async fn rdp_devices_keep_a_keyboard_layout_of_guacd(pool: PgPool) {
+    let f = fixture(pool).await;
+    let device = |protocol: &str, layout: Value| {
+        json!({
+            "folder_id": f.linux, "name": format!("{protocol} {layout}"), "protocol": protocol,
+            "host": "x.example.com", "port": 3389, "auth_mode": "ask", "credential_id": null,
+            "keyboard_layout": layout,
+        })
+    };
+    let german = create(
+        &f.app,
+        &f.alice,
+        "/api/devices",
+        device("rdp", json!("de-de-qwertz")),
+    )
+    .await;
+    let default = create(&f.app, &f.alice, "/api/devices", device("rdp", Value::Null)).await;
+    // VNC and SSH send characters: a layout would mean nothing.
+    let vnc = create(
+        &f.app,
+        &f.alice,
+        "/api/devices",
+        device("vnc", json!("de-de-qwertz")),
+    )
+    .await;
+    let response = call(
+        &f.app,
+        &f.alice,
+        "POST",
+        "/api/devices",
+        Some(device("rdp", json!("klingon"))),
+    )
+    .await;
+    assert_eq!(response.code(), "invalid_request");
+    assert_eq!(response.json()["params"]["field"], "keyboard_layout");
+
+    let tree = tree(&f.app, &f.alice).await;
+    let layout = |id: &str| {
+        tree["devices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["id"] == id)
+            .unwrap()["keyboard_layout"]
+            .clone()
+    };
+    assert_eq!(layout(&german), "de-de-qwertz");
+    assert_eq!(layout(&default), Value::Null);
+    assert_eq!(layout(&vnc), Value::Null);
+}
+
 /// A file of the lab's SSH target (deploy/testlab/ssh).
 fn lab_key(file: &str) -> String {
     let dir = std::path::PathBuf::from(

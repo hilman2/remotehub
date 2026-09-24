@@ -2,16 +2,19 @@
 	import {
 		AUTH_MODES,
 		DEFAULT_PORTS,
+		KEYBOARD_LAYOUTS,
 		PROTOCOLS,
 		allows,
 		type Credential,
 		type Device,
 		type DeviceInput,
+		type KeyboardLayout,
 		type Protocol
 	} from '$lib/api/catalog';
+	import { getLocale } from '$lib/i18n';
 	import { untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages';
-	import { AUTH_MODE_LABELS, PROTOCOL_LABELS } from './labels';
+	import { AUTH_MODE_LABELS, PROTOCOL_LABELS, keyboardLayoutLabel } from './labels';
 
 	let {
 		folderId,
@@ -36,6 +39,19 @@
 	let authMode = $state(start?.auth_mode ?? 'ask');
 	let credentialId = $state(start?.credential_id ?? '');
 	let description = $state(start?.description ?? '');
+	let keyboardLayout = $state<KeyboardLayout | ''>(start?.keyboard_layout ?? '');
+
+	// Layouts by name in the UI's language; Unicode last.
+	const layouts = $derived(
+		KEYBOARD_LAYOUTS.map((layout) => ({
+			layout,
+			label: keyboardLayoutLabel(layout, getLocale())
+		})).sort(
+			(a, b) =>
+				Number(a.layout === 'failsafe') - Number(b.layout === 'failsafe') ||
+				a.label.localeCompare(b.label, getLocale())
+		)
+	);
 
 	// Only credentials the user may use can be linked.
 	const usable = $derived(credentials.filter((c) => allows(c.role, 'connect')));
@@ -55,7 +71,8 @@
 			port: Number(port),
 			auth_mode: authMode,
 			credential_id: authMode === 'stored' ? credentialId || null : null,
-			description
+			description,
+			keyboard_layout: protocol === 'rdp' ? keyboardLayout || null : null
 		});
 	}
 
@@ -105,6 +122,22 @@
 		spellcheck="false"
 		bind:value={host}
 	/>
+
+	{#if protocol === 'rdp'}
+		<label class={label} for="device-keyboard">{m.field_keyboard_layout()}</label>
+		<select
+			id="device-keyboard"
+			class={field}
+			bind:value={keyboardLayout}
+			aria-describedby="device-keyboard-hint"
+		>
+			<option value="">{m.keyboard_layout_default()}</option>
+			{#each layouts as { layout, label: text } (layout)}
+				<option value={layout}>{text}</option>
+			{/each}
+		</select>
+		<p id="device-keyboard-hint" class="mt-1 text-xs text-ink-3">{m.keyboard_layout_hint()}</p>
+	{/if}
 
 	<label class={label} for="device-auth">{m.field_auth_mode()}</label>
 	<select id="device-auth" class={field} bind:value={authMode}>

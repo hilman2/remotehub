@@ -184,5 +184,9 @@
 	"display_ended": "Die Sitzung wurde auf dem Gerät beendet.",
 	"display_failed": "Die Verbindung ist fehlgeschlagen.",
 	"display_detail": "Einzelheiten: {detail}",
-	"credentials_username_optional": "Benutzername (falls das Gerät einen verlangt)"
+	"credentials_username_optional": "Benutzername (falls das Gerät einen verlangt)",
+	"field_keyboard_layout": "Tastaturlayout",
+	"keyboard_layout_default": "Standard dieses remotehub",
+	"keyboard_layout_hint": "Wie auf dem Gerät eingestellt, etwa Deutsch bei einem deutschen Windows; danach richtet sich das Tippen.",
+	"keyboard_layout_unicode": "Unicode (jedes Layout, manche Tastenkürzel gehen nicht)"
 }

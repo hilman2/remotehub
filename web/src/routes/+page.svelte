@@ -40,7 +40,8 @@
 		CREDENTIAL_KIND_LABELS,
 		KIND_LABELS,
 		PROTOCOL_LABELS,
-		ROLE_LABELS
+		ROLE_LABELS,
+		keyboardLayoutLabel
 	} from '$lib/catalog/labels';
 	import { filter, nest, pathTo } from '$lib/catalog/tree';
 	import Dialog from '$lib/components/Dialog.svelte';
@@ -339,6 +340,14 @@
 							</span>
 						{/if}
 					</dd>
+					{#if device.protocol === 'rdp'}
+						<dt class="text-ink-2">{m.field_keyboard_layout()}</dt>
+						<dd>
+							{device.keyboard_layout
+								? keyboardLayoutLabel(device.keyboard_layout, getLocale())
+								: m.keyboard_layout_default()}
+						</dd>
+					{/if}
 					{#if device.protocol === 'ssh'}
 						<dt class="text-ink-2">{m.device_host_key()}</dt>
 						<dd>

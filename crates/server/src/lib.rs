@@ -50,6 +50,8 @@ pub struct Settings {
     pub own_account_connections: bool,
     /// guacd for RDP and VNC (`host:port`).
     pub guacd: String,
+    /// Keyboard layout of RDP sessions for devices without one of their own.
+    pub rdp_keyboard_layout: String,
 }
 
 impl AppState {
