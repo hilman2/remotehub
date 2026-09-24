@@ -42,6 +42,16 @@ macro_rules! error_codes {
 
 error_codes! {
     NotFound = ("not_found", NOT_FOUND, "Not found"),
+    InvalidRequest = ("invalid_request", BAD_REQUEST, "Invalid request"),
+    Unauthenticated = ("unauthenticated", UNAUTHORIZED, "Not signed in"),
+    InvalidCredentials = ("invalid_credentials", UNAUTHORIZED, "Invalid user name or password"),
+    AccountDisabled = ("account_disabled", FORBIDDEN, "Account disabled"),
+    AccountLocked = ("account_locked", FORBIDDEN, "Account locked out"),
+    AccountExpired = ("account_expired", FORBIDDEN, "Account expired"),
+    PasswordChangeRequired = ("password_change_required", FORBIDDEN, "Password must be changed"),
+    TooManyAttempts = ("too_many_attempts", TOO_MANY_REQUESTS, "Too many failed sign-ins"),
+    ForbiddenOrigin = ("forbidden_origin", FORBIDDEN, "Request from a foreign origin"),
+    DirectoryUnavailable = ("directory_unavailable", SERVICE_UNAVAILABLE, "Directory unavailable"),
     DatabaseUnavailable = ("database_unavailable", SERVICE_UNAVAILABLE, "Database unavailable"),
     Internal = ("internal", INTERNAL_SERVER_ERROR, "Internal server error"),
 }

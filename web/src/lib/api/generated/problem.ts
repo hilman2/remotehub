@@ -3,6 +3,16 @@
 
 export const ERROR_CODES = [
 	'not_found',
+	'invalid_request',
+	'unauthenticated',
+	'invalid_credentials',
+	'account_disabled',
+	'account_locked',
+	'account_expired',
+	'password_change_required',
+	'too_many_attempts',
+	'forbidden_origin',
+	'directory_unavailable',
 	'database_unavailable',
 	'internal'
 ] as const;

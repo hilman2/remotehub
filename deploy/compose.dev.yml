@@ -22,7 +22,7 @@ x-rust: &rust
     - target:/target
     - cargo-registry:/usr/local/cargo/registry
     - cargo-git:/usr/local/cargo/git
-  environment:
+  environment: &rust-env
     TZ: Europe/Berlin
     RUST_LOG: info,remotehub_server=debug,tower_http=debug
     REMOTEHUB_DATABASE_URL: postgres://remotehub:remotehub@db:5432/remotehub
@@ -55,12 +55,23 @@ services:
 
   server:
     # API on http://server:8080 inside the compose network; the UI reaches it through Vite.
+    # Signs in against the test lab domain: e.g. alice / Alice-Passw0rd! (deploy/testlab/dc/users.sh).
     <<: *rust
+    environment:
+      <<: *rust-env
+      REMOTEHUB_PUBLIC_URL: http://localhost:5180
+      REMOTEHUB_LDAP_URL: ldaps://dc.remotehub.test
+      REMOTEHUB_LDAP_CA_FILE: /work/deploy/testlab/dc/tls/ca.crt
+      REMOTEHUB_LDAP_BIND_DN: svc-remotehub@remotehub.test
+      REMOTEHUB_LDAP_BIND_PASSWORD: Svc-Passw0rd!
+      REMOTEHUB_LDAP_BASE_DN: DC=remotehub,DC=test
     command: >
       watchexec --poll 1000ms --restart --watch crates --watch migrations --watch Cargo.toml
       --exts rs,toml,sql,ftl -- cargo run --package remotehub-server
     depends_on:
       db:
+        condition: service_healthy
+      dc:
         condition: service_healthy
 
   # Workbench for a shell, tests and rust-analyzer (dev container, .devcontainer/):
