@@ -28,6 +28,9 @@ x-rust: &rust
     REMOTEHUB_DATABASE_URL: postgres://remotehub:remotehub@db:5432/remotehub
     # For #[sqlx::test]: creates a fresh database per test on this server.
     DATABASE_URL: postgres://remotehub:remotehub@db:5432/remotehub
+    # Test lab for the integration tests (tests/integration_*.rs).
+    REMOTEHUB_TEST_LDAP_URL: ldaps://dc.remotehub.test
+    REMOTEHUB_TEST_SSH_HOST: ssh-target
 
 services:
   db:
@@ -69,6 +72,31 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      dc:
+        condition: service_healthy
+      ssh-target:
+        condition: service_started
+
+  # Test lab (deploy/testlab): a throwaway AD domain and an SSH target for the
+  # integration tests. Only reachable on the compose network; users,
+  # passwords and keys are in the READMEs and scripts there.
+  dc:
+    build: testlab/dc
+    image: remotehub-testlab-dc
+    hostname: dc
+    networks:
+      default:
+        aliases: [dc.remotehub.test]
+    healthcheck:
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/636"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  ssh-target:
+    build: testlab/ssh
+    image: remotehub-testlab-ssh
+    hostname: ssh-target
 
   web:
     # SvelteKit with Vite: http://localhost:5180 (API and WebSocket go to the server)

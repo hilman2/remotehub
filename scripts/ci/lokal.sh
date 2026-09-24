@@ -7,7 +7,7 @@
 # to remotehub.
 
 CI_REPO_KURZ="remotehub"
-CI_JOBS=(base rust web)
+CI_JOBS=(base rust web integration)
 
 # shellcheck source=scripts/ci/gemeinsam.sh
 source "$(dirname "${BASH_SOURCE[0]}")/gemeinsam.sh"
@@ -47,6 +47,8 @@ job_base() {
 
 # Formatting, Clippy without warnings and the tests of the whole workspace
 # against a fresh PostgreSQL (#[sqlx::test] creates a database per test).
+# Tests that need the test lab are #[ignore]d here and run in the job
+# integration.
 # Every run unpacks the commit afresh; so Rust does not build cold each time,
 # the registry and target/ live in volumes without a label — gemeinsam.sh
 # removes labelled volumes after the run. Build jobs are capped because the
@@ -102,6 +104,37 @@ job_web() {
 
       echo "── build"
       pnpm build
+    '
+}
+
+# Integration tests against the test lab (deploy/testlab): a Samba AD domain
+# controller and an SSH target, built from the commit under test (the build
+# cache keeps this fast), plus a fresh PostgreSQL. Runs exactly the tests
+# marked #[ignore = "needs the test lab"].
+job_integration() {
+  local tools
+  tools="$(ci_image scripts/ci/tools.Dockerfile)"
+  ci_docker_run "$tools" bash -euo pipefail -c '
+    docker build --quiet --tag remotehub-ci-testlab-dc deploy/testlab/dc
+    docker build --quiet --tag remotehub-ci-testlab-ssh deploy/testlab/ssh
+  '
+  ci_dienst db-integration -e POSTGRES_USER=ci -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=ci "$POSTGRES_IMAGE"
+  ci_dienst dc --hostname dc --network-alias dc.remotehub.test remotehub-ci-testlab-dc
+  ci_dienst ssh-target --hostname ssh-target remotehub-ci-testlab-ssh
+  ci_warten db-integration 60 pg_isready -h 127.0.0.1 -U ci -d ci
+  ci_warten dc 60 bash -c '</dev/tcp/127.0.0.1/636'
+  ci_warten ssh-target 30 bash -c '</dev/tcp/127.0.0.1/22'
+  ci_docker_run \
+    -v remotehub-ci-cargo-registry:/usr/local/cargo/registry \
+    -v remotehub-ci-cargo-git:/usr/local/cargo/git \
+    -v remotehub-ci-target:/ci-target \
+    -e CARGO_TARGET_DIR=/ci-target -e CARGO_BUILD_JOBS=6 -e CARGO_TERM_COLOR=never \
+    -e DATABASE_URL=postgres://ci:ci@db-integration:5432/ci \
+    -e REMOTEHUB_TEST_LDAP_URL=ldaps://dc.remotehub.test \
+    -e REMOTEHUB_TEST_SSH_HOST=ssh-target \
+    "$tools" bash -euo pipefail -c '
+      echo "── cargo nextest (integration)"
+      cargo nextest run --workspace --locked --no-tests=warn --run-ignored only
     '
 }
 

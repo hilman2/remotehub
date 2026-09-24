@@ -3,7 +3,7 @@
   "name": "remotehub",
   "dockerComposeFile": ["../deploy/compose.dev.yml"],
   "service": "workbench",
-  "runServices": ["workbench", "db"],
+  "runServices": ["workbench", "db", "dc", "ssh-target"],
   "workspaceFolder": "/work",
   "customizations": {
     "vscode": {
