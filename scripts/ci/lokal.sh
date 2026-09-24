@@ -155,7 +155,8 @@ start_lab() { # tools
   ci_dienst dc --hostname dc --network-alias dc.remotehub.test remotehub-ci-testlab-dc
   ci_dienst ssh-target --hostname ssh-target remotehub-ci-testlab-ssh
   ci_dienst desktop-target --hostname desktop-target remotehub-ci-testlab-desktop
-  ci_dienst guacd --read-only --tmpfs /tmp --tmpfs /home/guacd:uid=1000,mode=0700 \n    --cap-drop ALL --security-opt no-new-privileges remotehub-ci-guacd
+  ci_dienst guacd --read-only --tmpfs /tmp --tmpfs /home/guacd:uid=1000,mode=0700 \
+    --cap-drop ALL --security-opt no-new-privileges remotehub-ci-guacd
   ci_warten dc 60 bash -c '</dev/tcp/127.0.0.1/636'
   ci_warten ssh-target 30 bash -c '</dev/tcp/127.0.0.1/22'
   ci_warten desktop-target 30 bash -c '</dev/tcp/127.0.0.1/3389 && </dev/tcp/127.0.0.1/5900'
