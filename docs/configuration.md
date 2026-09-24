@@ -77,7 +77,9 @@ characters instead of keys.
 ## Command line
 
 `remotehub` alone runs the server. In the ops package, run the other commands with
-`docker compose exec remotehub remotehub <command>`:
+`docker compose exec remotehub remotehub <command>`. They answer in the language of `LC_ALL`, `LC_MESSAGES`
+or `LANG` (English or German, English otherwise), e.g. `docker compose exec -e LANG=de remotehub remotehub
+verify-audit`.
 
 | Command | Does |
 |---|---|

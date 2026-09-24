@@ -150,7 +150,7 @@ English is the base locale, German the second; more can follow (ADR 0002).
 
 - **UI:** paraglide-js with `web/messages/{en,de}.json`, typed message functions.
 - **Server:** API errors are `ErrorCode`s with parameters, translated by the UI; server-rendered text
-  (exports, mails) uses Fluent catalogs via `Message`.
+  (the admin CLI now, later exports and mails) uses Fluent catalogs via `Message`.
 - **Guards:** tests fail on words in components, missing or unused keys, mismatched placeholders, German
   texts identical to English (unless allow-listed), error codes without messages, and Fluent catalogs whose
   message IDs or variables differ between locales.

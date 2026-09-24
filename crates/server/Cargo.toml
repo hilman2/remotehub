@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 remotehub-directory.workspace = true
 remotehub-gateway.workspace = true
+remotehub-i18n.workspace = true
 remotehub-model.workspace = true
 remotehub-vault.workspace = true
 
