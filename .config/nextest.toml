@@ -1,0 +1,16 @@
+# nextest runs every test in its own process, many at once.
+
+# The lab's desktop target (deploy/testlab/desktop) starts an xrdp session
+# per RDP connection, and several starting at once fail at random: tests
+# then time out waiting for the first picture (#75). Its RDP and VNC tests
+# run one after another; everything else keeps running beside them. Even one
+# at a time, two of five full lab runs lost the first session start (guacd
+# reports "User is not responding"), so these tests get one retry; nextest
+# reports such a test as FLAKY.
+[test-groups]
+lab-desktop = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = "binary(integration_guacamole) | (package(remotehub-server) & binary(api) & test(/^display::/))"
+test-group = "lab-desktop"
+retries = 1
