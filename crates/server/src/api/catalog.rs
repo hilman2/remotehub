@@ -28,7 +28,10 @@ const PASSWORD_FIELD: &str = "password";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-async fn context(state: &AppState, session: &Session) -> Result<(Subject, Catalog), Problem> {
+pub(super) async fn context(
+    state: &AppState,
+    session: &Session,
+) -> Result<(Subject, Catalog), Problem> {
     Ok((
         session.subject(&state.settings),
         catalog::load(&state.db).await?,
@@ -50,12 +53,12 @@ fn require(
     }
 }
 
-fn body<T>(body: Result<Json<T>, JsonRejection>) -> Result<T, Problem> {
+pub(super) fn body<T>(body: Result<Json<T>, JsonRejection>) -> Result<T, Problem> {
     body.map(|Json(value)| value)
         .map_err(|_| Problem::new(ErrorCode::InvalidRequest))
 }
 
-fn invalid(field: &str) -> Problem {
+pub(super) fn invalid(field: &str) -> Problem {
     Problem::new(ErrorCode::InvalidRequest).param("field", field)
 }
 
@@ -83,7 +86,7 @@ fn database(error: sqlx::Error) -> Problem {
     Problem::from(error)
 }
 
-fn entry<'a>(
+pub(super) fn entry<'a>(
     session: &'a Session,
     action: Action,
     object: ObjectId,
@@ -1021,11 +1024,11 @@ fn secret_problem(error: secrets::SecretError) -> Problem {
 
 #[derive(Deserialize)]
 pub struct ObjectQuery {
-    kind: String,
-    id: Uuid,
+    pub(super) kind: String,
+    pub(super) id: Uuid,
 }
 
-fn object(kind: &str, id: Uuid) -> Result<ObjectId, Problem> {
+pub(super) fn object(kind: &str, id: Uuid) -> Result<ObjectId, Problem> {
     match kind {
         "folder" => Ok(ObjectId::Folder(id)),
         "device" => Ok(ObjectId::Device(id)),
@@ -1044,6 +1047,8 @@ struct GrantRow {
     principal_sid: String,
     principal_name: String,
     role: String,
+    /// RFC 3339 in UTC, for a just-in-time grant.
+    expires_at: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1074,9 +1079,11 @@ pub async fn list_grants(
         next = catalog.parent(ObjectId::Folder(folder));
     }
     let rows: Vec<GrantRow> = sqlx::query_as(
-        "SELECT id, folder_id, device_id, credential_id, principal_kind, principal_sid, principal_name, role
+        "SELECT id, folder_id, device_id, credential_id, principal_kind, principal_sid, principal_name, role,
+                to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS expires_at
          FROM grants
-         WHERE folder_id = ANY($1) OR folder_id = $2 OR device_id = $2 OR credential_id = $2
+         WHERE (folder_id = ANY($1) OR folder_id = $2 OR device_id = $2 OR credential_id = $2)
+           AND (expires_at IS NULL OR expires_at > now())
          ORDER BY lower(principal_name)",
     )
     .bind(&ancestors)
@@ -1130,7 +1137,7 @@ pub async fn add_grant(
         "INSERT INTO grants (folder_id, device_id, credential_id, principal_kind, principal_sid,
                              principal_name, role, created_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         ON CONFLICT (folder_id, device_id, credential_id, principal_sid)
+         ON CONFLICT (folder_id, device_id, credential_id, principal_sid) WHERE expires_at IS NULL
          DO UPDATE SET role = EXCLUDED.role, principal_name = EXCLUDED.principal_name",
     )
     .bind(folder)
@@ -1163,7 +1170,8 @@ pub async fn remove_grant(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, Problem> {
     let row: Option<GrantRow> = sqlx::query_as(
-        "SELECT id, folder_id, device_id, credential_id, principal_kind, principal_sid, principal_name, role
+        "SELECT id, folder_id, device_id, credential_id, principal_kind, principal_sid, principal_name, role,
+                to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS expires_at
          FROM grants WHERE id = $1",
     )
     .bind(id)

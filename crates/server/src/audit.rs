@@ -54,6 +54,10 @@ audit_actions! {
     HostKeyReset = "device.host_key_reset",
     CertificatePinned = "device.certificate_pinned",
     CertificateReset = "device.certificate_reset",
+    AccessRequested = "access.requested",
+    AccessApproved = "access.approved",
+    AccessDenied = "access.denied",
+    AccessCancelled = "access.cancelled",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).

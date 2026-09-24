@@ -7,6 +7,7 @@ mod display;
 pub mod health;
 mod origin;
 pub mod problem;
+mod requests;
 pub mod session;
 mod terminal;
 
@@ -53,6 +54,13 @@ pub fn router(state: AppState) -> Router<AppState> {
         )
         .route("/grants/{id}", delete(catalog::remove_grant))
         .route("/directory/principals", get(catalog::search_principals))
+        .route(
+            "/access-requests",
+            get(requests::list).post(requests::create),
+        )
+        .route("/access-requests/{id}", delete(requests::cancel))
+        .route("/access-requests/{id}/approve", post(requests::approve))
+        .route("/access-requests/{id}/deny", post(requests::deny))
         .route("/audit", get(audit::list))
         .route("/audit/verify", post(audit::verify))
         // Unknown API paths are a problem response, never the SPA's index.html.

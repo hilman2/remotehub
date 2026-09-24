@@ -107,6 +107,8 @@ export interface GrantRow {
 	principal_sid: string;
 	principal_name: string;
 	role: Role;
+	/** RFC 3339, UTC: when a just-in-time grant runs out. */
+	expires_at: string | null;
 }
 
 export interface Principal {

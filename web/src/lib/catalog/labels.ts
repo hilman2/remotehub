@@ -42,6 +42,15 @@ export const CREDENTIAL_KIND_LABELS: Record<CredentialKind, () => string> = {
 	ssh_key: m.credential_kind_ssh_key
 };
 
+/** A duration in whole hours in the UI's language: 60 → "1 hour", 1440 → "24 hours". */
+export function durationLabel(minutes: number, locale?: Locale): string {
+	return new Intl.NumberFormat(formatLocale(locale), {
+		style: 'unit',
+		unit: 'hour',
+		unitDisplay: 'long'
+	}).format(minutes / 60);
+}
+
 /**
  * A keyboard layout by the language and region it is for, in the UI's
  * language (`de-de-qwertz` → "German (Germany) · QWERTZ").
