@@ -10,7 +10,8 @@ use remotehub_directory::{AuthError, Identity, IdentityProvider, Sid};
 use secrecy::SecretString;
 
 fn lab_file(path: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    // At run time: a test binary must not depend on the path it was built under.
+    PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("set by cargo and nextest"))
         .join("../../deploy/testlab")
         .join(path)
 }
