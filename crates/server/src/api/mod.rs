@@ -38,6 +38,7 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/devices/{id}",
             put(catalog::update_device).delete(catalog::delete_device),
         )
+        .route("/ssh-ca.pub", get(connect::ssh_ca_public_key))
         .route("/devices/{id}/terminal", get(terminal::terminal))
         .route("/devices/{id}/display", get(display::display))
         .route("/devices/{id}/host-key", delete(catalog::reset_host_key))

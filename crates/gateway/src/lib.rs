@@ -5,3 +5,4 @@
 pub mod guacamole;
 pub mod rdp;
 pub mod ssh;
+pub mod ssh_ca;

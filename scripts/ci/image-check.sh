@@ -44,12 +44,13 @@ fail() {
 
 echo "── init.sh"
 sh init.sh
-for secret in db_password master_key ldap_bind_password; do
+for secret in db_password master_key ssh_ca_key ldap_bind_password; do
   [ -f "secrets/$secret" ] || fail "init.sh did not create secrets/$secret"
 done
 [ "$(stat -c %a secrets)" = 700 ] || fail "secrets/ is not 0700"
 [ "$(stat -c %u:%g:%a secrets/master_key)" = 65532:65532:400 ] || fail "secrets/master_key is not 65532:65532, 0400"
 [ "$(stat -c %u:%g:%a secrets/db_password)" = 65532:999:440 ] || fail "secrets/db_password is not 65532:999, 0440"
+[ "$(stat -c %u:%g:%a secrets/ssh_ca_key)" = 65532:65532:400 ] || fail "secrets/ssh_ca_key is not 65532:65532, 0400"
 [ -s secrets/master_key ] || fail "secrets/master_key is empty"
 sh init.sh | grep -q "kept    secrets/master_key" || fail "a second init.sh did not keep the secrets"
 
@@ -68,8 +69,8 @@ address() { # service network
 }
 remotehub="$(address remotehub default)"
 
-if docker compose -p "$project" logs remotehub | grep "master key file"; then
-  fail "remotehub finds the master key file too open"
+if docker compose -p "$project" logs remotehub | grep "accessible to other users"; then
+  fail "remotehub finds a key file too open"
 fi
 
 echo "── remotehub answers"
@@ -78,6 +79,8 @@ echo "$health"
 grep -q "\"version\":\"${version}\"" <<<"$health" || fail "version is not ${version}"
 grep -q '"database":"ok"' <<<"$health" || fail "the database is not reachable"
 curl -fsS "http://${remotehub}:8080/" | grep -q '<html' || fail "the web UI is not served"
+curl -fsS "http://${remotehub}:8080/api/ssh-ca.pub" | grep -q '^ssh-ed25519 ' ||
+  fail "the SSH CA's public key is not served"
 curl -fsS "http://${remotehub}:8080/devices/any" | grep -q '<html' ||
   fail "routes of the SPA do not fall back to index.html"
 

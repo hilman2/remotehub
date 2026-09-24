@@ -3,10 +3,12 @@
 //! target.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
+use remotehub_gateway::ssh_ca::SshCa;
 use remotehub_server::{AppState, app};
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -104,7 +106,10 @@ pub async fn create(app: &Router, token: &str, uri: &str, body: Value) -> String
 
 /// Alice's session and a folder for the devices.
 pub async fn setup(pool: PgPool) -> (AppState, Router, String, String) {
-    let state = state(pool);
+    setup_with(state(pool)).await
+}
+
+async fn setup_with(state: AppState) -> (AppState, Router, String, String) {
     let app = app(state.clone(), None);
     let token = send(&app, sign_in_request("alice", "right"))
         .await
@@ -437,4 +442,124 @@ async fn a_stored_key_with_certificate_opens_a_shell(pool: PgPool) {
         .await
         .unwrap();
     output_until(&mut socket, "cert: tester").await;
+}
+
+/// A server whose SSH CA is `ca`, with alice signed in, a folder, and a
+/// device on the lab's SSH target that signs in with a certificate.
+async fn certificate_device(
+    pool: PgPool,
+    ca: Option<SshCa>,
+) -> (SocketAddr, Router, String, String) {
+    let mut settings = crate::common::settings();
+    settings.ssh_ca = ca.map(Arc::new);
+    let state = AppState::new(
+        pool,
+        Some(Arc::new(crate::common::FakeDirectory)),
+        settings,
+        crate::common::vault(),
+    );
+    let (state, app, token, folder) = setup_with(state).await;
+    let device = create(
+        &app,
+        &token,
+        "/api/devices",
+        json!({
+            "folder_id": folder, "name": "as alice", "protocol": "ssh", "host": ssh_host(),
+            "port": 22, "auth_mode": "certificate", "credential_id": null,
+        }),
+    )
+    .await;
+    (serve(state).await, app, token, device)
+}
+
+/// The lab's key for remotehub's CA (deploy/testlab/ssh/remotehub_ca).
+fn lab_ca() -> SshCa {
+    let key = std::fs::read_to_string(
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("../../deploy/testlab/ssh/remotehub_ca"),
+    )
+    .unwrap();
+    SshCa::from_openssh(&key).unwrap()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn a_certificate_from_the_ca_signs_in_as_the_user(pool: PgPool) {
+    let (address, _, token, device) = certificate_device(pool, Some(lab_ca())).await;
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({})).await;
+    assert_eq!(event(&mut socket).await["type"], "connected");
+    socket
+        .send(Message::Binary(b"echo \"ca: $(whoami)\"\n".to_vec().into()))
+        .await
+        .unwrap();
+    // alice has neither password nor key on the target.
+    output_until(&mut socket, "ca: alice").await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn a_certificate_from_another_ca_is_refused(pool: PgPool) {
+    let other = SshCa::from_openssh(&SshCa::generate()).unwrap();
+    let (address, _, token, device) = certificate_device(pool, Some(other)).await;
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({})).await;
+    assert_eq!(event(&mut socket).await["code"], "target_auth_failed");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn without_a_ca_there_is_no_certificate_and_no_public_key(pool: PgPool) {
+    let (address, app, token, device) = certificate_device(pool, None).await;
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({})).await;
+    assert_eq!(event(&mut socket).await["code"], "ssh_ca_unavailable");
+    let missing = send(&app, crate::common::get("/api/ssh-ca.pub", None)).await;
+    assert_eq!(missing.status, 404);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_public_key_is_there_for_the_targets_without_signing_in(pool: PgPool) {
+    let ca = lab_ca();
+    let expected = format!("{}\n", ca.public_key());
+    let (_, app, _, _) = certificate_device(pool, Some(ca)).await;
+    let response = send(&app, crate::common::get("/api/ssh-ca.pub", None)).await;
+    assert_eq!(response.status, 200);
+    assert_eq!(String::from_utf8(response.body).unwrap(), expected);
+    // The same key as the lab target trusts, apart from the comment.
+    let lab = std::fs::read_to_string(
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("../../deploy/testlab/ssh/remotehub_ca.pub"),
+    )
+    .unwrap();
+    let key_of = |line: &str| {
+        line.split_whitespace()
+            .take(2)
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    assert_eq!(key_of(&expected), key_of(&lab));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn only_ssh_devices_sign_in_with_a_certificate(pool: PgPool) {
+    let (_, app, token, _) = certificate_device(pool, None).await;
+    let tree = send(&app, crate::common::get("/api/tree", Some(&token)))
+        .await
+        .json();
+    let folder = tree["folders"][0]["id"].as_str().unwrap().to_owned();
+    let response = send(
+        &app,
+        authed(
+            "POST",
+            "/api/devices",
+            Some(json!({
+                "folder_id": folder, "name": "rdp", "protocol": "rdp", "host": "desktop",
+                "port": 3389, "auth_mode": "certificate", "credential_id": null,
+            })),
+            &token,
+        ),
+    )
+    .await;
+    assert_eq!(response.status, 400);
+    assert_eq!(response.json()["params"]["field"], "auth_mode");
 }

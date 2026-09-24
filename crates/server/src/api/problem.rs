@@ -61,6 +61,7 @@ error_codes! {
     TargetAuthFailed = ("target_auth_failed", BAD_GATEWAY, "The target refused the credentials"),
     ConnectionFailed = ("connection_failed", BAD_GATEWAY, "The connection failed"),
     OwnAccountUnavailable = ("own_account_unavailable", CONFLICT, "The own sign-in password is not available in this session"),
+    SshCaUnavailable = ("ssh_ca_unavailable", CONFLICT, "No SSH certificate authority is configured"),
     DirectoryUnavailable = ("directory_unavailable", SERVICE_UNAVAILABLE, "Directory unavailable"),
     DatabaseUnavailable = ("database_unavailable", SERVICE_UNAVAILABLE, "Database unavailable"),
     Internal = ("internal", INTERNAL_SERVER_ERROR, "Internal server error"),

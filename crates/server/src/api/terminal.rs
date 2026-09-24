@@ -102,9 +102,13 @@ async fn run(
         rows: rows.clamp(2, 500),
     };
 
-    // 2. Credentials: from the vault, or as entered for this connection only.
+    // 2. Credentials: from the vault, as entered for this connection only, or
+    // a certificate issued for it.
     let resolved = match own {
         Some(own) => own,
+        None if target.auth_mode == "certificate" => {
+            connect::certificate(&state, &session, &target)
+        }
         None => connect::credentials(&state, &target, username, password).await,
     };
     let Credentials {

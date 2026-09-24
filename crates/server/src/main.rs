@@ -7,6 +7,7 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use remotehub_directory::Sid;
 use remotehub_directory::ldap::LdapDirectory;
+use remotehub_gateway::ssh_ca::SshCa;
 use remotehub_i18n::{self as i18n, Locale, Message};
 use remotehub_server::api::health;
 use remotehub_server::audit::{Action, Actor, Entry};
@@ -35,6 +36,9 @@ enum Command {
         #[arg(long, default_value_t = 1)]
         version: i32,
     },
+    /// Print a new SSH CA key for REMOTEHUB_SSH_CA_KEY_FILE. Replacing the
+    /// key means every target must trust the new public key.
+    GenerateSshCa,
     /// Recompute the audit log's hash chain; exits with 1 if it is broken.
     VerifyAudit,
     /// Ask the server running in this container for /api/health; exits with
@@ -70,6 +74,10 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", generate_key_line(version).as_str());
             Ok(())
         }
+        Command::GenerateSshCa => {
+            print!("{}", SshCa::generate().as_str());
+            Ok(())
+        }
         Command::VerifyAudit => verify_audit().await,
         Command::Healthcheck => {
             let listen = config::listen_address(&|name| std::env::var(name).ok())?;
@@ -89,6 +97,11 @@ async fn serve() -> anyhow::Result<()> {
     tracing::info!(version = VERSION, listen = %config.listen, public = %config.public_origin, "starting remotehub");
 
     let vault = load_vault(&config.master_key_file)?;
+    let ssh_ca = config
+        .ssh_ca_key_file
+        .as_deref()
+        .map(load_ssh_ca)
+        .transpose()?;
 
     let pool = db::connect(&config.database_url, config.database_password.as_ref())
         .await
@@ -121,6 +134,7 @@ async fn serve() -> anyhow::Result<()> {
         guacd: config.guacd,
         rdp_keyboard_layout: config.rdp_keyboard_layout,
         trusted_proxies: config.trusted_proxies,
+        ssh_ca,
     };
     let state = AppState::new(pool.clone(), directory, settings, vault);
     tokio::spawn(purge_sessions(pool, config.session.idle));
@@ -313,25 +327,35 @@ async fn verify_audit() -> anyhow::Result<()> {
 }
 
 fn load_vault(path: &Path) -> anyhow::Result<DynVault> {
-    warn_if_readable_by_others(path);
+    warn_if_readable_by_others(path, "master key file");
     let keyring = FileKeyring::load(path).context("cannot load the master key file")?;
     let (id, version) = keyring.current();
     tracing::info!(file = %path.display(), key = id, version, "vault ready");
     Ok(Vault::new(Box::new(keyring)))
 }
 
+fn load_ssh_ca(path: &Path) -> anyhow::Result<Arc<SshCa>> {
+    warn_if_readable_by_others(path, "SSH CA key file");
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("cannot read the SSH CA key file {}", path.display()))?;
+    let ca = SshCa::from_openssh(&text).context("invalid SSH CA key file")?;
+    tracing::info!(file = %path.display(), public_key = %ca.public_key(), "SSH CA ready");
+    Ok(Arc::new(ca))
+}
+
+/// `what` names the file in the warning, e.g. "master key file".
 #[cfg(unix)]
-fn warn_if_readable_by_others(path: &Path) {
+fn warn_if_readable_by_others(path: &Path, what: &str) {
     use std::os::unix::fs::PermissionsExt;
     if let Ok(meta) = std::fs::metadata(path)
         && meta.permissions().mode() & 0o077 != 0
     {
-        tracing::warn!(file = %path.display(), "the master key file is accessible to other users; use mode 0400");
+        tracing::warn!(file = %path.display(), "the {what} is accessible to other users; use mode 0400");
     }
 }
 
 #[cfg(not(unix))]
-fn warn_if_readable_by_others(_: &Path) {}
+fn warn_if_readable_by_others(_: &Path, _: &str) {}
 
 /// Deletes sessions that can no longer be used, every ten minutes.
 async fn purge_sessions(pool: sqlx::PgPool, idle: Duration) {

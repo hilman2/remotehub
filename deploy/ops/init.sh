@@ -47,6 +47,7 @@ random_password() {
 
 new_secret db_password 65532:999 440 random_password
 new_secret master_key 65532:65532 400 docker run --rm "$image" generate-key
+new_secret ssh_ca_key 65532:65532 400 docker run --rm "$image" generate-ssh-ca
 new_secret ldap_bind_password 65532:65532 400 true
 
 echo

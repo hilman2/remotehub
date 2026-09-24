@@ -426,6 +426,8 @@ impl DeviceInput {
             "stored" => "stored",
             "ask" => "ask",
             "own" => "own",
+            // Certificates are SSH's own; RDP and VNC know nothing like it.
+            "certificate" if protocol == "ssh" => "certificate",
             _ => return Err(invalid("auth_mode")),
         };
         // A stored credential is exactly what "stored" means, and nothing else.

@@ -27,7 +27,8 @@ export const PROTOCOL_LABELS: Record<Protocol, () => string> = {
 export const AUTH_MODE_LABELS: Record<AuthMode, () => string> = {
 	stored: m.auth_stored,
 	ask: m.auth_ask,
-	own: m.auth_own
+	own: m.auth_own,
+	certificate: m.auth_certificate
 };
 
 export const KIND_LABELS: Record<ObjectKind, () => string> = {

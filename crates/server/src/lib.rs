@@ -55,6 +55,9 @@ pub struct Settings {
     pub rdp_keyboard_layout: String,
     /// Reverse proxies whose `X-Forwarded-For` names the client.
     pub trusted_proxies: Vec<proxy::Network>,
+    /// The SSH CA for devices that sign in with a certificate; none without
+    /// `REMOTEHUB_SSH_CA_KEY_FILE`.
+    pub ssh_ca: Option<Arc<remotehub_gateway::ssh_ca::SshCa>>,
 }
 
 impl AppState {

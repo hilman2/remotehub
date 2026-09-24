@@ -128,6 +128,36 @@ test('an SSH key protected by a passphrase signs in', async ({ page, context }) 
 	await terminal.close();
 });
 
+test('an SSH device signs in with a certificate from remotehub', async ({ page, context }) => {
+	await signIn(page);
+	const dialog = page.getByRole('dialog');
+	const folder = `E2E ca ${run}`;
+	await newFolder(page, folder);
+
+	// No credential at all: remotehub signs a key for alice at every connection.
+	const name = `lab ssh ca ${run}`;
+	await page.getByRole('tree').getByRole('button', { name: folder, exact: true }).click();
+	await page.getByRole('button', { name: 'New device' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(name);
+	await dialog.getByLabel('Host name or IP address').fill(sshHost);
+	await dialog
+		.getByLabel('Sign in with')
+		.selectOption({ label: 'A certificate from remotehub, as myself' });
+	await expect(dialog.getByText(/\/api\/ssh-ca\.pub/)).toBeVisible();
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name })).toBeVisible();
+
+	const [terminal] = await Promise.all([
+		context.waitForEvent('page'),
+		page.getByRole('link', { name: 'Connect' }).click()
+	]);
+	await terminal.locator('.xterm').click();
+	await terminal.keyboard.type('echo "ca says $(whoami)"');
+	await terminal.keyboard.press('Enter');
+	await expect(terminal.locator('.xterm-rows')).toContainText('ca says alice');
+	await terminal.close();
+});
+
 test('an RDP desktop opens in the browser', async ({ page, context }) => {
 	// Chromium asks before a page reads the clipboard; the test says yes.
 	await context.grantPermissions(['clipboard-read', 'clipboard-write']);
