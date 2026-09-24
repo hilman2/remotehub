@@ -2,63 +2,34 @@
 //! a fresh database with all migrations (needs `DATABASE_URL`, provided by the
 //! development compose and the local CI).
 
-use std::time::Duration;
+mod common;
 
-use axum::Router;
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use http_body_util::BodyExt;
-use remotehub_server::{AppState, VERSION, app};
-use serde_json::{Value, json};
+use axum::http::StatusCode;
+use common::{get, send, state, unreachable_pool};
+use remotehub_server::{VERSION, app};
+use serde_json::json;
 use sqlx::PgPool;
-use sqlx::postgres::PgPoolOptions;
-use tower::ServiceExt;
-
-async fn get(app: Router, uri: &str) -> (StatusCode, Vec<u8>) {
-    let response = app
-        .oneshot(Request::get(uri).body(Body::empty()).unwrap())
-        .await
-        .unwrap();
-    let status = response.status();
-    let body = response.into_body().collect().await.unwrap().to_bytes();
-    (status, body.to_vec())
-}
-
-/// A pool whose database does not exist, for behaviour without a database.
-fn unreachable_pool() -> PgPool {
-    PgPoolOptions::new()
-        .acquire_timeout(Duration::from_millis(500))
-        .connect_lazy("postgres://nobody:nothing@127.0.0.1:1/none")
-        .unwrap()
-}
 
 #[sqlx::test(migrations = "../../migrations")]
 async fn health_reports_version_and_database(pool: PgPool) {
-    let (status, body) = get(app(AppState { db: pool }, None), "/api/health").await;
-    assert_eq!(status, StatusCode::OK);
-    let body: Value = serde_json::from_slice(&body).unwrap();
+    let response = send(&app(state(pool), None), get("/api/health", None)).await;
+    assert_eq!(response.status, StatusCode::OK);
     assert_eq!(
-        body,
+        response.json(),
         json!({ "status": "ok", "version": VERSION, "database": "ok" })
     );
 }
 
 #[tokio::test]
 async fn health_is_unavailable_without_database() {
-    let (status, body) = get(
-        app(
-            AppState {
-                db: unreachable_pool(),
-            },
-            None,
-        ),
-        "/api/health",
+    let response = send(
+        &app(state(unreachable_pool()), None),
+        get("/api/health", None),
     )
     .await;
-    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-    let body: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(body["database"], "unavailable");
-    assert_eq!(body["version"], VERSION);
+    assert_eq!(response.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.json()["database"], "unavailable");
+    assert_eq!(response.json()["version"], VERSION);
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -86,39 +57,24 @@ async fn serves_the_spa_for_routes_but_not_for_unknown_api_paths() {
     )
     .unwrap();
     std::fs::write(web.path().join("app.js"), "console.log(1)").unwrap();
-    let app = app(
-        AppState {
-            db: unreachable_pool(),
-        },
-        Some(web.path()),
-    );
+    let app = app(state(unreachable_pool()), Some(web.path()));
 
-    let (status, body) = get(app.clone(), "/devices/42").await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(String::from_utf8(body).unwrap().contains("spa"));
+    let response = send(&app, get("/devices/42", None)).await;
+    assert_eq!(response.status, StatusCode::OK);
+    assert!(String::from_utf8(response.body).unwrap().contains("spa"));
 
-    let (status, body) = get(app.clone(), "/app.js").await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body, b"console.log(1)");
+    let response = send(&app, get("/app.js", None)).await;
+    assert_eq!(response.status, StatusCode::OK);
+    assert_eq!(response.body, b"console.log(1)");
 
-    let (status, body) = get(app, "/api/does-not-exist").await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
-    let problem: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(problem["code"], "not_found");
-    assert_eq!(problem["status"], 404);
+    let response = send(&app, get("/api/does-not-exist", None)).await;
+    assert_eq!(response.status, StatusCode::NOT_FOUND);
+    assert_eq!(response.code(), "not_found");
+    assert_eq!(response.json()["status"], 404);
 }
 
 #[tokio::test]
 async fn without_a_built_ui_only_the_api_answers() {
-    let (status, _) = get(
-        app(
-            AppState {
-                db: unreachable_pool(),
-            },
-            None,
-        ),
-        "/",
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
+    let response = send(&app(state(unreachable_pool()), None), get("/", None)).await;
+    assert_eq!(response.status, StatusCode::NOT_FOUND);
 }

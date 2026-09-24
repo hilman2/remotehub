@@ -2,17 +2,21 @@
 //!
 //! Every setting `REMOTEHUB_X` can also be given as `REMOTEHUB_X_FILE`, the
 //! path of a file holding the value (Docker secrets). Secrets such as the
-//! database URL belong in files in production; the file wins if both are set.
+//! database URL and the LDAP password belong in files in production; the
+//! file wins if both are set.
 
 use std::fmt;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
+use std::time::Duration;
 
+use remotehub_directory::ldap::LdapConfig;
+use secrecy::SecretString;
 use thiserror::Error;
 
 const DEFAULT_LISTEN: &str = "0.0.0.0:8080";
 
-#[derive(Clone)]
 pub struct Config {
     /// Address the HTTP server binds to.
     pub listen: SocketAddr,
@@ -22,6 +26,20 @@ pub struct Config {
     pub web_dir: Option<PathBuf>,
     /// Log as JSON lines instead of human-readable text.
     pub log_json: bool,
+    /// Origin under which people open remotehub (`https://remotehub.example.com`).
+    /// Requests that change state must come from it.
+    pub public_origin: String,
+    pub session: SessionConfig,
+    /// Active Directory; without it only break-glass accounts can sign in.
+    pub ldap: Option<LdapConfig>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionConfig {
+    /// A session ends after this long without a request.
+    pub idle: Duration,
+    /// A session ends this long after sign-in, whatever happens.
+    pub max: Duration,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -47,35 +65,120 @@ impl Config {
     /// environment.
     pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
         let setting = |name: &'static str| read_setting(&lookup, name);
+        let required = |name: &'static str| setting(name)?.ok_or(ConfigError::Missing(name));
 
-        let listen_raw = setting("REMOTEHUB_LISTEN")?.unwrap_or_else(|| DEFAULT_LISTEN.to_owned());
-        let listen = listen_raw.parse().map_err(|_| ConfigError::Invalid {
-            name: "REMOTEHUB_LISTEN",
-            value: listen_raw,
-        })?;
-
-        let database_url = setting("REMOTEHUB_DATABASE_URL")?
-            .ok_or(ConfigError::Missing("REMOTEHUB_DATABASE_URL"))?;
-
+        let listen = parse_or(
+            "REMOTEHUB_LISTEN",
+            setting("REMOTEHUB_LISTEN")?,
+            DEFAULT_LISTEN.parse().unwrap(),
+        )?;
+        let database_url = required("REMOTEHUB_DATABASE_URL")?;
         let web_dir = setting("REMOTEHUB_WEB_DIR")?.map(PathBuf::from);
 
         let log_json = match setting("REMOTEHUB_LOG_FORMAT")?.as_deref() {
             None | Some("text") => false,
             Some("json") => true,
-            Some(other) => {
-                return Err(ConfigError::Invalid {
-                    name: "REMOTEHUB_LOG_FORMAT",
-                    value: other.to_owned(),
-                });
+            Some(other) => return Err(invalid("REMOTEHUB_LOG_FORMAT", other)),
+        };
+
+        let public_url = required("REMOTEHUB_PUBLIC_URL")?;
+        let public_origin =
+            origin(&public_url).ok_or_else(|| invalid("REMOTEHUB_PUBLIC_URL", &public_url))?;
+
+        let idle_minutes: u64 = parse_or(
+            "REMOTEHUB_SESSION_IDLE_MINUTES",
+            setting("REMOTEHUB_SESSION_IDLE_MINUTES")?,
+            30,
+        )?;
+        let max_hours: u64 = parse_or(
+            "REMOTEHUB_SESSION_MAX_HOURS",
+            setting("REMOTEHUB_SESSION_MAX_HOURS")?,
+            12,
+        )?;
+        if idle_minutes == 0 || max_hours == 0 || idle_minutes > max_hours * 60 {
+            return Err(invalid(
+                "REMOTEHUB_SESSION_IDLE_MINUTES",
+                &idle_minutes.to_string(),
+            ));
+        }
+        let session = SessionConfig {
+            idle: Duration::from_secs(idle_minutes * 60),
+            max: Duration::from_secs(max_hours * 3600),
+        };
+
+        let ldap = match setting("REMOTEHUB_LDAP_URL")? {
+            None => None,
+            Some(url) => {
+                if !(url.starts_with("ldaps://") || url.starts_with("ldap://")) {
+                    return Err(invalid("REMOTEHUB_LDAP_URL", &url));
+                }
+                let timeout: u64 = parse_or(
+                    "REMOTEHUB_LDAP_TIMEOUT_SECONDS",
+                    setting("REMOTEHUB_LDAP_TIMEOUT_SECONDS")?,
+                    10,
+                )?;
+                Some(LdapConfig {
+                    starttls: parse_or(
+                        "REMOTEHUB_LDAP_STARTTLS",
+                        setting("REMOTEHUB_LDAP_STARTTLS")?,
+                        false,
+                    )?,
+                    url,
+                    ca_file: setting("REMOTEHUB_LDAP_CA_FILE")?.map(PathBuf::from),
+                    bind_dn: required("REMOTEHUB_LDAP_BIND_DN")?,
+                    bind_password: SecretString::from(required("REMOTEHUB_LDAP_BIND_PASSWORD")?),
+                    base_dn: required("REMOTEHUB_LDAP_BASE_DN")?,
+                    user_filter: setting("REMOTEHUB_LDAP_USER_FILTER")?,
+                    timeout: Duration::from_secs(timeout.max(1)),
+                })
             }
         };
+        if let Some(ldap) = &ldap
+            && ldap.url.starts_with("ldap://")
+            && !ldap.starttls
+        {
+            // Passwords never travel unencrypted.
+            return Err(invalid("REMOTEHUB_LDAP_STARTTLS", "false with ldap://"));
+        }
 
         Ok(Config {
             listen,
             database_url,
             web_dir,
             log_json,
+            public_origin,
+            session,
+            ldap,
         })
+    }
+}
+
+/// `https://host[:port]` without path; the scheme and host are lowercased.
+fn origin(url: &str) -> Option<String> {
+    let url = url.trim().trim_end_matches('/');
+    let (scheme, rest) = url.split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    let valid = matches!(scheme.as_str(), "http" | "https")
+        && !rest.is_empty()
+        && !rest.contains(['/', '?', '#', '@', ' ']);
+    valid.then(|| format!("{scheme}://{}", rest.to_ascii_lowercase()))
+}
+
+fn invalid(name: &'static str, value: &str) -> ConfigError {
+    ConfigError::Invalid {
+        name,
+        value: value.to_owned(),
+    }
+}
+
+fn parse_or<T: FromStr>(
+    name: &'static str,
+    value: Option<String>,
+    default: T,
+) -> Result<T, ConfigError> {
+    match value {
+        None => Ok(default),
+        Some(value) => value.parse().map_err(|_| invalid(name, &value)),
     }
 }
 
@@ -103,6 +206,9 @@ impl fmt::Debug for Config {
             .field("database_url", &"<redacted>")
             .field("web_dir", &self.web_dir)
             .field("log_json", &self.log_json)
+            .field("public_origin", &self.public_origin)
+            .field("session", &self.session)
+            .field("ldap", &self.ldap.as_ref().map(|l| &l.url))
             .finish()
     }
 }
@@ -112,29 +218,67 @@ mod tests {
     use std::collections::HashMap;
     use std::io::Write;
 
+    use secrecy::ExposeSecret;
+
     use super::*;
 
-    fn lookup(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
-        let map: HashMap<String, String> = pairs
+    const BASE: [(&str, &str); 2] = [
+        ("REMOTEHUB_DATABASE_URL", "postgres://db/x"),
+        ("REMOTEHUB_PUBLIC_URL", "https://remotehub.example.com"),
+    ];
+
+    fn lookup(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
+        let map: HashMap<String, String> = BASE
             .iter()
+            .chain(pairs)
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect();
         move |name| map.get(name).cloned()
     }
 
+    fn without(name: &str) -> impl Fn(&str) -> Option<String> + use<'_> {
+        let base = lookup(&[]);
+        move |n| if n == name { None } else { base(n) }
+    }
+
     #[test]
-    fn uses_defaults_and_requires_the_database_url() {
-        let config =
-            Config::from_lookup(lookup(&[("REMOTEHUB_DATABASE_URL", "postgres://db/x")])).unwrap();
+    fn uses_defaults_and_requires_database_and_public_url() {
+        let config = Config::from_lookup(lookup(&[])).unwrap();
         assert_eq!(config.listen, DEFAULT_LISTEN.parse().unwrap());
         assert_eq!(config.database_url, "postgres://db/x");
-        assert_eq!(config.web_dir, None);
+        assert_eq!(config.public_origin, "https://remotehub.example.com");
+        assert_eq!(config.session.idle, Duration::from_secs(30 * 60));
+        assert_eq!(config.session.max, Duration::from_secs(12 * 3600));
+        assert!(config.ldap.is_none());
         assert!(!config.log_json);
 
+        for name in ["REMOTEHUB_DATABASE_URL", "REMOTEHUB_PUBLIC_URL"] {
+            assert_eq!(
+                Config::from_lookup(without(name)).unwrap_err(),
+                ConfigError::Missing(name)
+            );
+        }
+    }
+
+    #[test]
+    fn normalises_the_public_origin() {
         assert_eq!(
-            Config::from_lookup(lookup(&[])).unwrap_err(),
-            ConfigError::Missing("REMOTEHUB_DATABASE_URL")
+            origin("HTTPS://RemoteHub.Example.com:8443/"),
+            Some("https://remotehub.example.com:8443".into())
         );
+        assert_eq!(
+            origin("http://localhost:5180"),
+            Some("http://localhost:5180".into())
+        );
+        for bad in [
+            "remotehub.example.com",
+            "ftp://x",
+            "https://",
+            "https://x/path",
+            "https://u@x",
+        ] {
+            assert_eq!(origin(bad), None, "{bad}");
+        }
     }
 
     #[test]
@@ -143,11 +287,7 @@ mod tests {
         writeln!(file, "postgres://from-file/x").unwrap();
         let path = file.path().to_str().unwrap();
 
-        let config = Config::from_lookup(lookup(&[
-            ("REMOTEHUB_DATABASE_URL", "postgres://from-env/x"),
-            ("REMOTEHUB_DATABASE_URL_FILE", path),
-        ]))
-        .unwrap();
+        let config = Config::from_lookup(lookup(&[("REMOTEHUB_DATABASE_URL_FILE", path)])).unwrap();
         assert_eq!(config.database_url, "postgres://from-file/x");
     }
 
@@ -166,18 +306,54 @@ mod tests {
             }
         ));
 
-        let err = Config::from_lookup(lookup(&[
-            ("REMOTEHUB_DATABASE_URL", "postgres://db/x"),
+        for (name, value) in [
             ("REMOTEHUB_LISTEN", "not an address"),
-        ]))
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ConfigError::Invalid {
-                name: "REMOTEHUB_LISTEN",
-                ..
-            }
-        ));
+            ("REMOTEHUB_SESSION_IDLE_MINUTES", "0"),
+            ("REMOTEHUB_SESSION_IDLE_MINUTES", "soon"),
+            ("REMOTEHUB_PUBLIC_URL", "remotehub.example.com"),
+        ] {
+            assert!(
+                matches!(
+                    Config::from_lookup(lookup(&[(name, value)])),
+                    Err(ConfigError::Invalid { .. })
+                ),
+                "{name}={value}"
+            );
+        }
+    }
+
+    #[test]
+    fn reads_the_ldap_settings_and_insists_on_encryption() {
+        let ldap = [
+            ("REMOTEHUB_LDAP_URL", "ldaps://dc.example.com"),
+            ("REMOTEHUB_LDAP_BIND_DN", "svc@example.com"),
+            ("REMOTEHUB_LDAP_BIND_PASSWORD", "s3cret"),
+            ("REMOTEHUB_LDAP_BASE_DN", "DC=example,DC=com"),
+        ];
+        let config = Config::from_lookup(lookup(&ldap)).unwrap();
+        let settings = config.ldap.as_ref().unwrap();
+        assert_eq!(settings.url, "ldaps://dc.example.com");
+        assert_eq!(settings.bind_password.expose_secret(), "s3cret");
+        assert!(!settings.starttls);
+        assert_eq!(settings.timeout, Duration::from_secs(10));
+        assert!(!format!("{config:?}").contains("s3cret"));
+
+        let mut plain = ldap.to_vec();
+        plain[0] = ("REMOTEHUB_LDAP_URL", "ldap://dc.example.com");
+        assert!(Config::from_lookup(lookup(&plain)).is_err());
+        plain.push(("REMOTEHUB_LDAP_STARTTLS", "true"));
+        assert!(
+            Config::from_lookup(lookup(&plain))
+                .unwrap()
+                .ldap
+                .unwrap()
+                .starttls
+        );
+
+        assert_eq!(
+            Config::from_lookup(lookup(&ldap[..3])).unwrap_err(),
+            ConfigError::Missing("REMOTEHUB_LDAP_BASE_DN")
+        );
     }
 
     #[test]

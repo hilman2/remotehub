@@ -9,6 +9,9 @@ import { ERROR_CODES, type ErrorCode, type Problem } from './generated/problem';
 
 export { ERROR_CODES, type ErrorCode, type Problem };
 
+/** Code of the client for a server that did not answer at all. */
+const NETWORK = 'network';
+
 export function isErrorCode(code: unknown): code is ErrorCode {
 	return typeof code === 'string' && (ERROR_CODES as readonly string[]).includes(code);
 }
@@ -16,6 +19,7 @@ export function isErrorCode(code: unknown): code is ErrorCode {
 /** The message for a code; codes from a newer server fall back to a generic text. */
 export function errorMessage(code: string, locale?: Locale): string {
 	const options = locale ? { locale } : undefined;
+	if (code === NETWORK) return m.server_unreachable({}, options);
 	if (!isErrorCode(code)) return m.error_unknown({ code }, options);
 	const message = m[`error_${code}`];
 	return message({}, options);

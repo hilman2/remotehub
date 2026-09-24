@@ -2,15 +2,22 @@
 //! the web UI in one binary. See docs/architecture.md.
 
 pub mod api;
+pub mod auth;
 pub mod config;
 pub mod db;
+pub mod session;
 
 use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use sqlx::PgPool;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
+
+use auth::{Authenticator, SignInLimiter};
+use config::SessionConfig;
 
 /// Version of this build; also the release version (workspace Cargo.toml).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -18,13 +25,36 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
+    /// The configured directory; `None` if only break-glass accounts exist.
+    pub directory: Option<Arc<dyn Authenticator>>,
+    pub settings: Arc<Settings>,
+    pub limiter: Arc<SignInLimiter>,
+}
+
+/// Settings the request handlers need.
+#[derive(Debug, Clone)]
+pub struct Settings {
+    /// e.g. `https://remotehub.example.com`
+    pub public_origin: String,
+    pub session: SessionConfig,
+}
+
+impl AppState {
+    pub fn new(db: PgPool, directory: Option<Arc<dyn Authenticator>>, settings: Settings) -> Self {
+        AppState {
+            db,
+            directory,
+            settings: Arc::new(settings),
+            limiter: Arc::new(SignInLimiter::new(Duration::from_secs(5 * 60))),
+        }
+    }
 }
 
 /// The whole HTTP application: the API under `/api` and, if a built UI is
 /// given, the SPA for every other path (unknown paths get index.html, the
 /// SPA routes in the browser).
 pub fn app(state: AppState, web_dir: Option<&Path>) -> Router {
-    let mut app = Router::new().nest("/api", api::router());
+    let mut app = Router::new().nest("/api", api::router(state.clone()));
     if let Some(dir) = web_dir {
         let spa = ServeDir::new(dir).fallback(ServeFile::new(dir.join("index.html")));
         app = app.fallback_service(spa);

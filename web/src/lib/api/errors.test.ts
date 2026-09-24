@@ -23,6 +23,10 @@ describe('error messages', () => {
 		}
 	});
 
+	it('report an unreachable server for network failures', () => {
+		expect(errorMessage('network', 'en')).toBe('Server not reachable');
+	});
+
 	it('fall back to a generic text for codes of a newer server', () => {
 		expect(errorMessage('something_new', 'en')).toContain('something_new');
 		expect(errorMessage('something_new', 'de')).toContain('something_new');
