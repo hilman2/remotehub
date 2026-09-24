@@ -47,8 +47,8 @@ job_base() {
 
 # Formatting, Clippy without warnings and the tests of the whole workspace
 # against a fresh PostgreSQL (#[sqlx::test] creates a database per test).
-# Integration tests (tests/integration_*.rs) need the test lab and run in the
-# job integration.
+# Tests that need the test lab are #[ignore]d here and run in the job
+# integration.
 # Every run unpacks the commit afresh; so Rust does not build cold each time,
 # the registry and target/ live in volumes without a label — gemeinsam.sh
 # removes labelled volumes after the run. Build jobs are capped because the
@@ -76,7 +76,7 @@ job_rust() {
       cargo clippy --workspace --all-targets --locked -- -D warnings
 
       echo "── cargo nextest"
-      cargo nextest run --workspace --locked --no-tests=warn -E "not binary(/^integration_/)"
+      cargo nextest run --workspace --locked --no-tests=warn
     '
 }
 
@@ -109,7 +109,8 @@ job_web() {
 
 # Integration tests against the test lab (deploy/testlab): a Samba AD domain
 # controller and an SSH target, built from the commit under test (the build
-# cache keeps this fast), plus a fresh PostgreSQL.
+# cache keeps this fast), plus a fresh PostgreSQL. Runs exactly the tests
+# marked #[ignore = "needs the test lab"].
 job_integration() {
   local tools
   tools="$(ci_image scripts/ci/tools.Dockerfile)"
@@ -133,7 +134,7 @@ job_integration() {
     -e REMOTEHUB_TEST_SSH_HOST=ssh-target \
     "$tools" bash -euo pipefail -c '
       echo "── cargo nextest (integration)"
-      cargo nextest run --workspace --locked --no-tests=warn -E "binary(/^integration_/)"
+      cargo nextest run --workspace --locked --no-tests=warn --run-ignored only
     '
 }
 

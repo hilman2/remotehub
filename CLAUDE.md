@@ -86,7 +86,7 @@ docker compose -f deploy/compose.dev.yml down               # volumes are kept
   - pnpm only takes versions older than seven days (`web/pnpm-workspace.yaml`), so don't pin a range to a brand-new release.
   - Messages are in `web/messages/{en,de}.json`; `pnpm i18n` compiles them (also part of `pnpm check` and `pnpm test`). Language and theme switch sit in the header.
 - **Test lab** (`deploy/testlab/`): a Samba AD domain controller `dc` (domain `REMOTEHUB.TEST`, LDAPS with the test CA in `deploy/testlab/dc/tls/ca.crt`, users and nested groups in `users.sh`) and an SSH target `ssh-target` (see its README). Both run on the compose network only.
-  - Integration tests live in `tests/integration_*.rs` and read `REMOTEHUB_TEST_LDAP_URL` and `REMOTEHUB_TEST_SSH_HOST`; run them with `docker compose -f deploy/compose.dev.yml run --rm workbench cargo nextest run -E 'binary(/^integration_/)'`. The CI job `rust` skips them, the job `integration` runs only them.
+  - Tests that need the lab are marked `#[ignore = "needs the test lab"]`, live in `tests/integration_*.rs` and read `REMOTEHUB_TEST_LDAP_URL` and `REMOTEHUB_TEST_SSH_HOST`. Run them with `docker compose -f deploy/compose.dev.yml run --rm workbench cargo nextest run --run-ignored only`. The CI job `rust` skips them, the job `integration` runs only them. Use `#[ignore]` for nothing else.
   - The test lab's passwords, keys and certificates are public on purpose and protect nothing else.
 - **rust-analyzer** runs via the dev container (`.devcontainer/`, service `workbench`).
 - **Rust version:** it appears in `rust-toolchain.toml`, `scripts/ci/tools.Dockerfile` and `deploy/dev/rust.Dockerfile`; the CI job `base` checks that all three match.
