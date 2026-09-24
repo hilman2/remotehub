@@ -25,6 +25,14 @@ export const PROTOCOL_LABELS: Record<Protocol, () => string> = {
 	https: m.protocol_https
 };
 
+/** Protocol names as tags: technical terms, the same in every language. */
+export const PROTOCOL_SHORT: Record<Protocol, string> = {
+	ssh: 'SSH',
+	rdp: 'RDP',
+	vnc: 'VNC',
+	https: 'HTTPS'
+};
+
 export const AUTH_MODE_LABELS: Record<AuthMode, () => string> = {
 	stored: m.auth_stored,
 	ask: m.auth_ask,

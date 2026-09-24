@@ -3,8 +3,10 @@
 	import LogIn from '@lucide/svelte/icons/log-in';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import favicon from '$lib/assets/favicon.svg';
+	import { PROTOCOLS } from '$lib/api/catalog';
 	import { errorMessage } from '$lib/api/errors';
+	import ProtocolChip from '$lib/catalog/ProtocolChip.svelte';
+	import Logo from '$lib/components/Logo.svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { signIn } from '$lib/session.svelte';
 
@@ -28,61 +30,82 @@
 	}
 </script>
 
-<div class="flex min-h-dvh items-center justify-center px-4">
-	<form
-		class="w-full max-w-sm rounded-card border border-line bg-surface p-8 shadow-card"
-		onsubmit={submit}
+<div class="grid min-h-dvh lg:grid-cols-2">
+	<section
+		class="relative hidden flex-col overflow-hidden border-r border-line bg-sunken px-16 py-14 lg:flex"
+		style="background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 40px 40px"
 	>
-		<div class="mb-6 flex flex-col items-center gap-3 text-center">
-			<img src={favicon} alt="" class="size-10" />
-			<h1 class="text-xl font-semibold tracking-tight">{m.sign_in_title()}</h1>
-			<p class="text-sm text-ink-2">{m.sign_in_intro()}</p>
+		<div class="flex items-center gap-3">
+			<Logo size={32} />
+			<span class="font-display text-xl font-bold">remotehub</span>
 		</div>
-
-		<label class="block text-sm font-medium" for="username">{m.sign_in_username()}</label>
-		<input
-			id="username"
-			name="username"
-			autocomplete="username"
-			required
-			bind:value={username}
-			aria-describedby="username-hint"
-			class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
-		/>
-		<p id="username-hint" class="mt-1 text-xs text-ink-3">{m.sign_in_username_hint()}</p>
-
-		<label class="mt-4 block text-sm font-medium" for="password">{m.sign_in_password()}</label>
-		<input
-			id="password"
-			name="password"
-			type="password"
-			autocomplete="current-password"
-			required
-			bind:value={password}
-			class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
-		/>
-
-		{#if error}
-			<p class="mt-4 flex items-start gap-2 text-sm" role="alert">
-				<CircleAlert size={16} class="mt-0.5 shrink-0 text-critical" aria-hidden="true" />
-				{error}
-			</p>
-		{/if}
-
-		<button
-			type="submit"
-			disabled={busy}
-			class="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 font-medium text-accent-ink disabled:opacity-60"
+		<p
+			class="mt-auto mb-auto font-display text-6xl leading-[0.98] font-semibold tracking-tight whitespace-pre-line xl:text-7xl"
 		>
-			<LogIn size={16} aria-hidden="true" />
-			{busy ? m.sign_in_busy() : m.sign_in_submit()}
-		</button>
+			{m.sign_in_headline()}
+		</p>
+		<div class="flex gap-2.5">
+			{#each PROTOCOLS as protocol (protocol)}
+				<ProtocolChip {protocol} large />
+			{/each}
+		</div>
+	</section>
 
-		<a
-			href={resolve('/sign-in/break-glass')}
-			class="mt-4 block text-center text-xs text-ink-3 hover:text-ink hover:underline"
-		>
-			{m.sign_in_break_glass_link()}
-		</a>
-	</form>
+	<section class="flex items-center justify-center px-6 py-16">
+		<form class="flex w-full max-w-sm flex-col gap-5" onsubmit={submit}>
+			<div class="mb-2 flex items-center gap-3 lg:hidden">
+				<Logo size={28} />
+				<span class="font-display text-lg font-bold">remotehub</span>
+			</div>
+			<h1 class="text-3xl font-semibold">{m.sign_in_title()}</h1>
+
+			<div class="flex flex-col gap-2">
+				<label class="text-sm font-medium" for="username">{m.sign_in_username()}</label>
+				<input
+					id="username"
+					name="username"
+					autocomplete="username"
+					required
+					bind:value={username}
+					class="h-12 w-full rounded-xl border border-line-strong bg-surface px-3.5"
+				/>
+			</div>
+
+			<div class="flex flex-col gap-2">
+				<label class="text-sm font-medium" for="password">{m.sign_in_password()}</label>
+				<input
+					id="password"
+					name="password"
+					type="password"
+					autocomplete="current-password"
+					required
+					bind:value={password}
+					class="h-12 w-full rounded-xl border border-line-strong bg-surface px-3.5"
+				/>
+			</div>
+
+			{#if error}
+				<p class="flex items-start gap-2 text-sm" role="alert">
+					<CircleAlert size={16} class="mt-0.5 shrink-0 text-critical" aria-hidden="true" />
+					{error}
+				</p>
+			{/if}
+
+			<button
+				type="submit"
+				disabled={busy}
+				class="inline-flex h-13 w-full items-center justify-center gap-2 rounded-xl bg-accent font-display text-lg font-semibold text-accent-ink hover:brightness-110 disabled:opacity-60"
+			>
+				<LogIn size={18} aria-hidden="true" />
+				{busy ? m.sign_in_busy() : m.sign_in_submit()}
+			</button>
+
+			<a
+				href={resolve('/sign-in/break-glass')}
+				class="self-center text-sm text-ink-3 hover:text-ink hover:underline"
+			>
+				{m.sign_in_break_glass_link()}
+			</a>
+		</form>
+	</section>
 </div>

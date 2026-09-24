@@ -31,8 +31,7 @@
 </script>
 
 <form onsubmit={submit}>
-	<p class="text-sm text-ink-2">{m.request_hint()}</p>
-	<label class={label} for="request-role">{m.request_role()}</label>
+	<label class="block text-sm font-medium" for="request-role">{m.request_role()}</label>
 	<select id="request-role" class={field} bind:value={role}>
 		{#each roles as option (option)}
 			<option value={option}>{ROLE_LABELS[option]()}</option>

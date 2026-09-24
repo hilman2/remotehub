@@ -160,7 +160,7 @@
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
 	{@attach session}
-	class="h-full w-full cursor-default overflow-hidden rounded-card bg-black outline-none focus-visible:ring-2 focus-visible:ring-accent"
+	class="h-full w-full cursor-default overflow-hidden bg-[#07090c] outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
 	role="application"
 	aria-label={m.display_label({ name })}
 	tabindex="0"

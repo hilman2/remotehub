@@ -83,8 +83,7 @@
 	</p>
 {/snippet}
 
-<h1 class="text-2xl font-semibold tracking-tight">{m.requests_title()}</h1>
-<p class="mt-1 text-sm text-ink-2">{m.requests_intro()}</p>
+<h1 class="text-4xl font-semibold">{m.requests_title()}</h1>
 
 {#if error}
 	<p class="mt-4 flex items-center gap-2 text-sm" role="alert">
