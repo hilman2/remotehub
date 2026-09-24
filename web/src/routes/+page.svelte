@@ -528,8 +528,9 @@
 						{m.credential_hidden()}
 					</p>
 					{#if credential.kind === 'ssh_key'}
+						<p class="font-mono text-xs text-ink-2">{credential.key_algorithm}</p>
 						<p class="font-mono text-xs leading-relaxed break-all text-ink-2">
-							{credential.key_algorithm} · {credential.key_fingerprint}
+							{credential.key_fingerprint}
 						</p>
 					{/if}
 				</section>
