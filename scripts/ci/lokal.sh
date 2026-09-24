@@ -168,6 +168,7 @@ part_web() { # tools
     -v remotehub-ci-pnpm-store:/pnpm-store \
     -e pnpm_config_store_dir=/pnpm-store \
     -e PARAGLIDE_PRECOMPILED=1 \
+    -e REMOTEHUB_WEB_VERSION="$CI_SHA" \
     "$1" bash -euo pipefail -c '
       cd web
       pnpm install --frozen-lockfile --config.minimum-release-age=0
