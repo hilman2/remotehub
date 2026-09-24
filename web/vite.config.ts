@@ -29,12 +29,18 @@ export default defineConfig({
 		// locale comes from the user's choice (localStorage), then the browser,
 		// then English — never from the URL, the SPA has one set of routes.
 		// Keep the strategy in sync with the `i18n` script in package.json.
-		paraglideVitePlugin({
-			project: './project.inlang',
-			outdir: './src/lib/paraglide',
-			strategy: ['localStorage', 'preferredLanguage', 'baseLocale'],
-			emitTsDeclarations: true
-		})
+		// Not under vitest: tests use the messages `pnpm i18n` compiled, so the
+		// CI can run vitest next to svelte-check without rewriting them.
+		...(process.env.VITEST
+			? []
+			: [
+					paraglideVitePlugin({
+						project: './project.inlang',
+						outdir: './src/lib/paraglide',
+						strategy: ['localStorage', 'preferredLanguage', 'baseLocale'],
+						emitTsDeclarations: true
+					})
+				])
 	],
 	server: {
 		host: '0.0.0.0',
