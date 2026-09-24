@@ -2,8 +2,10 @@
 # Answers every text that reaches the desktop's clipboard with `echo:<text>`
 # on the same clipboard. A test puts text in on its side and waits for the
 # answer: that proves both directions, into the session and out of it.
+# Ends with its display, so that a session that is gone leaves no loop.
 last=
-while sleep 0.2; do
+while sleep 0.3; do
+  xset q >/dev/null 2>&1 || exit 0
   text=$(xclip -o -selection clipboard 2>/dev/null) || continue
   [ "$text" = "$last" ] && continue
   last=$text
