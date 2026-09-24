@@ -13,7 +13,14 @@ const CATALOGS: Record<string, Catalog> = { en, de };
  * same in both languages (technical terms, protocol names). Everything else
  * that is identical is most likely a forgotten translation.
  */
-const IDENTICAL_IN_GERMAN = new Set<string>(['footer_version']);
+const IDENTICAL_IN_GERMAN = new Set<string>([
+	'footer_version',
+	'field_name',
+	'field_port',
+	'protocol_ssh',
+	'protocol_vnc',
+	'credential_version'
+]);
 
 /** Every message as text; plural and select variants as their JSON. */
 const messages = (catalog: Catalog): [string, string][] =>
