@@ -22,7 +22,15 @@ export default defineConfig({
 			},
 
 			// SPA: every route falls back to index.html, served by the server.
-			adapter: adapter({ fallback: 'index.html' })
+			adapter: adapter({ fallback: 'index.html' }),
+
+			// One app version for everything a build runs. SvelteKit's default is a
+			// timestamp per process; the CI builds while vitest syncs in parallel, and
+			// two versions give a start page that crashes (#49). The CI sets the
+			// commit, a release its version; development keeps the default.
+			...(process.env.REMOTEHUB_WEB_VERSION
+				? { version: { name: process.env.REMOTEHUB_WEB_VERSION } }
+				: {})
 		}),
 
 		// Messages in messages/{locale}.json, compiled to typed functions. The
