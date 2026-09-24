@@ -67,6 +67,23 @@ Built up with the issues of milestone M0:
 
 ## Commands
 
+Development happens entirely in Docker (`deploy/compose.dev.yml`):
+
+```bash
+docker compose -f deploy/compose.dev.yml up -d --build     # db, server
+docker compose -f deploy/compose.dev.yml logs -f server
+docker compose -f deploy/compose.dev.yml run --rm workbench cargo nextest run
+docker compose -f deploy/compose.dev.yml run --rm workbench cargo clippy --workspace --all-targets
+docker compose -f deploy/compose.dev.yml down               # volumes are kept
+```
+
+- **Server** is rebuilt and restarted on every change under `crates/` or `migrations/`. On Windows, file events from bind mounts do not reach containers, so `watchexec` polls (`--poll`).
+- **Build output:** `target/` lives in the volume `target` (path `/target`), not in the working copy.
+- **Database:** `127.0.0.1:55440` (user, password and database `remotehub`). Tests with `#[sqlx::test]` create a fresh database per test on the same server.
+- **Configuration:** `REMOTEHUB_*` environment variables, each also as `REMOTEHUB_*_FILE` (Docker secrets); see `crates/server/src/config.rs`.
+- **rust-analyzer** runs via the dev container (`.devcontainer/`, service `workbench`).
+- **Rust version:** it appears in `rust-toolchain.toml`, `scripts/ci/tools.Dockerfile` and `deploy/dev/rust.Dockerfile`; the CI job `base` checks that all three match.
+
 ```bash
 bash scripts/ci/lokal.sh               # local CI for HEAD, reports status "lokal"
 bash scripts/ci/lokal.sh --pr 12       # check the head commit of a PR

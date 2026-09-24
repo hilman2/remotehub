@@ -1,0 +1,6 @@
+# Keep in sync with the base images in scripts/ci/tools.Dockerfile and
+# deploy/dev/rust.Dockerfile (the CI job `base` checks this).
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
