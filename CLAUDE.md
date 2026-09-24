@@ -108,7 +108,17 @@ The local CI needs Docker, `gh` and Git Bash. Only one run of this repository at
 - **Only what changed is compiled:** Rust builds from the fixed path `/src` (volume `remotehub-ci-src`), synced by content, so cargo rebuilds only the crates whose files changed.
 - **Only what a change can affect runs:** the files changed since the merge base with `main` decide (`RUST_INPUTS`, `WEB_INPUTS`, `LAB_INPUTS` in `lokal.sh`). A commit on `main` itself, a change under `scripts/ci/` or `CI_FULL=1 bash scripts/ci/lokal.sh` runs everything.
 - **Working rhythm (Claude sessions):** while developing, run only the checks for what you are changing (one crate's tests, one vitest file, `pnpm check`). Run `lokal.sh` exactly once per PR, in the background, and continue with the next issue meanwhile — never the full suite by hand and then again in the CI.
+  - While a `lokal.sh` run is in progress, do not switch branches or edit `scripts/ci/` in this working copy: bash reads the running script from disk, so a changed `lokal.sh` changes the run. Continue on a branch whose `scripts/ci/` is identical, or in a `git worktree`. The commit under test itself is safe; it lives in the run's own volume.
 
 **Ports on the development machine:** other projects already use 5173, 8025, 55432 and 55433. remotehub publishes only `127.0.0.1:5180` (UI) and `127.0.0.1:55440` (database); everything else stays on the compose network.
+
+**Docker and the office network:** Docker's default bridge uses `172.17.0.0/16`, and so does the office LAN (e.g. `172.17.0.90`). With the default, containers — guacd above all — cannot reach LAN hosts in that range: the traffic stays on Docker's own bridge. On such a machine, move Docker's ranges in Docker Desktop → Settings → Docker Engine (`%USERPROFILE%.dockerdaemon.json`):
+
+```json
+"bip": "10.211.0.1/24",
+"default-address-pools": [{ "base": "10.212.0.0/16", "size": 24 }]
+```
+
+Then restart Docker Desktop (this stops every container, other projects' included) and recreate the development network with `docker compose -f deploy/compose.dev.yml down` and `up -d`; existing networks keep their old range until they are recreated. Check with `docker network inspect bridge` and a connection test from the guacd container.
 
 In Git Bash, set `export MSYS_NO_PATHCONV=1` before `docker compose` if needed, otherwise Git Bash rewrites paths.
