@@ -4,6 +4,7 @@
 pub mod api;
 pub mod audit;
 pub mod auth;
+pub mod break_glass;
 pub mod config;
 pub mod db;
 pub mod secrets;

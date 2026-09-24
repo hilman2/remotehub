@@ -7,9 +7,10 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use remotehub_directory::Sid;
 use remotehub_directory::ldap::LdapDirectory;
+use remotehub_server::audit::{Action, Actor, Entry};
 use remotehub_server::auth::Authenticator;
 use remotehub_server::config::Config;
-use remotehub_server::{AppState, Settings, VERSION, app, audit, db, session};
+use remotehub_server::{AppState, Settings, VERSION, app, audit, break_glass, db, session};
 use remotehub_vault::{DynVault, FileKeyring, KeyProvider, Vault, generate_key_line};
 use tracing_subscriber::EnvFilter;
 
@@ -34,6 +35,24 @@ enum Command {
     },
     /// Recompute the audit log's hash chain; exits with 1 if it is broken.
     VerifyAudit,
+    /// Manage break-glass accounts: local emergency accounts that work
+    /// without the directory. Password and TOTP secret are shown only once.
+    BreakGlass {
+        #[command(subcommand)]
+        action: BreakGlassAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum BreakGlassAction {
+    /// Create an account with a generated password and TOTP secret.
+    Create { username: String },
+    /// Replace password and TOTP secret; open sessions end.
+    Reset { username: String },
+    /// Delete an account.
+    Delete { username: String },
+    /// List the accounts.
+    List,
 }
 
 #[tokio::main]
@@ -46,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::VerifyAudit => verify_audit().await,
+        Command::BreakGlass { action } => manage_break_glass(action).await,
     }
 }
 
@@ -134,6 +154,88 @@ async fn resolve_admin_groups(
         );
     }
     Ok(sids)
+}
+
+async fn manage_break_glass(action: BreakGlassAction) -> anyhow::Result<()> {
+    let config = Config::from_env()?;
+    let vault = load_vault(&config.master_key_file)?;
+    let pool = db::connect(&config.database_url)
+        .await
+        .context("cannot connect to the database")?;
+    db::MIGRATOR
+        .run(&pool)
+        .await
+        .context("cannot apply database migrations")?;
+    let sign_in_url = format!("{}/sign-in/break-glass", config.public_origin);
+
+    let (issued, action) = match action {
+        BreakGlassAction::List => {
+            for account in break_glass::list(&pool).await? {
+                println!("{}", account.username);
+            }
+            return Ok(());
+        }
+        BreakGlassAction::Delete { username } => {
+            let account = break_glass::delete(&pool, &username).await?;
+            audit_cli(
+                &pool,
+                Action::BreakGlassDeleted,
+                account.user_id,
+                &account.username,
+            )
+            .await?;
+            println!("Break-glass account {:?} deleted.", account.username);
+            return Ok(());
+        }
+        BreakGlassAction::Create { username } => (
+            break_glass::create(&pool, &vault, &username).await?,
+            Action::BreakGlassCreated,
+        ),
+        BreakGlassAction::Reset { username } => (
+            break_glass::reset(&pool, &vault, &username).await?,
+            Action::BreakGlassReset,
+        ),
+    };
+    let user_id: uuid::Uuid = sqlx::query_scalar(
+        "SELECT id FROM users WHERE kind = 'local' AND lower(username) = lower($1)",
+    )
+    .bind(&issued.username)
+    .fetch_one(&pool)
+    .await?;
+    audit_cli(&pool, action, user_id, &issued.username).await?;
+    println!(
+        "Break-glass account {:?} is ready. This is shown only once; keep it offline, \
+         e.g. in a safe.\n\n  Password:    {}\n  TOTP secret: {}\n  TOTP URI:    {}\n\n\
+         Sign in at {sign_in_url}",
+        issued.username,
+        issued.password.as_str(),
+        issued.totp_secret.as_str(),
+        issued.totp_uri.as_str(),
+    );
+    Ok(())
+}
+
+async fn audit_cli(
+    pool: &sqlx::PgPool,
+    action: Action,
+    user_id: uuid::Uuid,
+    username: &str,
+) -> anyhow::Result<()> {
+    audit::record(
+        pool,
+        Entry {
+            actor: Actor {
+                id: None,
+                name: "cli",
+            },
+            action,
+            object: Some(("user", user_id)),
+            details: serde_json::json!({ "username": username }),
+            address: None,
+        },
+    )
+    .await?;
+    Ok(())
 }
 
 async fn verify_audit() -> anyhow::Result<()> {

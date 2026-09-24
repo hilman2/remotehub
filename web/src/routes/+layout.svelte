@@ -1,6 +1,7 @@
 <script lang="ts">
 	import './layout.css';
 	import LogOut from '@lucide/svelte/icons/log-out';
+	import Siren from '@lucide/svelte/icons/siren';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
@@ -14,7 +15,7 @@
 
 	let { children } = $props();
 
-	const signInPage = $derived(page.url.pathname === resolve('/sign-in'));
+	const signInPage = $derived(page.url.pathname.startsWith(resolve('/sign-in')));
 
 	$effect(() => {
 		document.documentElement.lang = getLocale();
@@ -97,6 +98,16 @@
 				</div>
 			</div>
 		</header>
+
+		{#if session.user.kind === 'local'}
+			<div
+				class="flex items-center justify-center gap-2 bg-critical px-4 py-2 text-sm font-medium text-white"
+				role="alert"
+			>
+				<Siren size={16} aria-hidden="true" />
+				{m.break_glass_banner()}
+			</div>
+		{/if}
 
 		<main id="main" class="mx-auto w-full max-w-7xl flex-1 px-4 pt-8 pb-16 sm:px-6">
 			{@render children()}

@@ -54,5 +54,14 @@
 	"audit_session_sign_in_failed": "Sign-in failed",
 	"audit_session_sign_out": "Signed out",
 	"audit_audit_verified": "Verified the audit log",
-	"error_forbidden": "You are not permitted to do this."
+	"error_forbidden": "You are not permitted to do this.",
+	"sign_in_break_glass_link": "Emergency access (break-glass)",
+	"break_glass_title": "Emergency access",
+	"break_glass_intro": "For when the directory is unavailable. Every sign-in here is recorded.",
+	"break_glass_code": "Code from the authenticator app",
+	"break_glass_back": "Back to the normal sign-in",
+	"break_glass_banner": "Signed in with an emergency account. Everything you do is recorded.",
+	"audit_break_glass_created": "Created a break-glass account",
+	"audit_break_glass_reset": "Reset a break-glass account",
+	"audit_break_glass_deleted": "Deleted a break-glass account"
 }

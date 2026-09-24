@@ -69,7 +69,10 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - **Identifiers:** users and groups are stored by `objectSid`/`objectGUID` (Entra object IDs later), never
   by name, so renames do not change permissions.
 - **Sessions:** server-side in PostgreSQL; cookie HttpOnly, Secure, SameSite=Strict; CSRF protection.
-- **Break-glass:** local accounts (argon2id + TOTP), created only via CLI, work when AD is down.
+- **Break-glass:** local accounts (argon2id + TOTP, each code accepted once), created, reset and deleted
+  only via `remotehub break-glass …`, which prints password and TOTP secret once. The TOTP secret is sealed
+  in the vault. They sign in at `/sign-in/break-glass`, work when AD is down, are administrators, and every
+  attempt is audited with `break_glass: true`; the UI shows a red banner during such a session.
 - **Permissions:** a folder tree holds devices and credentials. A grant gives an AD group or a user a role
   on a folder or an entry: `list < connect < reveal < edit < manage`. Grants are inherited downwards and
   only allow. `authorize()` is the single decision point and is tested table-driven.

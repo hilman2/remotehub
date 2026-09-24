@@ -33,6 +33,9 @@ audit_actions! {
     SignInFailed = "session.sign_in_failed",
     SignOut = "session.sign_out",
     AuditVerified = "audit.verified",
+    BreakGlassCreated = "break_glass.created",
+    BreakGlassReset = "break_glass.reset",
+    BreakGlassDeleted = "break_glass.deleted",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).
