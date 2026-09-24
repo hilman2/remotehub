@@ -118,6 +118,9 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   before. Picks from the device list are stored per user on the server (`search_picks`); picks in the
   personal vault are sealed with the vault key like its entries (`personal_search`), so the server never
   sees what someone looks for there. Picks are preferences, not audited.
+- **Session tabs** (`web/src/lib/session/`): sessions open as tabs inside the page and keep running
+  while the user moves between its pages; a reload ends them. `/connect/{id}` shows one session alone,
+  for a window of its own.
 - Plaintext lives only in `secrecy`/`zeroize` types and never appears in logs, API responses (except the
   audited `reveal`), environment variables or command lines. Core dumps are disabled.
 

@@ -303,5 +303,13 @@
 	"audit_connector_deleted": "Standort-Konnektor gelöscht",
 	"search_results": "Suchergebnisse",
 	"search_frequent": "Häufig genutzt",
-	"vault_search": "Einträge suchen"
+	"vault_search": "Einträge suchen",
+	"session_tabs": "Offene Sitzungen",
+	"session_close": "{name} schließen",
+	"session_connecting": "Verbindet",
+	"session_connected": "Verbunden",
+	"session_closed": "Beendet",
+	"session_failed": "Fehlgeschlagen",
+	"session_show_devices": "Geräte einblenden",
+	"session_new_window": "In neuem Fenster öffnen"
 }

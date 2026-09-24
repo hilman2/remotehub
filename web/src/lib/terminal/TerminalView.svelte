@@ -7,16 +7,24 @@
 	let {
 		deviceId,
 		credentials,
+		visible = true,
 		onevent,
 		onend
 	}: {
 		deviceId: string;
 		credentials: Credentials | null;
+		/** Takes the keyboard whenever it is shown again. */
+		visible?: boolean;
 		onevent: (event: ServerEvent) => void;
 		onend: () => void;
 	} = $props();
 
 	let container: HTMLDivElement;
+	let focus: () => void = () => {};
+
+	$effect(() => {
+		if (visible) focus();
+	});
 
 	// One terminal and one connection per mount; the page remounts to reconnect.
 	$effect(() => {
@@ -52,11 +60,14 @@
 		);
 		const input = terminal.onData((data) => connection.send(data));
 		const observer = new ResizeObserver(() => {
+			// A hidden tab has no size (display: none); the session keeps its own.
+			if (container.clientWidth === 0) return;
 			fit.fit();
 			connection.resize({ cols: terminal.cols, rows: terminal.rows });
 		});
 		observer.observe(container);
-		terminal.focus();
+		focus = () => terminal.focus();
+		focus();
 
 		return () => {
 			observer.disconnect();

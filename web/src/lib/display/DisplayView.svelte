@@ -8,6 +8,7 @@
 		deviceId,
 		name,
 		credentials,
+		visible = true,
 		onevent,
 		onfailure,
 		onend
@@ -15,11 +16,19 @@
 		deviceId: string;
 		name: string;
 		credentials: Credentials | null;
+		/** Takes the keyboard whenever it is shown again. */
+		visible?: boolean;
 		onevent: (event: ServerEvent) => void;
 		/** guacd ended the session with this Guacamole status. */
 		onfailure: (code: number, detail: string) => void;
 		onend: () => void;
 	} = $props();
+
+	let view: HTMLDivElement;
+
+	$effect(() => {
+		if (visible) view.focus();
+	});
 
 	/** Opens the session into `container` and closes it when the view goes. */
 	function session(container: HTMLDivElement) {
@@ -39,7 +48,11 @@
 		container.appendChild(element);
 
 		// The remote picture fits into the window, never larger than it is.
+		// A hidden tab has no size (display: none). Its session keeps the size
+		// it had and is fitted again when the tab is shown.
+		const hidden = () => container.clientWidth === 0;
 		const fit = () => {
+			if (hidden()) return;
 			const width = display.getWidth();
 			const height = display.getHeight();
 			if (width > 0 && height > 0) {
@@ -50,6 +63,7 @@
 		// RDP follows the window's size; VNC keeps its own and is scaled.
 		let resizing: ReturnType<typeof setTimeout> | undefined;
 		const observer = new ResizeObserver(() => {
+			if (hidden()) return;
 			fit();
 			clearTimeout(resizing);
 			resizing = setTimeout(() => {
@@ -159,6 +173,7 @@
      role application with tabindex, as WAI-ARIA describes it. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
+	bind:this={view}
 	{@attach session}
 	class="h-full w-full cursor-default overflow-hidden bg-[#07090c] outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
 	role="application"
