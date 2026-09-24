@@ -316,3 +316,84 @@ async fn asked_credentials_work_once_and_wrong_ones_are_reported(pool: PgPool) {
     start(&mut socket, json!({})).await;
     assert_eq!(event(&mut socket).await["code"], "target_auth_failed");
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn the_own_account_connects_with_the_sign_in_password(pool: PgPool) {
+    let state = state(pool);
+    let app = app(state.clone(), None);
+    // "tester" exists in the fake directory with the SSH target's password.
+    let sign_in = send(&app, sign_in_request("tester", "Tester-Passw0rd!")).await;
+    let token = sign_in.session_token().unwrap();
+    let key_cookie = sign_in
+        .headers
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find(|v| v.starts_with("__Host-remotehub-login-key="))
+        .map(|v| v.split(';').next().unwrap().to_owned())
+        .unwrap();
+    let alice = send(&app, sign_in_request("alice", "right"))
+        .await
+        .session_token()
+        .unwrap();
+    let folder = create(
+        &app,
+        &alice,
+        "/api/folders",
+        json!({ "parent_id": null, "name": "Own" }),
+    )
+    .await;
+    let device = create(
+        &app,
+        &alice,
+        "/api/devices",
+        json!({
+            "folder_id": folder, "name": "own", "protocol": "ssh", "host": ssh_host(),
+            "port": 22, "auth_mode": "own", "credential_id": null,
+        }),
+    )
+    .await;
+    let grant = send(
+        &app,
+        authed(
+            "POST",
+            "/api/grants",
+            Some(json!({
+                "object": { "kind": "device", "id": device },
+                "principal_kind": "user", "principal_sid": "S-1-5-21-1-2-3-1108",
+                "principal_name": "Tester", "role": "connect",
+            })),
+            &alice,
+        ),
+    )
+    .await;
+    assert_eq!(grant.status, 204);
+    let address = serve(state).await;
+
+    // Without the key cookie the password cannot be opened.
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({})).await;
+    assert_eq!(event(&mut socket).await["code"], "own_account_unavailable");
+
+    let mut request = format!("ws://{address}/api/devices/{device}/terminal")
+        .into_client_request()
+        .unwrap();
+    request.headers_mut().insert(
+        "cookie",
+        format!("__Host-remotehub-session={token}; {key_cookie}")
+            .parse()
+            .unwrap(),
+    );
+    request
+        .headers_mut()
+        .insert("origin", ORIGIN.parse().unwrap());
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    start(&mut socket, json!({})).await;
+    assert_eq!(event(&mut socket).await["type"], "connected");
+    socket
+        .send(Message::Binary(b"whoami\n".to_vec().into()))
+        .await
+        .unwrap();
+    output_until(&mut socket, "tester").await;
+}

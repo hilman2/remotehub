@@ -29,6 +29,7 @@ pub fn settings() -> Settings {
             max: Duration::from_secs(12 * 3600),
         },
         admin_groups: vec![ADMINS_SID.to_owned()],
+        own_account_connections: true,
     }
 }
 
@@ -112,6 +113,16 @@ impl IdentityProvider for FakeDirectory {
                 display_name: "Olaf Operator".into(),
                 email: None,
                 groups: vec![OPS_SID.parse::<Sid>().unwrap()],
+            }),
+            // Same name and password as the lab's SSH target, for "own account" tests.
+            ("tester", "Tester-Passw0rd!") => Ok(Identity {
+                sid: "S-1-5-21-1-2-3-1108".parse().unwrap(),
+                guid: Uuid::from_u128(0x7e57),
+                username: "tester".into(),
+                upn: None,
+                display_name: "Tester".into(),
+                email: None,
+                groups: vec![],
             }),
             ("carol", _) => Err(AuthError::AccountDisabled),
             ("offline", _) => Err(AuthError::Unavailable("connection refused".into())),

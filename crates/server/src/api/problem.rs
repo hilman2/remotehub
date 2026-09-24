@@ -58,6 +58,7 @@ error_codes! {
     TargetUnreachable = ("target_unreachable", BAD_GATEWAY, "The target is not reachable"),
     TargetAuthFailed = ("target_auth_failed", BAD_GATEWAY, "The target refused the credentials"),
     ConnectionFailed = ("connection_failed", BAD_GATEWAY, "The connection failed"),
+    OwnAccountUnavailable = ("own_account_unavailable", CONFLICT, "The own sign-in password is not available in this session"),
     DirectoryUnavailable = ("directory_unavailable", SERVICE_UNAVAILABLE, "Directory unavailable"),
     DatabaseUnavailable = ("database_unavailable", SERVICE_UNAVAILABLE, "Database unavailable"),
     Internal = ("internal", INTERNAL_SERVER_ERROR, "Internal server error"),

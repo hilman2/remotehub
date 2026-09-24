@@ -159,5 +159,6 @@
 	"audit_connection_closed": "Verbindung beendet",
 	"audit_connection_failed": "Verbindung fehlgeschlagen",
 	"audit_device_host_key_pinned": "Host-Schlüssel hinterlegt",
-	"audit_device_host_key_reset": "Host-Schlüssel vergessen"
+	"audit_device_host_key_reset": "Host-Schlüssel vergessen",
+	"error_own_account_unavailable": "Das Anmeldepasswort steht in dieser Sitzung nicht zur Verfügung. Bitte neu anmelden — oder die Funktion ist hier abgeschaltet."
 }

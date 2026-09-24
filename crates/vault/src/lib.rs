@@ -20,6 +20,56 @@ use zeroize::Zeroizing;
 
 pub use keyring::{FileKeyring, generate_key_line};
 
+/// Secrets sealed with a key the server does not keep — for example one that
+/// lives only in the user's cookie. The context (e.g. a session's token hash)
+/// is bound in as associated data.
+pub mod detached {
+    use zeroize::Zeroizing;
+
+    use crate::{Key, VaultError};
+
+    fn aad(context: &[u8]) -> Vec<u8> {
+        [b"remotehub|detached|".as_slice(), context].concat()
+    }
+
+    pub fn new_key() -> Key {
+        crate::random_key()
+    }
+
+    pub fn seal(key: &Key, context: &[u8], plaintext: &[u8]) -> Vec<u8> {
+        crate::encrypt(key, &aad(context), plaintext)
+    }
+
+    pub fn open(
+        key: &Key,
+        context: &[u8],
+        sealed: &[u8],
+    ) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+        crate::decrypt(key, &aad(context), sealed)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn opens_only_with_the_same_key_and_context() {
+            let key = new_key();
+            let sealed = seal(&key, b"session-a", b"Passw0rd!");
+            assert!(!sealed.windows(9).any(|w| w == b"Passw0rd!"));
+            assert_eq!(
+                open(&key, b"session-a", &sealed).unwrap().as_slice(),
+                b"Passw0rd!"
+            );
+            assert_eq!(open(&key, b"session-b", &sealed), Err(VaultError::Open));
+            assert_eq!(
+                open(&new_key(), b"session-a", &sealed),
+                Err(VaultError::Open)
+            );
+        }
+    }
+}
+
 /// Name of the sealing scheme stored with every sealed value.
 pub const SCHEME: &str = "xchacha20poly1305-v1";
 

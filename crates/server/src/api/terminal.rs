@@ -101,7 +101,14 @@ pub async fn terminal(
     if target.protocol != "ssh" {
         return Err(Problem::new(ErrorCode::InvalidRequest).param("field", "protocol"));
     }
-    Ok(upgrade.on_upgrade(move |socket| run(socket, state, session, target, address)))
+    // The own account's password needs the key cookie, which only this
+    // request carries.
+    let own = if target.auth_mode == "own" {
+        Some(own_account(&state, &session, &headers).await?)
+    } else {
+        None
+    };
+    Ok(upgrade.on_upgrade(move |socket| run(socket, state, session, target, own, address)))
 }
 
 async fn send_json(socket: &mut WebSocket, value: Value) {
@@ -135,11 +142,30 @@ fn entry<'a>(
     }
 }
 
+/// The signed-in user's own directory account (ADR 0005): their user name
+/// and the sign-in password kept for this session.
+async fn own_account(
+    state: &AppState,
+    session: &Session,
+    headers: &HeaderMap,
+) -> Result<Result<(String, SecretString), Problem>, Problem> {
+    if !state.settings.own_account_connections || session.kind != "directory" {
+        return Ok(Err(Problem::new(ErrorCode::OwnAccountUnavailable)));
+    }
+    let Some(password) = crate::session::sign_in_password(&state.db, headers).await? else {
+        return Ok(Err(Problem::new(ErrorCode::OwnAccountUnavailable)));
+    };
+    let password =
+        String::from_utf8(password.to_vec()).map_err(|_| Problem::new(ErrorCode::Internal))?;
+    Ok(Ok((session.username.clone(), SecretString::from(password))))
+}
+
 async fn run(
     mut socket: WebSocket,
     state: AppState,
     session: Session,
     target: Target,
+    own: Option<Result<(String, SecretString), Problem>>,
     address: String,
 ) {
     // 1. The browser says how big its terminal is (and, if asked, who to be).
@@ -163,7 +189,11 @@ async fn run(
     };
 
     // 2. Credentials: from the vault, or as entered for this connection only.
-    let (username, password) = match credentials(&state, &target, username, password).await {
+    let resolved = match own {
+        Some(own) => own,
+        None => credentials(&state, &target, username, password).await,
+    };
+    let (username, password) = match resolved {
         Ok(credentials) => credentials,
         Err(problem) => {
             send_problem(&mut socket, &problem).await;
@@ -331,7 +361,6 @@ async fn credentials(
                 .ok_or(Problem::new(ErrorCode::InvalidRequest).param("field", "password"))?;
             Ok((username.trim().to_owned(), password))
         }
-        // Signing in with the own directory account arrives with #14.
         _ => Err(Problem::new(ErrorCode::InvalidRequest).param("field", "auth_mode")),
     }
 }

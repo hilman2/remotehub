@@ -25,6 +25,8 @@ use remotehub_model::Subject;
 use crate::{AppState, Settings};
 
 pub const COOKIE_NAME: &str = "__Host-remotehub-session";
+/// Holds the key to the sealed sign-in password (ADR 0005); never stored on the server.
+pub const LOGIN_KEY_COOKIE: &str = "__Host-remotehub-login-key";
 
 /// The signed-in user of a request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
@@ -64,7 +66,9 @@ impl Session {
     }
 }
 
-fn hash(token: &str) -> [u8; 32] {
+/// SHA-256 of a session token: its key in the database and the context the
+/// sign-in password is sealed to.
+pub fn hash(token: &str) -> [u8; 32] {
     Sha256::digest(token.as_bytes()).into()
 }
 
@@ -147,15 +151,60 @@ pub async fn purge(db: &PgPool, idle: Duration) -> Result<u64, sqlx::Error> {
     Ok(result.rows_affected())
 }
 
+/// Seals the sign-in password with a fresh key bound to this session and
+/// returns the key for the user's cookie. Only the ciphertext is stored.
+pub async fn keep_sign_in_password<'e>(
+    db: impl PgExecutor<'e>,
+    token: &str,
+    password: &[u8],
+) -> Result<String, sqlx::Error> {
+    let key = remotehub_vault::detached::new_key();
+    let sealed = remotehub_vault::detached::seal(&key, &hash(token), password);
+    sqlx::query("UPDATE sessions SET login_secret = $2 WHERE token_hash = $1")
+        .bind(hash(token).as_slice())
+        .bind(sealed)
+        .execute(db)
+        .await?;
+    Ok(URL_SAFE_NO_PAD.encode(key.as_slice()))
+}
+
+/// The sign-in password of the session, if it was kept and the request
+/// carries the key cookie.
+pub async fn sign_in_password(
+    db: &PgPool,
+    headers: &HeaderMap,
+) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>, sqlx::Error> {
+    let (Some(token), Some(key)) = (token(headers), cookie(headers, LOGIN_KEY_COOKIE)) else {
+        return Ok(None);
+    };
+    let Ok(key) = <[u8; 32]>::try_from(URL_SAFE_NO_PAD.decode(key).unwrap_or_default().as_slice())
+    else {
+        return Ok(None);
+    };
+    let sealed: Option<Vec<u8>> =
+        sqlx::query_scalar("SELECT login_secret FROM sessions WHERE token_hash = $1")
+            .bind(hash(&token).as_slice())
+            .fetch_optional(db)
+            .await?
+            .flatten();
+    Ok(sealed.and_then(|sealed| {
+        remotehub_vault::detached::open(&zeroize::Zeroizing::new(key), &hash(&token), &sealed).ok()
+    }))
+}
+
 /// The session token from the request's cookies.
 pub fn token(headers: &HeaderMap) -> Option<String> {
+    cookie(headers, COOKIE_NAME)
+}
+
+fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get_all(COOKIE)
         .iter()
         .filter_map(|value| value.to_str().ok())
         .flat_map(|value| value.split(';'))
         .filter_map(|pair| pair.trim().split_once('='))
-        .find(|(name, _)| *name == COOKIE_NAME)
+        .find(|(n, _)| *n == name)
         .map(|(_, value)| value.to_owned())
         .filter(|value| !value.is_empty())
 }
@@ -171,7 +220,24 @@ pub fn set_cookie(token: &str) -> (axum::http::HeaderName, HeaderValue) {
 
 /// `Set-Cookie` that removes the token.
 pub fn clear_cookie() -> (axum::http::HeaderName, HeaderValue) {
-    let value = format!("{COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0");
+    clear(COOKIE_NAME)
+}
+
+/// `Set-Cookie` for the key to the sealed sign-in password.
+pub fn set_login_key_cookie(key: &str) -> (axum::http::HeaderName, HeaderValue) {
+    let value = format!("{LOGIN_KEY_COOKIE}={key}; Path=/; HttpOnly; Secure; SameSite=Strict");
+    (
+        SET_COOKIE,
+        HeaderValue::from_str(&value).expect("key is base64url"),
+    )
+}
+
+pub fn clear_login_key_cookie() -> (axum::http::HeaderName, HeaderValue) {
+    clear(LOGIN_KEY_COOKIE)
+}
+
+fn clear(name: &str) -> (axum::http::HeaderName, HeaderValue) {
+    let value = format!("{name}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0");
     (
         SET_COOKIE,
         HeaderValue::from_str(&value).expect("static cookie"),

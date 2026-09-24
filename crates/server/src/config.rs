@@ -35,6 +35,9 @@ pub struct Config {
     /// File with the vault's master keys (a Docker secret), never an
     /// environment variable.
     pub master_key_file: PathBuf,
+    /// Keep the sign-in password, encrypted with a key only in the user's
+    /// cookie, so devices can be opened with the own directory account.
+    pub own_account_connections: bool,
     /// Groups whose members administer remotehub: SIDs or group names
     /// (names are looked up in the directory at startup).
     pub admin_groups: Vec<String>,
@@ -166,6 +169,12 @@ impl Config {
             })
             .unwrap_or_default();
 
+        let own_account_connections = parse_or(
+            "REMOTEHUB_OWN_ACCOUNT_CONNECTIONS",
+            setting("REMOTEHUB_OWN_ACCOUNT_CONNECTIONS")?,
+            true,
+        )?;
+
         Ok(Config {
             listen,
             database_url,
@@ -175,6 +184,7 @@ impl Config {
             session,
             ldap,
             master_key_file,
+            own_account_connections,
             admin_groups,
         })
     }

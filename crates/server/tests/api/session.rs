@@ -258,3 +258,80 @@ fn app_without_directory(pool: PgPool) -> axum::Router {
     let state = AppState::new(pool, None, settings(), crate::common::vault());
     app(state, None)
 }
+
+fn login_key(response: &crate::common::Response) -> Option<String> {
+    response
+        .headers
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find(|v| v.starts_with("__Host-remotehub-login-key="))
+        .map(str::to_owned)
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_sign_in_password_is_kept_sealed_with_a_key_only_the_browser_has(pool: PgPool) {
+    let app = app(state(pool.clone()), None);
+    let response = send(&app, sign_in_request("alice", "right")).await;
+    let cookie = login_key(&response).expect("key cookie");
+    for attribute in ["HttpOnly", "Secure", "SameSite=Strict", "Path=/"] {
+        assert!(
+            cookie.contains(attribute),
+            "{attribute} missing in {cookie}"
+        );
+    }
+
+    let sealed: Vec<u8> = sqlx::query_scalar("SELECT login_secret FROM sessions")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(!sealed.is_empty());
+    assert!(!sealed.windows(5).any(|w| w == b"right"));
+    // The key never reaches the database.
+    let key = cookie.split(';').next().unwrap().split_once('=').unwrap().1;
+    let dump: String = sqlx::query_scalar("SELECT string_agg(s::text, '') FROM sessions s")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(!dump.contains(key));
+
+    // Signing out removes the key cookie, too.
+    let token = response.session_token().unwrap();
+    let mut out = crate::common::authed("DELETE", "/api/session", None, &token);
+    out.headers_mut().remove(header::CONTENT_TYPE);
+    let out = send(&app, out).await;
+    let cleared: Vec<&str> = out
+        .headers
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .collect();
+    assert!(
+        cleared
+            .iter()
+            .any(|c| c.starts_with("__Host-remotehub-login-key=;") && c.contains("Max-Age=0"))
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn keeping_the_password_can_be_switched_off(pool: PgPool) {
+    let mut settings = settings();
+    settings.own_account_connections = false;
+    let app = app(
+        AppState::new(
+            pool.clone(),
+            Some(std::sync::Arc::new(crate::common::FakeDirectory)),
+            settings,
+            crate::common::vault(),
+        ),
+        None,
+    );
+    let response = send(&app, sign_in_request("alice", "right")).await;
+    assert!(response.session_token().is_some());
+    assert!(login_key(&response).is_none());
+    let sealed: Option<Vec<u8>> = sqlx::query_scalar("SELECT login_secret FROM sessions")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(sealed.is_none());
+}

@@ -159,5 +159,6 @@
 	"audit_connection_closed": "Closed a connection",
 	"audit_connection_failed": "Connection failed",
 	"audit_device_host_key_pinned": "Pinned a host key",
-	"audit_device_host_key_reset": "Forgot a host key"
+	"audit_device_host_key_reset": "Forgot a host key",
+	"error_own_account_unavailable": "Your sign-in password is not available in this session. Sign in again — or this is switched off here."
 }

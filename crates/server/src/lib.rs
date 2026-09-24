@@ -46,6 +46,8 @@ pub struct Settings {
     pub session: SessionConfig,
     /// SIDs of the groups whose members are administrators.
     pub admin_groups: Vec<String>,
+    /// Whether devices may be opened with the own directory account (ADR 0005).
+    pub own_account_connections: bool,
 }
 
 impl AppState {
