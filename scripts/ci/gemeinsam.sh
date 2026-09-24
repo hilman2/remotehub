@@ -90,9 +90,20 @@ ci_ziel_bestimmen() {
 
   CI_WURZEL="$(git rev-parse --show-toplevel)"
   if [ -n "$CI_PR" ]; then
-    git -C "$CI_WURZEL" fetch -q origin "pull/${CI_PR}/head" ||
-      ci_fehler "Pull Request #${CI_PR} nicht gefunden"
-    CI_SHA="$(git -C "$CI_WURZEL" rev-parse FETCH_HEAD)"
+    # GitHub zieht pull/N/head kurz nach einem Push nach; bis dahin käme der
+    # alte Stand. Deshalb auf den Kopf-Commit warten, den GitHub meldet.
+    local erwartet="" versuch
+    if command -v gh >/dev/null; then
+      erwartet="$(cd "$CI_WURZEL" && gh pr view "$CI_PR" --json headRefOid -q .headRefOid 2>/dev/null || true)"
+    fi
+    for versuch in 1 2 3 4 5 6 7 8 9 10; do
+      git -C "$CI_WURZEL" fetch -q origin "pull/${CI_PR}/head" ||
+        ci_fehler "Pull Request #${CI_PR} nicht gefunden"
+      CI_SHA="$(git -C "$CI_WURZEL" rev-parse FETCH_HEAD)"
+      [ -z "$erwartet" ] || [ "$CI_SHA" = "$erwartet" ] && break
+      [ "$versuch" = 1 ] && echo "… warte, bis GitHub den neuen Stand von #${CI_PR} liefert"
+      sleep 2
+    done
   else
     CI_SHA="$(git -C "$CI_WURZEL" rev-parse --verify "${CI_ZIEL}^{commit}")" ||
       ci_fehler "Commit ${CI_ZIEL} unbekannt"

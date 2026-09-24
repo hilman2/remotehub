@@ -13,3 +13,7 @@ bun.lockb
 
 # Generated from Rust (crates/server/src/api/problem.rs), checked by a Rust test
 /src/lib/api/generated/
+
+# Playwright output
+/test-results/
+/playwright-report/

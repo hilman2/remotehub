@@ -18,8 +18,9 @@ CI_JOBS=(base code)
 # shellcheck source=scripts/ci/gemeinsam.sh
 source "$(dirname "${BASH_SOURCE[0]}")/gemeinsam.sh"
 
-# Keep in sync with deploy/compose.dev.yml.
+# Keep in sync with deploy/compose.dev.yml (and web/package.json for Playwright).
 POSTGRES_IMAGE="postgres:18.6-trixie"
+E2E_IMAGE="mcr.microsoft.com/playwright:v1.63.0-noble"
 
 # What each part depends on (path prefixes). scripts/ci/ counts for all.
 RUST_INPUTS=(crates/ migrations/ Cargo.toml Cargo.lock rust-toolchain.toml deploy/dev/rust.Dockerfile)
@@ -199,6 +200,33 @@ part_web() { # tools
     '
 }
 
+# End-to-end tests in a real browser (web/tests/e2e) with the server binary
+# and the UI built in this run, a fresh database and the lab. The browser
+# shares the server's network namespace, so it reaches it as localhost —
+# Secure cookies need localhost or HTTPS.
+part_e2e() { # tools
+  ci_dienst db-e2e -e POSTGRES_USER=ci -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=e2e "$POSTGRES_IMAGE"
+  ci_warten db-e2e 60 pg_isready -h 127.0.0.1 -U ci -d e2e
+  ci_dienst e2e-server \
+    -v remotehub-ci-target:/ci-target -v "${CI_VOLUME}:${CI_SRC}" \
+    -e REMOTEHUB_DATABASE_URL=postgres://ci:ci@db-e2e:5432/e2e \
+    -e REMOTEHUB_PUBLIC_URL=http://localhost:8080 \
+    -e REMOTEHUB_MASTER_KEY_FILE="${CI_SRC}/deploy/dev/master.key" \
+    -e REMOTEHUB_WEB_DIR="${CI_SRC}/web/build" \
+    -e REMOTEHUB_LDAP_URL=ldaps://dc.remotehub.test \
+    -e REMOTEHUB_LDAP_CA_FILE="${CI_SRC}/deploy/testlab/dc/tls/ca.crt" \
+    -e REMOTEHUB_LDAP_BIND_DN=svc-remotehub@remotehub.test \
+    -e 'REMOTEHUB_LDAP_BIND_PASSWORD=Svc-Passw0rd!' \
+    -e REMOTEHUB_LDAP_BASE_DN=DC=remotehub,DC=test \
+    -e 'REMOTEHUB_ADMIN_GROUPS=RH Admins' \
+    "$1" /ci-target/debug/remotehub
+  ci_warten e2e-server 60 bash -c '</dev/tcp/127.0.0.1/8080'
+  docker run --rm --label "ci-lokal=${CI_ID}" --network "container:${CI_ID}-e2e-server" \
+    -v "${CI_VOLUME}:${CI_SRC}" -w "${CI_SRC}/web" \
+    -e E2E_BASE_URL=http://localhost:8080 -e E2E_SSH_HOST=ssh-target -e CI=1 \
+    "$E2E_IMAGE" node node_modules/@playwright/test/cli.js test
+}
+
 # Runs a part in the background with its own log and records how long it took.
 #   in_background NAME COMMAND... (sets NAME_pid)
 in_background() {
@@ -215,10 +243,11 @@ in_background() {
   printf -v "${name}_pid" "%s" "$!"
 }
 
-# Rust (with the lab) and web in parallel, each with its own log; failed parts
-# are printed last so the summary of gemeinsam.sh shows them.
+# Rust (with the lab) and web in parallel, each with its own log; then, in
+# full runs (or with CI_E2E=1), the end-to-end tests with what both built.
+# Failed parts are printed last so the summary of gemeinsam.sh shows them.
 job_code() {
-  local tools logs rust=0 web=0 lab=0 rust_pid="" web_pid="" rust_rc=0 web_rc=0
+  local tools logs rust=0 web=0 lab=0 rust_pid="" web_pid="" e2e_pid="" rust_rc=0 web_rc=0 e2e_rc=0
   tools="$(ci_image scripts/ci/tools.Dockerfile)"
   logs="$(mktemp -d)"
   if needed "${RUST_INPUTS[@]}"; then rust=1; fi
@@ -240,25 +269,34 @@ job_code() {
   if [ -n "$rust_pid" ]; then wait "$rust_pid" || rust_rc=$?; fi
   if [ -n "$web_pid" ]; then wait "$web_pid" || web_rc=$?; fi
 
+  # Full runs (and changes under scripts/ci/ or to the tests themselves)
+  # include them; CI_E2E=1 forces them.
+  local full=0
+  if [ "${CI_E2E:-0}" = 1 ] || needed web/tests/e2e/ web/playwright.config.ts; then full=1; fi
+  if [ "$full" = 1 ] && [ "$lab" = 1 ] && [ "$web" = 1 ] && [ "$rust_rc" = 0 ] && [ "$web_rc" = 0 ]; then
+    in_background e2e part_e2e "$tools"
+    wait "$e2e_pid" || e2e_rc=$?
+  else
+    echo "skipped: end-to-end tests run in full runs after Rust and web passed (CI_E2E=1 forces them)" >"${logs}/e2e.log"
+  fi
+
   # Successful parts first, failed parts last.
   local part rc seconds
   for want in ok failed; do
-    for part in rust web; do
+    for part in rust web e2e; do
       rc="${part}_rc"
       seconds="$(cat "${logs}/${part}.seconds" 2>/dev/null || echo 0)"
       if [ "$want" = ok ] && [ "${!rc}" = 0 ]; then
-        printf '════ %s ✓ %ss
-' "$part" "$seconds"
+        printf '════ %s ✓ %ss\n' "$part" "$seconds"
         cat "${logs}/${part}.log"
       elif [ "$want" = failed ] && [ "${!rc}" != 0 ]; then
-        printf '════ %s ✗ %ss (exit %s)
-' "$part" "$seconds" "${!rc}"
+        printf '════ %s ✗ %ss (exit %s)\n' "$part" "$seconds" "${!rc}"
         cat "${logs}/${part}.log"
       fi
     done
   done
   rm -rf "$logs"
-  [ "$rust_rc" = 0 ] && [ "$web_rc" = 0 ]
+  [ "$rust_rc" = 0 ] && [ "$web_rc" = 0 ] && [ "$e2e_rc" = 0 ]
 }
 
 ci_main "$@"
