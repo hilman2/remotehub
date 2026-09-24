@@ -2,9 +2,14 @@
 //! a fresh database with all migrations (needs `DATABASE_URL`, provided by the
 //! development compose and the local CI).
 
+use std::net::{Ipv4Addr, SocketAddr};
+
 use crate::common::{get, send, state, unreachable_pool};
+use crate::terminal::serve;
 use axum::http::StatusCode;
-use remotehub_server::{VERSION, app};
+use remotehub_server::api::health;
+use remotehub_server::{VERSION, app, db};
+use secrecy::SecretString;
 use serde_json::json;
 use sqlx::PgPool;
 
@@ -28,6 +33,49 @@ async fn health_is_unavailable_without_database() {
     assert_eq!(response.status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(response.json()["database"], "unavailable");
     assert_eq!(response.json()["version"], VERSION);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_health_probe_passes_only_a_healthy_server(pool: PgPool) {
+    let healthy = serve(state(pool)).await;
+    health::probe(healthy).await.unwrap();
+    // The default REMOTEHUB_LISTEN, 0.0.0.0:8080, is what the probe gets.
+    let everywhere = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), healthy.port());
+    health::probe(everywhere).await.unwrap();
+
+    let without_database = serve(state(unreachable_pool())).await;
+    let error = health::probe(without_database).await.unwrap_err();
+    assert!(error.contains("503"), "{error}");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let nobody = listener.local_addr().unwrap();
+    drop(listener);
+    assert!(health::probe(nobody).await.is_err());
+}
+
+/// The tests' database URL without its password, and the password.
+fn url_and_password() -> (String, String) {
+    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL for the tests");
+    let (scheme, rest) = url.split_once("://").unwrap();
+    let (credentials, host) = rest.split_once('@').unwrap();
+    let (user, password) = credentials.split_once(':').unwrap();
+    (format!("{scheme}://{user}@{host}"), password.to_owned())
+}
+
+#[tokio::test]
+async fn the_database_password_can_be_separate_from_the_url() {
+    let (url, password) = url_and_password();
+    let password = SecretString::from(password);
+    let pool = db::connect(&url, Some(&password)).await.unwrap();
+    assert!(db::is_reachable(&pool).await);
+
+    // The separate password wins over one in the URL.
+    let (scheme, rest) = url.split_once('@').unwrap();
+    let wrong_in_url = format!("{scheme}:wrong@{rest}");
+    let pool = db::connect(&wrong_in_url, Some(&password)).await.unwrap();
+    assert!(db::is_reachable(&pool).await);
+    let wrong = SecretString::from("wrong".to_owned());
+    assert!(db::connect(&url, Some(&wrong)).await.is_err());
 }
 
 #[sqlx::test(migrations = "../../migrations")]

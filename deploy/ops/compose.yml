@@ -1,0 +1,99 @@
+# remotehub in production: the server, PostgreSQL and guacd.
+# Installation, configuration and upgrades: docs/install.md.
+#
+#   sh init.sh            # once: creates .env and the secrets in secrets/
+#   docker compose up -d
+#
+# remotehub listens on 127.0.0.1 only; a reverse proxy on the host serves it
+# with TLS under REMOTEHUB_PUBLIC_URL (docs/install.md#reverse-proxy).
+name: remotehub
+
+x-hardened: &hardened
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+
+services:
+  remotehub:
+    <<: *hardened
+    image: ${REMOTEHUB_IMAGE:-ghcr.io/hilman2/remotehub}:${REMOTEHUB_VERSION:?set REMOTEHUB_VERSION in .env}
+    environment:
+      REMOTEHUB_PUBLIC_URL: ${REMOTEHUB_PUBLIC_URL:?set REMOTEHUB_PUBLIC_URL in .env}
+      REMOTEHUB_DATABASE_URL: postgres://remotehub@db:5432/remotehub
+      REMOTEHUB_DATABASE_PASSWORD_FILE: /run/secrets/db_password
+      REMOTEHUB_MASTER_KEY_FILE: /run/secrets/master_key
+      REMOTEHUB_GUACD: guacd:4822
+      REMOTEHUB_LOG_FORMAT: ${REMOTEHUB_LOG_FORMAT:-text}
+      REMOTEHUB_ADMIN_GROUPS: ${REMOTEHUB_ADMIN_GROUPS:-}
+      REMOTEHUB_LDAP_URL: ${REMOTEHUB_LDAP_URL:-}
+      REMOTEHUB_LDAP_STARTTLS: ${REMOTEHUB_LDAP_STARTTLS:-false}
+      REMOTEHUB_LDAP_BIND_DN: ${REMOTEHUB_LDAP_BIND_DN:-}
+      REMOTEHUB_LDAP_BIND_PASSWORD_FILE: /run/secrets/ldap_bind_password
+      REMOTEHUB_LDAP_BASE_DN: ${REMOTEHUB_LDAP_BASE_DN:-}
+      REMOTEHUB_LDAP_USER_FILTER: ${REMOTEHUB_LDAP_USER_FILTER:-}
+      # The CA of the directory's certificate, if it is not a public one:
+      # put it at certs/ldap-ca.crt and set this to /run/certs/ldap-ca.crt.
+      REMOTEHUB_LDAP_CA_FILE: ${REMOTEHUB_LDAP_CA_FILE:-}
+      REMOTEHUB_OWN_ACCOUNT_CONNECTIONS: ${REMOTEHUB_OWN_ACCOUNT_CONNECTIONS:-true}
+      REMOTEHUB_RDP_KEYBOARD_LAYOUT: ${REMOTEHUB_RDP_KEYBOARD_LAYOUT:-en-us-qwerty}
+      REMOTEHUB_SESSION_IDLE_MINUTES: ${REMOTEHUB_SESSION_IDLE_MINUTES:-30}
+      REMOTEHUB_SESSION_MAX_HOURS: ${REMOTEHUB_SESSION_MAX_HOURS:-12}
+    secrets: [db_password, master_key, ldap_bind_password]
+    volumes:
+      - ./certs:/run/certs:ro
+    ports:
+      - "127.0.0.1:${REMOTEHUB_PORT:-8080}:8080"
+    networks: [default, database]
+    depends_on:
+      db:
+        condition: service_healthy
+      guacd:
+        condition: service_started
+
+  db:
+    restart: unless-stopped
+    image: postgres:18.6-trixie
+    environment:
+      POSTGRES_DB: remotehub
+      POSTGRES_USER: remotehub
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes:
+      # Since PostgreSQL 18, PGDATA lives in a versioned directory below /var/lib/postgresql.
+      - db:/var/lib/postgresql
+    # Only remotehub reaches the database; it has no way out.
+    networks: [database]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "remotehub", "-d", "remotehub"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # RDP and VNC (deploy/guacd). guacd serves anyone who reaches port 4822, so
+  # it is never published; it needs a way out to the devices.
+  guacd:
+    <<: *hardened
+    image: ${GUACD_IMAGE:-ghcr.io/hilman2/remotehub-guacd}:${REMOTEHUB_VERSION:?set REMOTEHUB_VERSION in .env}
+    tmpfs:
+      - /tmp
+      - /home/guacd:uid=1000,mode=0700
+    mem_limit: 1g
+    pids_limit: 256
+
+networks:
+  default:
+  database:
+    internal: true
+
+volumes:
+  db:
+
+# Files made by init.sh; see docs/install.md#secrets.
+secrets:
+  db_password:
+    file: ./secrets/db_password
+  master_key:
+    file: ./secrets/master_key
+  ldap_bind_password:
+    file: ./secrets/ldap_bind_password

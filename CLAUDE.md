@@ -62,7 +62,7 @@ Built up with the issues of milestone M0:
 - `crates/` holds `server`, `model`, `vault`, `directory`, `gateway` and `i18n`.
 - `web/` is the SvelteKit frontend.
 - `migrations/` holds the sqlx migrations.
-- `deploy/` holds the Dockerfiles, the development compose and (from M2) the ops package.
+- `deploy/` holds the Dockerfiles (`Dockerfile` is the production image), the development compose and the ops package `deploy/ops` (see `docs/install.md`).
 - `scripts/ci/` is the local CI: `lokal.sh` holds this repository's jobs, `gemeinsam.sh` is identical in all repositories and is not changed here.
 
 ## Commands
@@ -103,7 +103,7 @@ bash scripts/ci/lokal.sh --help        # all options
 
 The local CI needs Docker, `gh` and Git Bash. Only one run of this repository at a time (lock `.git/ci-lokal/sperre`); other repositories never wait for it. Logs are under `.git/ci-lokal/protokolle/`.
 
-- **Jobs:** `base` (always, seconds) and `code`, which checks Rust (fmt, clippy, tests, then the lab tests) and the web UI (svelte-check, lint, vitest, build) in parallel.
+- **Jobs:** `base` (always, seconds), `code`, which checks Rust (fmt, clippy, tests, then the lab tests) and the web UI (svelte-check, lint, vitest, build) in parallel, and `image`, which builds the production images and tries them with the ops package (`scripts/ci/image-check.sh`) when `IMAGE_INPUTS` change and in full runs.
 - **Nothing is checked twice:** a commit with the same file state (Git tree) as one already checked green — e.g. a PR's merge commit — takes over that result without running.
 - **Only what changed is compiled:** Rust builds from the fixed path `/src` (volume `remotehub-ci-src`), synced by content, so cargo rebuilds only the crates whose files changed.
 - **Only what a change can affect runs:** the files changed since the merge base with `main` decide (`RUST_INPUTS`, `WEB_INPUTS`, `LAB_INPUTS` in `lokal.sh`). A commit on `main` itself, a change under `scripts/ci/` or `CI_FULL=1 bash scripts/ci/lokal.sh` runs everything.

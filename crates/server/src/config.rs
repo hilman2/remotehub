@@ -23,8 +23,11 @@ const DEFAULT_GUACD: &str = "guacd:4822";
 pub struct Config {
     /// Address the HTTP server binds to.
     pub listen: SocketAddr,
-    /// PostgreSQL connection URL; contains the password, never logged.
+    /// PostgreSQL connection URL; may contain the password, never logged.
     pub database_url: String,
+    /// The database password, if not in the URL. As a file, it can be the
+    /// same Docker secret that PostgreSQL reads (`POSTGRES_PASSWORD_FILE`).
+    pub database_password: Option<SecretString>,
     /// Built SPA (web/build) to serve; in development Vite serves the UI.
     pub web_dir: Option<PathBuf>,
     /// Log as JSON lines instead of human-readable text.
@@ -86,12 +89,9 @@ impl Config {
         let setting = |name: &'static str| read_setting(&lookup, name);
         let required = |name: &'static str| setting(name)?.ok_or(ConfigError::Missing(name));
 
-        let listen = parse_or(
-            "REMOTEHUB_LISTEN",
-            setting("REMOTEHUB_LISTEN")?,
-            DEFAULT_LISTEN.parse().unwrap(),
-        )?;
+        let listen = listen_address(&lookup)?;
         let database_url = required("REMOTEHUB_DATABASE_URL")?;
+        let database_password = setting("REMOTEHUB_DATABASE_PASSWORD")?.map(SecretString::from);
         let web_dir = setting("REMOTEHUB_WEB_DIR")?.map(PathBuf::from);
 
         let log_json = match setting("REMOTEHUB_LOG_FORMAT")?.as_deref() {
@@ -200,6 +200,7 @@ impl Config {
         Ok(Config {
             listen,
             database_url,
+            database_password,
             web_dir,
             log_json,
             public_origin,
@@ -212,6 +213,16 @@ impl Config {
             rdp_keyboard_layout,
         })
     }
+}
+
+/// The address the server binds to (`REMOTEHUB_LISTEN`). The health check
+/// reads it alone, without the settings a running server needs.
+pub fn listen_address(lookup: &impl Fn(&str) -> Option<String>) -> Result<SocketAddr, ConfigError> {
+    parse_or(
+        "REMOTEHUB_LISTEN",
+        read_setting(lookup, "REMOTEHUB_LISTEN")?,
+        DEFAULT_LISTEN.parse().unwrap(),
+    )
 }
 
 /// `https://host[:port]` without path; the scheme and host are lowercased.
@@ -265,6 +276,7 @@ impl fmt::Debug for Config {
         f.debug_struct("Config")
             .field("listen", &self.listen)
             .field("database_url", &"<redacted>")
+            .field("database_password", &"<redacted>")
             .field("web_dir", &self.web_dir)
             .field("log_json", &self.log_json)
             .field("public_origin", &self.public_origin)

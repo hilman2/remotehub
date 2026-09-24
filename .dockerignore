@@ -1,0 +1,10 @@
+# Build context of the production image (deploy/Dockerfile): only what the
+# build needs. Build output and dependencies are made inside the build.
+.git
+target
+web/node_modules
+web/.svelte-kit
+web/build
+web/src/lib/paraglide
+web/test-results
+deploy/testlab

@@ -7,9 +7,10 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use remotehub_directory::Sid;
 use remotehub_directory::ldap::LdapDirectory;
+use remotehub_server::api::health;
 use remotehub_server::audit::{Action, Actor, Entry};
 use remotehub_server::auth::Authenticator;
-use remotehub_server::config::Config;
+use remotehub_server::config::{self, Config};
 use remotehub_server::{AppState, Settings, VERSION, app, audit, break_glass, db, session};
 use remotehub_vault::{DynVault, FileKeyring, KeyProvider, Vault, generate_key_line};
 use tracing_subscriber::EnvFilter;
@@ -35,6 +36,10 @@ enum Command {
     },
     /// Recompute the audit log's hash chain; exits with 1 if it is broken.
     VerifyAudit,
+    /// Ask the server running in this container for /api/health; exits with
+    /// 1 unless it answers 200. The image's health check: it has no shell
+    /// and no curl.
+    Healthcheck,
     /// Manage break-glass accounts: local emergency accounts that work
     /// without the directory. Password and TOTP secret are shown only once.
     BreakGlass {
@@ -65,6 +70,14 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::VerifyAudit => verify_audit().await,
+        Command::Healthcheck => {
+            let listen = config::listen_address(&|name| std::env::var(name).ok())?;
+            if let Err(error) = health::probe(listen).await {
+                eprintln!("unhealthy: {error}");
+                std::process::exit(1);
+            }
+            Ok(())
+        }
         Command::BreakGlass { action } => manage_break_glass(action).await,
     }
 }
@@ -76,7 +89,7 @@ async fn serve() -> anyhow::Result<()> {
 
     let vault = load_vault(&config.master_key_file)?;
 
-    let pool = db::connect(&config.database_url)
+    let pool = db::connect(&config.database_url, config.database_password.as_ref())
         .await
         .context("cannot connect to the database")?;
     db::MIGRATOR
@@ -162,7 +175,7 @@ async fn resolve_admin_groups(
 async fn manage_break_glass(action: BreakGlassAction) -> anyhow::Result<()> {
     let config = Config::from_env()?;
     let vault = load_vault(&config.master_key_file)?;
-    let pool = db::connect(&config.database_url)
+    let pool = db::connect(&config.database_url, config.database_password.as_ref())
         .await
         .context("cannot connect to the database")?;
     db::MIGRATOR
@@ -243,7 +256,7 @@ async fn audit_cli(
 
 async fn verify_audit() -> anyhow::Result<()> {
     let config = Config::from_env()?;
-    let pool = db::connect(&config.database_url)
+    let pool = db::connect(&config.database_url, config.database_password.as_ref())
         .await
         .context("cannot connect to the database")?;
     let result = audit::verify(&pool).await?;

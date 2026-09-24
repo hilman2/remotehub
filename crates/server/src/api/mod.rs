@@ -4,7 +4,7 @@ mod audit;
 mod catalog;
 mod connect;
 mod display;
-mod health;
+pub mod health;
 mod origin;
 pub mod problem;
 pub mod session;
