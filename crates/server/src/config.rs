@@ -21,6 +21,8 @@ use crate::proxy::Network;
 const DEFAULT_LISTEN: &str = "0.0.0.0:8080";
 /// The guacd service of the ops package's compose file.
 const DEFAULT_GUACD: &str = "guacd:4822";
+/// The browser service of the ops package's compose file.
+const DEFAULT_BROWSER: &str = "browser:4823";
 
 pub struct Config {
     /// Address the HTTP server binds to.
@@ -55,6 +57,9 @@ pub struct Config {
     /// guacd for RDP and VNC (`host:port`), only reachable on an internal
     /// network.
     pub guacd: String,
+    /// The browser service for HTTPS devices (`host:port`), only reachable
+    /// on an internal network, like guacd.
+    pub browser: String,
     /// Keyboard layout of RDP sessions for devices without one of their own.
     pub rdp_keyboard_layout: String,
     /// Reverse proxies whose `X-Forwarded-For` names the client.
@@ -198,6 +203,10 @@ impl Config {
         if !guacd.contains(':') || guacd.contains(['/', ' ']) {
             return Err(invalid("REMOTEHUB_GUACD", &guacd));
         }
+        let browser = setting("REMOTEHUB_BROWSER")?.unwrap_or_else(|| DEFAULT_BROWSER.to_owned());
+        if !browser.contains(':') || browser.contains(['/', ' ']) {
+            return Err(invalid("REMOTEHUB_BROWSER", &browser));
+        }
 
         let rdp_keyboard_layout =
             setting("REMOTEHUB_RDP_KEYBOARD_LAYOUT")?.unwrap_or_else(|| "en-us-qwerty".to_owned());
@@ -236,6 +245,7 @@ impl Config {
             own_account_connections,
             admin_groups,
             guacd,
+            browser,
             rdp_keyboard_layout,
             trusted_proxies,
         })
@@ -313,6 +323,7 @@ impl fmt::Debug for Config {
             .field("ssh_ca_key_file", &self.ssh_ca_key_file)
             .field("admin_groups", &self.admin_groups)
             .field("guacd", &self.guacd)
+            .field("browser", &self.browser)
             .field("rdp_keyboard_layout", &self.rdp_keyboard_layout)
             .field("trusted_proxies", &self.trusted_proxies)
             .finish()
@@ -362,6 +373,7 @@ mod tests {
         assert!(config.ldap.is_none());
         assert!(config.admin_groups.is_empty());
         assert_eq!(config.guacd, "guacd:4822");
+        assert_eq!(config.browser, "browser:4823");
         assert_eq!(config.rdp_keyboard_layout, "en-us-qwerty");
         assert!(!config.log_json);
 
@@ -466,6 +478,7 @@ mod tests {
             ("REMOTEHUB_PUBLIC_URL", "remotehub.example.com"),
             ("REMOTEHUB_GUACD", "guacd"),
             ("REMOTEHUB_GUACD", "tcp://guacd:4822"),
+            ("REMOTEHUB_BROWSER", "browser"),
             ("REMOTEHUB_RDP_KEYBOARD_LAYOUT", "de"),
         ] {
             assert!(

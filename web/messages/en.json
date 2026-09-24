@@ -153,6 +153,7 @@
 	"protocol_ssh": "SSH",
 	"protocol_rdp": "Remote Desktop (RDP)",
 	"protocol_vnc": "VNC",
+	"protocol_https": "Web interface (HTTPS)",
 	"auth_stored": "A stored credential",
 	"auth_ask": "Credentials asked for when connecting",
 	"auth_own": "My own directory account",

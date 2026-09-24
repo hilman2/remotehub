@@ -1,9 +1,11 @@
-//! `GET /api/devices/{id}/display`: an RDP or VNC session in the browser over
-//! a WebSocket (ADR 0003), drawn by the Guacamole client.
+//! `GET /api/devices/{id}/display`: an RDP, VNC or HTTPS session in the
+//! browser over a WebSocket (ADR 0003), drawn by the Guacamole client.
 //!
 //! The server opens the connection through guacd with the credentials
 //! resolved here; the browser only exchanges Guacamole instructions for
-//! input and drawing, and never sees the connection's parameters.
+//! input and drawing, and never sees the connection's parameters. An HTTPS
+//! device is a Chromium of the browser service (ADR 0007), which signs in
+//! with the credentials and is shown through guacd as a VNC display.
 //!
 //! Browser → server:
 //! - first text frame: `{"type":"start","width":…,"height":…,"dpi":…,
@@ -23,8 +25,11 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
+use remotehub_browser::client::{self as browser, BrowserError};
+use remotehub_browser::protocol::Reply;
 use remotehub_gateway::guacamole::{self, Connection, GuacError, Handshake, Parser};
-use remotehub_gateway::rdp::{self, ProbeError};
+use remotehub_gateway::rdp;
+use remotehub_gateway::tls::{self, ProbeError};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde_json::json;
@@ -43,6 +48,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// Learning an RDP server's certificate: TCP, X.224 and the TLS handshake.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const START_TIMEOUT: Duration = Duration::from_secs(120);
+/// The browser service starts a display and Chromium: a second or two.
+const BROWSER_TIMEOUT: Duration = Duration::from_secs(20);
 /// Browser frames are input and clipboard chunks; guacd splits clipboard
 /// data into blobs of a few KiB.
 const MAX_BROWSER_FRAME: usize = 256 * 1024;
@@ -69,7 +76,7 @@ pub async fn display(
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Problem> {
     connect::same_origin(&headers, &state)?;
-    let target = connect::target(&state, &session, id, &["rdp", "vnc"]).await?;
+    let target = connect::target(&state, &session, id, &["rdp", "vnc", "https"]).await?;
     // The own account's password needs the key cookie, which only this
     // request carries.
     let own = if target.auth_mode == "own" {
@@ -78,7 +85,8 @@ pub async fn display(
                 .await?
                 .map(|mut own| {
                     // NTLM needs the domain: the principal name carries it.
-                    if let Some(upn) = &session.upn {
+                    // A web interface gets the name the user signs in with.
+                    if let Some(upn) = session.upn.as_ref().filter(|_| target.protocol != "https") {
                         own.username.clone_from(upn);
                     }
                     own
@@ -200,61 +208,120 @@ async fn run(
         }
     };
 
-    // 3. RDP: the certificate the device presents must be the pinned one,
-    // or becomes it (trust on first use, like SSH host keys).
-    let certificate = if target.protocol == "rdp" {
-        let port = u16::try_from(target.port).unwrap_or(3389);
-        match rdp::certificate_fingerprint(&target.host, port, PROBE_TIMEOUT).await {
-            Ok(presented) => match &target.certificate_fingerprint {
-                Some(pinned) if *pinned != presented => {
-                    let problem = Problem::new(ErrorCode::CertificateChanged)
-                        .param("expected", pinned.as_str())
-                        .param("presented", presented.as_str());
-                    fail(&mut socket, &state, &session, &target, &problem, &address).await;
-                    return;
-                }
-                _ => Some(presented),
-            },
-            Err(error) => {
-                tracing::warn!(device = %target.id, %error, "RDP certificate probe failed");
-                let problem = Problem::new(match error {
-                    ProbeError::NoTls => ErrorCode::TlsRequired,
-                    ProbeError::Unreachable(_) | ProbeError::Timeout => {
-                        ErrorCode::TargetUnreachable
-                    }
-                    ProbeError::Protocol(_) | ProbeError::Tls(_) => ErrorCode::ConnectionFailed,
-                });
+    // 3. RDP and HTTPS: the certificate the device presents must be the
+    // pinned one, or becomes it (trust on first use, like SSH host keys).
+    let port = u16::try_from(target.port).unwrap_or_default();
+    let probed = match target.protocol.as_str() {
+        "rdp" => Some(
+            rdp::certificate_fingerprint(&target.host, port, PROBE_TIMEOUT)
+                .await
+                .map(|fingerprint| (fingerprint, None)),
+        ),
+        "https" => Some(
+            tls::https_certificate(&target.host, port, PROBE_TIMEOUT)
+                .await
+                .map(|presented| (presented.fingerprint, Some(presented.spki))),
+        ),
+        _ => None,
+    };
+    let (certificate, spki) = match probed {
+        None => (None, None),
+        Some(Ok((presented, spki))) => match &target.certificate_fingerprint {
+            Some(pinned) if *pinned != presented => {
+                let problem = Problem::new(ErrorCode::CertificateChanged)
+                    .param("expected", pinned.as_str())
+                    .param("presented", presented.as_str());
                 fail(&mut socket, &state, &session, &target, &problem, &address).await;
                 return;
             }
+            _ => (Some(presented), spki),
+        },
+        Some(Err(error)) => {
+            tracing::warn!(device = %target.id, %error, "certificate probe failed");
+            let problem = Problem::new(match error {
+                ProbeError::NoTls => ErrorCode::TlsRequired,
+                ProbeError::Unreachable(_) | ProbeError::Timeout => ErrorCode::TargetUnreachable,
+                ProbeError::Protocol(_) | ProbeError::Tls(_) => ErrorCode::ConnectionFailed,
+            });
+            fail(&mut socket, &state, &session, &target, &problem, &address).await;
+            return;
         }
-    } else {
-        None
     };
     let accepted = certificate
         .as_ref()
         .map(|fingerprint| format!("sha256:{fingerprint}"));
-
-    // 4. Connect through guacd.
-    let port = target.port.to_string();
+    let password = match &credentials.login {
+        Login::Password(password) => password.expose_secret(),
+        Login::Key(_) => "",
+    };
     let zone = timezone(zone);
+
+    // 4. HTTPS: a browser on the device, signing in with the credentials.
+    let mut browser = match &spki {
+        Some(spki) => {
+            let request = browser::Request {
+                host: &target.host,
+                port,
+                spki,
+                width,
+                height,
+                timezone: zone.as_deref(),
+                login: Some((&credentials.username, password)),
+            };
+            match browser::open(&state.settings.browser, &request, BROWSER_TIMEOUT).await {
+                Ok(browser) => Some(browser),
+                Err(error) => {
+                    tracing::warn!(device = %target.id, %error, "browser service failed");
+                    let reason = match error {
+                        BrowserError::Failed(reason) => format!("browser_{reason}"),
+                        _ => "browser_unreachable".to_owned(),
+                    };
+                    let _ = audit::record(
+                        &state.db,
+                        entry(
+                            &session,
+                            Action::ConnectionFailed,
+                            target.id,
+                            json!({ "protocol": target.protocol, "reason": reason, "host": target.host }),
+                            &address,
+                        ),
+                    )
+                    .await;
+                    send_problem(&mut socket, &Problem::new(ErrorCode::ConnectionFailed)).await;
+                    return;
+                }
+            }
+        }
+        None => None,
+    };
+
+    // 5. Connect through guacd: to the device, or to the browser's display.
+    let port = target.port.to_string();
     let opened = {
-        let password = match &credentials.login {
-            Login::Password(password) => password.expose_secret(),
-            Login::Key(_) => "",
+        let vnc_port = browser.as_ref().map(|b| b.vnc_port.to_string());
+        let parameters = match (&browser, &vnc_port) {
+            (Some(browser), Some(vnc_port)) => vec![
+                ("hostname", browser.vnc_host.as_str()),
+                ("port", vnc_port.as_str()),
+                ("password", browser.vnc_password.as_str()),
+            ],
+            _ => parameters(
+                &target,
+                &port,
+                &credentials,
+                password,
+                &state.settings.rdp_keyboard_layout,
+                accepted.as_deref().unwrap_or_default(),
+            ),
         };
-        let parameters = parameters(
-            &target,
-            &port,
-            &credentials,
-            password,
-            &state.settings.rdp_keyboard_layout,
-            accepted.as_deref().unwrap_or_default(),
-        );
         guacamole::open(
             &state.settings.guacd,
             &Handshake {
-                protocol: &target.protocol,
+                protocol: if browser.is_some() {
+                    "vnc"
+                } else {
+                    &target.protocol
+                },
                 parameters: &parameters,
                 width: width.clamp(320, 8192),
                 height: height.clamp(200, 8192),
@@ -317,10 +384,11 @@ async fn run(
     )
     .await;
 
-    // 5. Relay until either side ends.
+    // 6. Relay until either side ends; the browser ends with the session.
     let started = Instant::now();
-    let outcome = relay(&mut socket, &mut connection).await;
+    let outcome = relay(&mut socket, &mut connection, browser.as_mut()).await;
     connection.close().await;
+    drop(browser);
     let _ = socket.send(Message::Close(None)).await;
 
     let _ = audit::record(
@@ -333,6 +401,7 @@ async fn run(
                 "protocol": target.protocol, "seconds": started.elapsed().as_secs(),
                 "bytes_sent": outcome.sent, "bytes_received": outcome.received,
                 "dropped_instructions": outcome.dropped, "error": outcome.error,
+                "signed_in": outcome.signed_in,
             }),
             &address,
         ),
@@ -405,13 +474,30 @@ struct Outcome {
     dropped: usize,
     /// guacd's last `error`: message and status.
     error: Option<(String, String)>,
+    /// HTTPS: whether the browser service filled in the sign-in form; none
+    /// until it says, and for other protocols.
+    signed_in: Option<bool>,
 }
 
-async fn relay(socket: &mut WebSocket, connection: &mut Connection) -> Outcome {
+async fn relay(
+    socket: &mut WebSocket,
+    connection: &mut Connection,
+    mut browser: Option<&mut browser::Session>,
+) -> Outcome {
     let mut outcome = Outcome::default();
     let mut from_browser = Parser::default();
     loop {
         tokio::select! {
+            event = browser_event(browser.as_deref_mut()) => match event {
+                Some(Reply::Filled) => outcome.signed_in = Some(true),
+                Some(Reply::NotFilled { reason }) => {
+                    tracing::info!(reason, "the browser did not sign in");
+                    outcome.signed_in = Some(false);
+                }
+                Some(_) => {}
+                // Chromium or its display ended.
+                None => return outcome,
+            },
             message = socket.recv() => match message {
                 Some(Ok(Message::Text(text))) => {
                     from_browser.push(text.as_bytes());
@@ -449,6 +535,14 @@ async fn relay(socket: &mut WebSocket, connection: &mut Connection) -> Outcome {
                 Ok(None) | Err(_) => return outcome,
             },
         }
+    }
+}
+
+/// The browser service's next message; never resolves without a browser.
+async fn browser_event(browser: Option<&mut browser::Session>) -> Option<Reply> {
+    match browser {
+        Some(browser) => browser.next().await,
+        None => std::future::pending().await,
     }
 }
 

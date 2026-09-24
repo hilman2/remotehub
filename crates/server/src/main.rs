@@ -132,6 +132,7 @@ async fn serve() -> anyhow::Result<()> {
         admin_groups,
         own_account_connections: config.own_account_connections,
         guacd: config.guacd,
+        browser: config.browser,
         rdp_keyboard_layout: config.rdp_keyboard_layout,
         trusted_proxies: config.trusted_proxies,
         ssh_ca,

@@ -33,6 +33,8 @@ x-rust: &rust
     REMOTEHUB_TEST_SSH_HOST: ssh-target
     REMOTEHUB_TEST_GUACD: guacd:4822
     REMOTEHUB_TEST_DESKTOP_HOST: desktop-target
+    REMOTEHUB_TEST_BROWSER: browser:4823
+    REMOTEHUB_TEST_WEB_HOST: web-target
 
 services:
   db:
@@ -73,6 +75,7 @@ services:
       REMOTEHUB_LDAP_BASE_DN: DC=remotehub,DC=test
       REMOTEHUB_ADMIN_GROUPS: RH Admins
       REMOTEHUB_RDP_KEYBOARD_LAYOUT: de-de-qwertz
+      REMOTEHUB_BROWSER: browser:4823
     command: >
       watchexec --poll 1000ms --restart --watch crates --watch migrations --watch Cargo.toml
       --exts rs,toml,sql,ftl -- cargo run --package remotehub-server
@@ -115,8 +118,9 @@ services:
       - ..:/work
       - web-node-modules:/work/web/node_modules
 
-  # Test lab (deploy/testlab): a throwaway AD domain, an SSH target and a
-  # desktop target (RDP and VNC) for the integration tests. Only reachable on the compose network; users,
+  # Test lab (deploy/testlab): a throwaway AD domain, an SSH target, a
+  # desktop target (RDP and VNC) and a web target (an appliance's sign-in page)
+  # for the integration tests. Only reachable on the compose network; users,
   # passwords and keys are in the READMEs and scripts there.
   dc:
     build: testlab/dc
@@ -140,6 +144,28 @@ services:
     build: testlab/desktop
     image: remotehub-testlab-desktop
     hostname: desktop-target
+
+  web-target:
+    build: testlab/web
+    image: remotehub-testlab-web
+    hostname: web-target
+
+  # Web interfaces of HTTPS devices (deploy/browser, ADR 0007), hardened as in
+  # production. Like guacd, it serves anyone who reaches it: never published.
+  browser:
+    build:
+      context: ..
+      dockerfile: deploy/browser/Dockerfile
+    image: remotehub-browser
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    # Chromium's sandbox needs user namespaces, which Docker's default
+    # seccomp profile forbids.
+    security_opt: [no-new-privileges:true, seccomp:unconfined]
+    mem_limit: 2g
+    pids_limit: 1024
 
   # RDP and VNC engine (deploy/guacd), hardened as in production. guacd serves
   # anyone who reaches port 4822, so it is never published.

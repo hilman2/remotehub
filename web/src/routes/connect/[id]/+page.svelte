@@ -5,7 +5,7 @@
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
 	import { page } from '$app/state';
-	import { allows, loadTree, resetHostKey, type Device } from '$lib/api/catalog';
+	import { allows, isGraphical, loadTree, resetHostKey, type Device } from '$lib/api/catalog';
 	import { errorMessage } from '$lib/api/errors';
 	import DisplayView from '$lib/display/DisplayView.svelte';
 	import { failureOf, type Failure } from '$lib/display/tunnel';
@@ -40,7 +40,7 @@
 	// Remounting the view starts a new connection.
 	let attempt = $state(0);
 
-	const graphical = $derived(device?.protocol === 'rdp' || device?.protocol === 'vnc');
+	const graphical = $derived(device !== null && isGraphical(device.protocol));
 	const needsCredentials = $derived(device?.auth_mode === 'ask' && credentials === null);
 	const running = $derived(device !== null && !needsCredentials);
 

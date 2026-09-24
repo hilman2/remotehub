@@ -8,6 +8,7 @@ describe('sign-in modes', () => {
 		expect(authModesFor('ssh')).toEqual(AUTH_MODES);
 		expect(authModesFor('rdp')).toEqual(['stored', 'ask', 'own', 'laps']);
 		expect(authModesFor('vnc')).toEqual(['stored', 'ask', 'own']);
+		expect(authModesFor('https')).toEqual(['stored', 'ask', 'own']);
 		for (const mode of AUTH_MODES) expect(AUTH_MODE_LABELS[mode]()).not.toBe('');
 	});
 });

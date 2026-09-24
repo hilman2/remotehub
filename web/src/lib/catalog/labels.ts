@@ -21,7 +21,8 @@ export const ROLE_LABELS: Record<Role, () => string> = {
 export const PROTOCOL_LABELS: Record<Protocol, () => string> = {
 	ssh: m.protocol_ssh,
 	rdp: m.protocol_rdp,
-	vnc: m.protocol_vnc
+	vnc: m.protocol_vnc,
+	https: m.protocol_https
 };
 
 export const AUTH_MODE_LABELS: Record<AuthMode, () => string> = {

@@ -7,21 +7,30 @@ export { KEYBOARD_LAYOUTS, type KeyboardLayout } from './generated/keyboard';
 export type Role = 'list' | 'connect' | 'reveal' | 'edit' | 'manage';
 export const ROLES: readonly Role[] = ['list', 'connect', 'reveal', 'edit', 'manage'];
 
-export type Protocol = 'ssh' | 'rdp' | 'vnc';
-export const PROTOCOLS: readonly Protocol[] = ['ssh', 'rdp', 'vnc'];
-export const DEFAULT_PORTS: Record<Protocol, number> = { ssh: 22, rdp: 3389, vnc: 5900 };
+export type Protocol = 'ssh' | 'rdp' | 'vnc' | 'https';
+export const PROTOCOLS: readonly Protocol[] = ['ssh', 'rdp', 'vnc', 'https'];
+export const DEFAULT_PORTS: Record<Protocol, number> = {
+	ssh: 22,
+	rdp: 3389,
+	vnc: 5900,
+	https: 443
+};
+
+/** Protocols shown as a picture (through guacd) rather than a terminal. */
+export const isGraphical = (protocol: Protocol) => protocol !== 'ssh';
 
 export type AuthMode = 'stored' | 'ask' | 'own' | 'certificate' | 'laps';
 export const AUTH_MODES: readonly AuthMode[] = ['stored', 'ask', 'own', 'laps', 'certificate'];
 
 /**
- * Sign-in modes a protocol offers: certificates are SSH's own, and VNC has
- * a password of its own that LAPS does not keep.
+ * Sign-in modes a protocol offers: certificates are SSH's own, and LAPS
+ * keeps the local administrator's password, which only SSH and RDP use.
  */
 export function authModesFor(protocol: Protocol): readonly AuthMode[] {
 	return AUTH_MODES.filter(
 		(mode) =>
-			(mode !== 'certificate' || protocol === 'ssh') && (mode !== 'laps' || protocol !== 'vnc')
+			(mode !== 'certificate' || protocol === 'ssh') &&
+			(mode !== 'laps' || protocol === 'ssh' || protocol === 'rdp')
 	);
 }
 

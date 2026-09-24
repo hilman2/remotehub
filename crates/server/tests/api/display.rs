@@ -1,6 +1,6 @@
-//! The display WebSocket (RDP and VNC through guacd) end to end: a real
-//! server, a WebSocket client like the browser, and (lab tests) guacd and the
-//! test lab's desktop target.
+//! The display WebSocket (RDP, VNC and HTTPS through guacd) end to end: a
+//! real server, a WebSocket client like the browser, and (lab tests) guacd,
+//! the browser service and the test lab's desktop and web targets.
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -511,4 +511,230 @@ async fn an_rdp_desktop_opens_with_its_laps_password(pool: PgPool) {
     let seen = instructions_until(&mut socket, "3.img,").await;
     assert!(!seen.contains("5.error,"), "{seen:.300}");
     leave(socket).await;
+}
+
+// ── HTTPS: the browser service and the lab's web target ─────────────────────
+
+fn web_host() -> String {
+    std::env::var("REMOTEHUB_TEST_WEB_HOST")
+        .expect("REMOTEHUB_TEST_WEB_HOST points to the test lab")
+}
+
+fn browser_service() -> String {
+    std::env::var("REMOTEHUB_TEST_BROWSER").expect("REMOTEHUB_TEST_BROWSER points to the test lab")
+}
+
+/// The web target's record of sign-ins (deploy/testlab/web), over its plain
+/// HTTP port.
+async fn sign_ins() -> Value {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut stream = TcpStream::connect((web_host(), 8080)).await.unwrap();
+    stream
+        .write_all(b"GET /last HTTP/1.0\r\nHost: web-target\r\n\r\n")
+        .await
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).await.unwrap();
+    let (_, body) = response.split_once("\r\n\r\n").unwrap();
+    serde_json::from_str(body).unwrap()
+}
+
+/// The next sign-in after `count` sign-ins.
+async fn sign_in_after(count: &Value) -> Value {
+    for _ in 0..100 {
+        let now = sign_ins().await;
+        if now["count"].as_u64() > count.as_u64() {
+            return now;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("no sign-in after {count}");
+}
+
+async fn web_device(app: &Router, token: &str, folder: &str, device: Value) -> String {
+    let mut body = json!({ "folder_id": folder, "name": "appliance", "protocol": "https",
+                           "host": web_host(), "port": 443 });
+    body.as_object_mut()
+        .unwrap()
+        .extend(device.as_object().unwrap().clone());
+    create(app, token, "/api/devices", body).await
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn an_https_device_opens_signed_in_with_its_stored_credential(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let credential = create(
+        &app,
+        &token,
+        "/api/credentials",
+        json!({ "folder_id": folder, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
+    )
+    .await;
+    let web = web_device(
+        &app,
+        &token,
+        &folder,
+        json!({ "auth_mode": "stored", "credential_id": credential }),
+    )
+    .await;
+    let address = serve(state).await;
+    let before = sign_ins().await;
+
+    let mut socket = open(address, &web, &token, "display", ORIGIN)
+        .await
+        .unwrap();
+    start(&mut socket, json!({})).await;
+    let connected = connected(&mut socket).await;
+    assert_eq!(connected["type"], "connected", "{connected}");
+    assert_eq!(connected["pinned"], true, "{connected}");
+    let seen = instructions_until(&mut socket, "3.img,").await;
+    assert!(!seen.contains("Tester-Passw0rd!"));
+    let signed_in = sign_in_after(&before["count"]).await;
+    assert_eq!(signed_in["username"], "tester", "{signed_in}");
+    assert_eq!(signed_in["ok"], true, "{signed_in}");
+    // The sign-in page also loads an image from another port of the target,
+    // which counts as another device: the browser's proxy refuses it.
+    assert_eq!(signed_in["escapes"], before["escapes"], "{signed_in}");
+
+    leave(socket).await;
+    let mut log = Value::Null;
+    for _ in 0..50 {
+        log = send(&app, get("/api/audit", Some(&token))).await.json();
+        if log.to_string().contains("connection.closed") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let closed = log
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["action"] == "connection.closed")
+        .unwrap_or_else(|| panic!("no connection.closed in {log}"));
+    assert_eq!(closed["details"]["protocol"], "https");
+    assert_eq!(closed["details"]["signed_in"], true, "{closed}");
+    assert!(!log.to_string().contains("Tester-Passw0rd!"));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn asked_credentials_reach_the_web_interface_as_typed(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let web = web_device(
+        &app,
+        &token,
+        &folder,
+        json!({ "auth_mode": "ask", "credential_id": null }),
+    )
+    .await;
+    let address = serve(state).await;
+    let before = sign_ins().await["count"].clone();
+
+    let mut socket = open(address, &web, &token, "display", ORIGIN)
+        .await
+        .unwrap();
+    start(
+        &mut socket,
+        json!({ "username": "tester", "password": "not-the-password" }),
+    )
+    .await;
+    assert_eq!(connected(&mut socket).await["type"], "connected");
+    let signed_in = sign_in_after(&before).await;
+    assert_eq!(signed_in["username"], "tester", "{signed_in}");
+    assert_eq!(signed_in["ok"], false, "{signed_in}");
+    leave(socket).await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn a_changed_https_certificate_stops_the_connection(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool.clone()).await;
+    let web = web_device(
+        &app,
+        &token,
+        &folder,
+        json!({ "auth_mode": "ask", "credential_id": null }),
+    )
+    .await;
+    let presented =
+        remotehub_gateway::tls::https_certificate(&web_host(), 443, Duration::from_secs(5))
+            .await
+            .unwrap()
+            .fingerprint;
+    let other = format!("00:00{}", &presented[5..]);
+    sqlx::query("UPDATE devices SET certificate_fingerprint = $1, certificate_pinned_at = now()")
+        .bind(&other)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let address = serve(state).await;
+    let before = sign_ins().await["count"].clone();
+
+    let mut socket = open(address, &web, &token, "display", ORIGIN)
+        .await
+        .unwrap();
+    start(
+        &mut socket,
+        json!({ "username": "tester", "password": "Tester-Passw0rd!" }),
+    )
+    .await;
+    let error = connected(&mut socket).await;
+    assert_eq!(error["code"], "certificate_changed", "{error}");
+    assert_eq!(error["params"]["presented"], presented.as_str());
+    assert_eq!(sign_ins().await["count"], before);
+}
+
+/// Chromium itself holds to the pinned key: with another one it shows its
+/// error page, and the agent types nothing.
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn the_browser_signs_in_only_where_the_pinned_key_is(_pool: PgPool) {
+    use remotehub_browser::client::{self, Request};
+    use remotehub_browser::protocol::Reply;
+
+    let host = web_host();
+    let right = remotehub_gateway::tls::https_certificate(&host, 443, Duration::from_secs(5))
+        .await
+        .unwrap()
+        .spki;
+    let before = sign_ins().await["count"].clone();
+    // Open until the form has been sent: the browser ends with its session.
+    let mut sessions = Vec::new();
+    for (spki, expected) in [
+        (
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            Reply::NotFilled {
+                reason: "page_error".into(),
+            },
+        ),
+        (right.as_str(), Reply::Filled),
+    ] {
+        let mut session = client::open(
+            &browser_service(),
+            &Request {
+                host: &host,
+                port: 443,
+                spki,
+                width: 1024,
+                height: 768,
+                timezone: None,
+                login: Some(("tester", "Tester-Passw0rd!")),
+            },
+            Duration::from_secs(20),
+        )
+        .await
+        .unwrap();
+        let answer = tokio::time::timeout(Duration::from_secs(40), session.next())
+            .await
+            .expect("an answer within 40 s");
+        assert_eq!(answer, Some(expected), "{spki}");
+        sessions.push(session);
+    }
+    let after = sign_in_after(&before).await;
+    assert_eq!(
+        after["count"].as_u64(),
+        before.as_u64().map(|n| n + 1),
+        "one sign-in, with the right key: {after}"
+    );
 }

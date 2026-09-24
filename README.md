@@ -6,7 +6,7 @@ remotehub is a self-hosted web application in the spirit of classic RDP managers
 Remote Desktop Manager) combined with a multi-user password vault in the spirit of KeePass:
 
 - Sign in with your **Active Directory** account (Entra ID follows).
-- See the devices you are allowed to reach — RDP, VNC, SSH (HTTPS web interfaces later) — organised in folders.
+- See the devices you are allowed to reach — RDP, VNC, SSH, HTTPS web interfaces — organised in folders.
 - Click and work **in the browser**. The connection runs on the server and only picture, terminal output and
   input travel to your browser, so your client needs no network access to the targets.
 - Connect with the **credentials stored for the device**, with **personal credentials**, or with **your own AD account** —
@@ -26,7 +26,8 @@ Browser (SvelteKit SPA · xterm.js · Guacamole JS client)
    │ HTTPS + WebSocket only
 remotehub (Rust: API, sign-in, permissions, vault, audit, SSH engine, Guacamole tunnel)
    ├── PostgreSQL
-   └── guacd (RDP and VNC engine, internal network only)
+   ├── guacd (RDP and VNC engine, internal network only)
+   └── browser service (Chromium for web interfaces, internal network only)
 ```
 
 Everything runs in Docker. Details: [`docs/architecture.md`](docs/architecture.md), decisions in [`docs/adr/`](docs/adr/).

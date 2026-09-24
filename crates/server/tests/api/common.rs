@@ -32,6 +32,8 @@ pub fn settings() -> Settings {
         admin_groups: vec![ADMINS_SID.to_owned()],
         own_account_connections: true,
         guacd: std::env::var("REMOTEHUB_TEST_GUACD").unwrap_or_else(|_| "guacd:4822".to_owned()),
+        browser: std::env::var("REMOTEHUB_TEST_BROWSER")
+            .unwrap_or_else(|_| "browser:4823".to_owned()),
         rdp_keyboard_layout: "en-us-qwerty".to_owned(),
         trusted_proxies: Vec::new(),
         ssh_ca: None,

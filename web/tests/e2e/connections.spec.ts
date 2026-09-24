@@ -3,12 +3,14 @@ import { join } from 'node:path';
 
 // Connections end to end: an AD user of the test lab signs in, sets up
 // folders, credentials and devices through the UI, and works on them in the
-// browser — SSH in a terminal, RDP as a picture — against the test lab.
+// browser — SSH in a terminal, RDP and web interfaces as a picture — against
+// the test lab.
 
 // The development database keeps data between runs, so names are unique.
 const run = Date.now().toString(36);
 const sshHost = process.env.E2E_SSH_HOST ?? 'ssh-target';
 const desktopHost = process.env.E2E_DESKTOP_HOST ?? 'desktop-target';
+const webHost = process.env.E2E_WEB_HOST ?? 'web-target';
 /** Keys of the lab's SSH target; the tests run in web/. */
 const labKeys = join(process.cwd(), '..', 'deploy', 'testlab', 'ssh');
 
@@ -392,4 +394,44 @@ test('an RDP desktop opens in the browser', async ({ page, context }) => {
 	await desktop.keyboard.press('Control+V');
 	await expect.poll(clipboard).toBe('echo:pasted with Ctrl+V');
 	await desktop.close();
+});
+
+test('a web interface opens signed in, in a browser on the server', async ({ page, context }) => {
+	await signIn(page);
+	const dialog = page.getByRole('dialog');
+	const folder = `E2E appliances ${run}`;
+	await newFolder(page, folder);
+
+	const credential = `appliance tester ${run}`;
+	await page.getByRole('button', { name: 'New credential' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(credential);
+	await dialog.getByLabel('User name', { exact: true }).fill('tester');
+	await dialog.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name: credential })).toBeVisible();
+
+	await newDevice(page, folder, `lab appliance ${run}`, credential, {
+		label: 'Web interface (HTTPS)',
+		host: webHost
+	});
+	const [appliance] = await Promise.all([
+		context.waitForEvent('page'),
+		page.getByRole('link', { name: 'Connect' }).click()
+	]);
+	await expect(appliance.getByText(/the certificate .* is now pinned/)).toBeVisible();
+	await expect(appliance.getByRole('application')).toBeVisible();
+
+	// The lab appliance turns green (#2e7d32) once signed in, red if not.
+	await expect
+		.poll(
+			() =>
+				appliance.evaluate(() => {
+					const canvas = document.querySelector<HTMLCanvasElement>('[role=application] canvas');
+					const pixel = canvas?.getContext('2d')?.getImageData(4, 4, 1, 1).data;
+					return pixel ? [pixel[0], pixel[1], pixel[2]] : null;
+				}),
+			{ timeout: 15_000 }
+		)
+		.toEqual([46, 125, 50]);
+	await appliance.close();
 });

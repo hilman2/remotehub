@@ -1,4 +1,5 @@
-# remotehub in production: the server, PostgreSQL and guacd.
+# remotehub in production: the server, PostgreSQL, guacd and the browser
+# service.
 # Installation, configuration and upgrades: docs/install.md.
 #
 #   sh init.sh            # once: creates .env and the secrets in secrets/
@@ -25,6 +26,7 @@ services:
       REMOTEHUB_MASTER_KEY_FILE: /run/secrets/master_key
       REMOTEHUB_SSH_CA_KEY_FILE: /run/secrets/ssh_ca_key
       REMOTEHUB_GUACD: guacd:4822
+      REMOTEHUB_BROWSER: browser:4823
       REMOTEHUB_LOG_FORMAT: ${REMOTEHUB_LOG_FORMAT:-text}
       REMOTEHUB_ADMIN_GROUPS: ${REMOTEHUB_ADMIN_GROUPS:-}
       REMOTEHUB_LDAP_URL: ${REMOTEHUB_LDAP_URL:-}
@@ -53,6 +55,8 @@ services:
       db:
         condition: service_healthy
       guacd:
+        condition: service_started
+      browser:
         condition: service_started
 
   db:
@@ -85,10 +89,26 @@ services:
     mem_limit: 1g
     pids_limit: 256
 
+  # Web interfaces of HTTPS devices (deploy/browser, ADR 0007): a Chromium per
+  # session. Like guacd, it serves anyone who reaches port 4823, so it is never
+  # published; it needs a way out to the devices.
+  browser:
+    <<: *hardened
+    image: ${BROWSER_IMAGE:-ghcr.io/hilman2/remotehub-browser}:${REMOTEHUB_VERSION:?set REMOTEHUB_VERSION in .env}
+    # Chromium's sandbox needs user namespaces, which Docker's default
+    # seccomp profile forbids.
+    security_opt: [no-new-privileges:true, seccomp:unconfined]
+    tmpfs:
+      - /tmp
+    environment:
+      REMOTEHUB_BROWSER_SESSIONS: ${REMOTEHUB_BROWSER_SESSIONS:-8}
+    mem_limit: ${REMOTEHUB_BROWSER_MEMORY:-3g}
+    pids_limit: 2048
+
 networks:
   # A fixed range, so the gateway that remotehub trusts stays the same.
-  # guacd cannot reach devices in this range: change both in .env if your
-  # network uses it.
+  # guacd and the browser service cannot reach devices in this range: change
+  # both in .env if your network uses it.
   default:
     ipam:
       config:

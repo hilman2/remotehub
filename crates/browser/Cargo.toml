@@ -1,6 +1,6 @@
 [package]
-name = "remotehub-gateway"
-description = "Protocol engines that run connections on the server: SSH via russh, RDP and VNC via guacd"
+name = "remotehub-browser"
+description = "Browser agent: opens a device's web interface in Chromium on the server and signs in (ADR 0007)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,18 +8,19 @@ license.workspace = true
 publish.workspace = true
 repository.workspace = true
 
+[[bin]]
+name = "remotehub-browser"
+path = "src/main.rs"
+
 [dependencies]
-base64.workspace = true
 getrandom.workspace = true
-russh.workspace = true
-rustls.workspace = true
 secrecy.workspace = true
-sha2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
-tokio-rustls.workspace = true
+tokio = { workspace = true, features = ["process"] }
 tracing.workspace = true
-x509-parser.workspace = true
+tracing-subscriber.workspace = true
 zeroize.workspace = true
 
 [lints]

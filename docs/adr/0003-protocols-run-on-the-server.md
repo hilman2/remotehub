@@ -26,8 +26,8 @@ and credentials never leave the server.
   remotehub implements the Guacamole protocol client side in Rust (no maintained crate exists): it performs
   the handshake, passes the credentials in `connect`, then relays instructions to the browser, where the
   Guacamole JS client (vendored from guacamole-client 1.6.0, not the outdated npm copy) draws them.
-- **HTTPS (later):** a Chromium container per session, shown through guacd; logins filled in via the Chrome
-  DevTools Protocol.
+- **HTTPS:** a Chromium per session, shown through guacd; logins filled in via the Chrome DevTools
+  Protocol. How: ADR 0007.
 - **Engine abstraction:** all engines implement the trait `ProtocolEngine`. The API and UI do not know
   which engine serves a protocol.
 - **Hardening of guacd:** no published ports, reachable only by the server on an internal network, non-root,
