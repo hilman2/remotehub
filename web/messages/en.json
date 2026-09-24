@@ -188,5 +188,14 @@
 	"field_keyboard_layout": "Keyboard layout",
 	"keyboard_layout_default": "Default of this remotehub",
 	"keyboard_layout_hint": "As set on the device, e.g. German on a German Windows; typing uses it.",
-	"keyboard_layout_unicode": "Unicode (any layout, some shortcuts may not work)"
+	"keyboard_layout_unicode": "Unicode (any layout, some shortcuts may not work)",
+	"device_certificate": "Certificate",
+	"error_certificate_changed": "The target's certificate changed.",
+	"error_tls_required": "The device offers Remote Desktop only without TLS; remotehub does not connect to it unencrypted.",
+	"audit_device_certificate_pinned": "Pinned a certificate",
+	"audit_device_certificate_reset": "Forgot a certificate",
+	"display_connected_certificate": "Connected · certificate {fingerprint}",
+	"display_certificate_pinned": "First connection: the certificate {fingerprint} is now pinned.",
+	"display_certificate_changed": "The certificate of {name} changed: pinned {expected}, now {presented}. This happens when a certificate is renewed — or when someone intercepts the connection.",
+	"display_trust_new_certificate": "Trust the new certificate"
 }

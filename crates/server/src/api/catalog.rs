@@ -141,6 +141,8 @@ struct DeviceRow {
     description: String,
     /// RDP only; `None` uses the instance's default.
     keyboard_layout: Option<String>,
+    /// RDP: SHA-256 fingerprint of the pinned certificate, if one is pinned.
+    certificate_fingerprint: Option<String>,
     #[serde(skip)]
     host_key: Option<String>,
 }
@@ -186,7 +188,7 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
             .await?;
     let devices: Vec<DeviceRow> = sqlx::query_as(
         "SELECT id, folder_id, name, protocol, host, port, auth_mode, credential_id, description,
-                keyboard_layout, host_key
+                keyboard_layout, certificate_fingerprint, host_key
          FROM devices ORDER BY lower(name)",
     )
     .fetch_all(&state.db)
@@ -576,7 +578,9 @@ pub async fn update_device(
              auth_mode = $7, credential_id = $8, description = $9, keyboard_layout = $11,
              updated_at = now(),
              host_key = CASE WHEN $10 THEN NULL ELSE host_key END,
-             host_key_pinned_at = CASE WHEN $10 THEN NULL ELSE host_key_pinned_at END
+             host_key_pinned_at = CASE WHEN $10 THEN NULL ELSE host_key_pinned_at END,
+             certificate_fingerprint = CASE WHEN $10 THEN NULL ELSE certificate_fingerprint END,
+             certificate_pinned_at = CASE WHEN $10 THEN NULL ELSE certificate_pinned_at END
          WHERE id = $1",
     )
     .bind(id)
@@ -652,25 +656,31 @@ pub async fn reset_host_key(
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Edit, ObjectId::Device(id))?;
     let mut tx = state.db.begin().await?;
-    let old: Option<String> = sqlx::query_scalar(
-        "UPDATE devices d SET host_key = NULL, host_key_pinned_at = NULL
-         FROM (SELECT host_key FROM devices WHERE id = $1) old
-         WHERE d.id = $1 RETURNING old.host_key",
-    )
-    .bind(id)
-    .fetch_one(&mut *tx)
-    .await?;
-    let details =
-        json!({ "fingerprint": old.as_deref().and_then(remotehub_gateway::ssh::fingerprint) });
+    // Whatever is pinned goes: the SSH host key or the RDP certificate.
+    let (protocol, host_key, certificate): (String, Option<String>, Option<String>) =
+        sqlx::query_as(
+            "UPDATE devices d SET host_key = NULL, host_key_pinned_at = NULL,
+                 certificate_fingerprint = NULL, certificate_pinned_at = NULL
+             FROM (SELECT host_key, certificate_fingerprint FROM devices WHERE id = $1) old
+             WHERE d.id = $1 RETURNING d.protocol, old.host_key, old.certificate_fingerprint",
+        )
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let (action, details) = if protocol == "rdp" {
+        (
+            Action::CertificateReset,
+            json!({ "fingerprint": certificate }),
+        )
+    } else {
+        let fingerprint = host_key
+            .as_deref()
+            .and_then(remotehub_gateway::ssh::fingerprint);
+        (Action::HostKeyReset, json!({ "fingerprint": fingerprint }))
+    };
     audit::record(
         &mut *tx,
-        entry(
-            &session,
-            Action::HostKeyReset,
-            ObjectId::Device(id),
-            details,
-            &address,
-        ),
+        entry(&session, action, ObjectId::Device(id), details, &address),
     )
     .await?;
     tx.commit().await?;

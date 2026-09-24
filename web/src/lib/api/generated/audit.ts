@@ -24,7 +24,9 @@ export const AUDIT_ACTIONS = [
 	'connection.closed',
 	'connection.failed',
 	'device.host_key_pinned',
-	'device.host_key_reset'
+	'device.host_key_reset',
+	'device.certificate_pinned',
+	'device.certificate_reset'
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

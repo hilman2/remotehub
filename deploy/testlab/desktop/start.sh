@@ -3,6 +3,9 @@
 # 3389, which starts an Xvnc session per RDP sign-in.
 set -eu
 
+# A restarted container keeps /tmp: stale locks and sockets of the last run
+# would keep the displays from starting.
+rm -f /tmp/.X*-lock /tmp/.X11-unix/X*
 mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
 runuser -u tester -- Xvnc :1 -rfbport 5900 -rfbauth /etc/vnc/passwd -SecurityTypes VncAuth \

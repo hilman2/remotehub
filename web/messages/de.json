@@ -188,5 +188,14 @@
 	"field_keyboard_layout": "Tastaturlayout",
 	"keyboard_layout_default": "Standard dieses remotehub",
 	"keyboard_layout_hint": "Wie auf dem Gerät eingestellt, etwa Deutsch bei einem deutschen Windows; danach richtet sich das Tippen.",
-	"keyboard_layout_unicode": "Unicode (jedes Layout, manche Tastenkürzel gehen nicht)"
+	"keyboard_layout_unicode": "Unicode (jedes Layout, manche Tastenkürzel gehen nicht)",
+	"device_certificate": "Zertifikat",
+	"error_certificate_changed": "Das Zertifikat des Ziels hat sich geändert.",
+	"error_tls_required": "Das Gerät bietet Remotedesktop nur ohne TLS an; unverschlüsselt verbindet remotehub nicht.",
+	"audit_device_certificate_pinned": "Zertifikat hinterlegt",
+	"audit_device_certificate_reset": "Zertifikat vergessen",
+	"display_connected_certificate": "Verbunden · Zertifikat {fingerprint}",
+	"display_certificate_pinned": "Erste Verbindung: Das Zertifikat {fingerprint} ist jetzt hinterlegt.",
+	"display_certificate_changed": "Das Zertifikat von {name} hat sich geändert: hinterlegt {expected}, jetzt {presented}. Das passiert, wenn ein Zertifikat erneuert wird – oder wenn jemand die Verbindung abfängt.",
+	"display_trust_new_certificate": "Dem neuen Zertifikat vertrauen"
 }

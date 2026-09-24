@@ -36,6 +36,8 @@ export interface Device {
 	description: string;
 	/** RDP only; null uses the instance's default. */
 	keyboard_layout: KeyboardLayout | null;
+	/** RDP: SHA-256 fingerprint of the pinned certificate, if pinned. */
+	certificate_fingerprint: string | null;
 	/** SHA-256 fingerprint of the pinned host key (SSH), if pinned. */
 	host_key_fingerprint: string | null;
 	role: Role;

@@ -5,6 +5,7 @@
 use std::time::Duration;
 
 use remotehub_gateway::guacamole::{self, Connection, GuacError, Handshake};
+use remotehub_gateway::rdp::{self, ProbeError};
 
 /// The lab certificate's fingerprint (deploy/testlab/desktop/README.md).
 const LAB_CERTIFICATE: &str = "sha256:C1:E8:6D:13:4E:8D:B7:A5:D2:72:01:8F:93:8F:C4:44:EC:E4:C0:D5:97:C8:00:EF:25:24:BB:76:22:0B:DF:CD";
@@ -145,4 +146,21 @@ async fn guacd_offers_neither_ssh_nor_telnet() {
         .await;
         assert!(result.is_err(), "{protocol} is available");
     }
+}
+
+#[tokio::test]
+#[ignore = "needs the test lab"]
+async fn the_rdp_certificate_is_learned_without_signing_in() {
+    let host = env("REMOTEHUB_TEST_DESKTOP_HOST");
+    let fingerprint = rdp::certificate_fingerprint(&host, 3389, Duration::from_secs(5))
+        .await
+        .unwrap();
+    assert_eq!(format!("sha256:{fingerprint}"), LAB_CERTIFICATE);
+
+    // VNC is no RDP server.
+    let result = rdp::certificate_fingerprint(&host, 5900, Duration::from_secs(5)).await;
+    assert!(
+        matches!(result, Err(ProbeError::Protocol(_) | ProbeError::Timeout)),
+        "{result:?}"
+    );
 }

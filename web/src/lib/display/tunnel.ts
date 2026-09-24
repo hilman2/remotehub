@@ -19,7 +19,8 @@ export interface Start {
 }
 
 export type ServerEvent =
-	{ type: 'connected' } | { type: 'error'; code: string; params: Record<string, unknown> };
+	| { type: 'connected'; certificate_fingerprint: string | null; pinned: boolean }
+	| { type: 'error'; code: string; params: Record<string, unknown> };
 
 export function displayUrl(deviceId: string, location: Location = window.location): string {
 	const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
