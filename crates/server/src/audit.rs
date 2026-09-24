@@ -58,6 +58,11 @@ audit_actions! {
     AccessApproved = "access.approved",
     AccessDenied = "access.denied",
     AccessCancelled = "access.cancelled",
+    PersonalUnlockAdded = "personal.unlock_added",
+    PersonalUnlockRemoved = "personal.unlock_removed",
+    PersonalEntrySaved = "personal.entry_saved",
+    PersonalEntryDeleted = "personal.entry_deleted",
+    PersonalVaultReset = "personal.vault_reset",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).

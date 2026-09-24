@@ -250,6 +250,93 @@ test('an RDP desktop opens with the password LAPS keeps in the directory', async
 	await desktop.close();
 });
 
+test('the personal vault opens only in the browser, with passphrase, passkey or recovery key', async ({
+	page,
+	context
+}) => {
+	// A passkey that can derive secrets (WebAuthn PRF), as Chromium emulates it.
+	const cdp = await context.newCDPSession(page);
+	await cdp.send('WebAuthn.enable');
+	await cdp.send('WebAuthn.addVirtualAuthenticator', {
+		options: {
+			protocol: 'ctap2',
+			transport: 'internal',
+			hasResidentKey: true,
+			hasUserVerification: true,
+			isUserVerified: true,
+			automaticPresenceSimulation: true,
+			hasPrf: true
+		}
+	});
+	await signIn(page);
+	await page.getByRole('link', { name: 'My vault' }).click();
+
+	// Start from nothing: an earlier run may have left a vault behind.
+	const unlockHeading = page.getByRole('heading', { name: 'Unlock your vault' });
+	const setupHeading = page.getByRole('heading', { name: 'Set up your vault' });
+	await expect(unlockHeading.or(setupHeading)).toBeVisible();
+	if (await unlockHeading.isVisible()) {
+		await page.getByRole('button', { name: 'Start over' }).click();
+		await page.getByRole('dialog').getByRole('button', { name: 'Start over' }).click();
+		await expect(setupHeading).toBeVisible();
+	}
+	const passphrase = 'long enough passphrase';
+	await page.getByLabel('Passphrase', { exact: true }).fill(passphrase);
+	await page.getByLabel('Passphrase again').fill(passphrase);
+	await page.getByRole('button', { name: 'Set up' }).click();
+	const recovery = (await page.getByTestId('recovery-key').innerText()).trim();
+	expect(recovery).toMatch(/^([A-Z2-7]{4}-){7}[A-Z2-7]{4}$/);
+	await page.getByRole('button', { name: 'I have kept it safe' }).click();
+
+	const secret = `Router-Pw-${run}`;
+	await page.getByRole('button', { name: 'New entry' }).click();
+	const dialog = page.getByRole('dialog');
+	await dialog.getByLabel('Title').fill('Office router');
+	await dialog.getByLabel('User name').fill('admin');
+	await dialog.getByLabel('Password').fill(secret);
+	await dialog.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText('Office router')).toBeVisible();
+	await expect(page.getByText(secret)).toHaveCount(0);
+	await page.getByRole('button', { name: 'Show' }).click();
+	await expect(page.getByText(secret)).toBeVisible();
+
+	// The server holds nothing readable of it.
+	const stored = await page.evaluate(async () => {
+		const vault = await (await fetch('/api/personal/vault')).json();
+		return (
+			JSON.stringify(vault) +
+			vault.entries.map((e: { ciphertext: string }) => atob(e.ciphertext)).join('')
+		);
+	});
+	expect(stored).not.toContain(secret);
+	expect(stored).not.toContain('Office router');
+
+	await page.getByLabel('Name of the passkey').fill('virtual key');
+	await page.getByRole('button', { name: 'Add a passkey' }).click();
+	await expect(page.getByText('Passkey · virtual key')).toBeVisible();
+
+	const lock = () => page.getByRole('button', { name: 'Lock' }).click();
+	await lock();
+	await page.getByRole('button', { name: 'Unlock with a passkey' }).click();
+	await expect(page.getByText('Office router')).toBeVisible();
+
+	await lock();
+	await page.getByLabel('Passphrase', { exact: true }).fill('not the passphrase');
+	await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+	await expect(page.getByRole('alert')).toHaveText('That does not unlock the vault.');
+	await page.getByRole('button', { name: 'Use the recovery key' }).click();
+	await page.getByLabel('Recovery key').fill(recovery.toLowerCase());
+	await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+	await expect(page.getByText('Office router')).toBeVisible();
+
+	// A reload forgets the key; the passphrase opens it again.
+	await page.reload();
+	await expect(unlockHeading).toBeVisible();
+	await page.getByLabel('Passphrase', { exact: true }).fill(passphrase);
+	await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+	await expect(page.getByText('Office router')).toBeVisible();
+});
+
 test('an RDP desktop opens in the browser', async ({ page, context }) => {
 	// Chromium asks before a page reads the clipboard; the test says yes.
 	await context.grantPermissions(['clipboard-read', 'clipboard-write']);

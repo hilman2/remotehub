@@ -36,6 +36,6 @@ server has to be able to decrypt them.
 
 - No zero knowledge for shared entries: whoever controls the server and its key file can decrypt them.
   This is the same trade-off every credential-injecting PAM product makes; it is stated in SECURITY.md.
-- Personal entries can later get an end-to-end scheme (`e2e_user_v1`, key from WebAuthn PRF); the schema
-  reserves room for it.
+- Personal entries got an end-to-end scheme (`e2e_user_v1`, key from WebAuthn PRF, a passphrase or the
+  recovery key, #22) in their own table `personal_entries`.
 - The KDBX crate (`keepass`) is young and changes fast; it is isolated in `crates/kdbx` and pinned exactly.

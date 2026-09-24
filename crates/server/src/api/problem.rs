@@ -66,6 +66,7 @@ error_codes! {
     RequestPending = ("request_pending", CONFLICT, "The same request is already waiting for a decision"),
     RequestDecided = ("request_decided", CONFLICT, "The request has been decided already"),
     OwnRequest = ("own_request", FORBIDDEN, "Nobody approves their own request"),
+    LastUnlock = ("last_unlock", CONFLICT, "The last way to unlock the personal vault cannot be removed"),
     DirectoryUnavailable = ("directory_unavailable", SERVICE_UNAVAILABLE, "Directory unavailable"),
     DatabaseUnavailable = ("database_unavailable", SERVICE_UNAVAILABLE, "Database unavailable"),
     Internal = ("internal", INTERNAL_SERVER_ERROR, "Internal server error"),

@@ -102,7 +102,13 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - Sealed fields live in `secret_fields`, one row per owner, version and field; the associated data makes a
   row that is copied or moved elsewhere impossible to open.
 - The server must be able to decrypt stored credentials to inject them. That rules out zero knowledge for
-  shared entries; a personal end-to-end scheme (`e2e_user_v1`) is reserved for later.
+  shared entries.
+- **Personal vault** (`e2e_user_v1`, `/vault`): entries only their owner can read, encrypted in the browser
+  with WebCrypto (`web/src/lib/vault/crypto.ts`). One random vault key (AES-256-GCM, entry ID as associated
+  data) is stored wrapped (AES-KW) once per way to unlock: a passkey's WebAuthn PRF output or the recovery
+  key through HKDF, the passphrase through PBKDF2-SHA-256 (600 000 iterations). The server keeps
+  ciphertext and wrapped keys for their owner only (`api/personal.rs`); nobody, the operator included, can
+  reset the passphrase. Such entries cannot be injected into connections.
 - Plaintext lives only in `secrecy`/`zeroize` types and never appears in logs, API responses (except the
   audited `reveal`), environment variables or command lines. Core dumps are disabled.
 

@@ -27,6 +27,7 @@ export const ERROR_CODES = [
 	'request_pending',
 	'request_decided',
 	'own_request',
+	'last_unlock',
 	'directory_unavailable',
 	'database_unavailable',
 	'internal'
