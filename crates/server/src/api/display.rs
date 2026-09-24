@@ -95,6 +95,7 @@ fn parameters<'a>(
     port: &'a str,
     credentials: &'a Credentials,
     password: &'a str,
+    default_layout: &'a str,
 ) -> Vec<(&'static str, &'a str)> {
     let mut parameters = vec![("hostname", target.host.as_str()), ("port", port)];
     if target.protocol == "rdp" {
@@ -111,6 +112,11 @@ fn parameters<'a>(
             // TODO(#53): pin the certificate on first use instead.
             ("ignore-cert", "true"),
             ("client-name", "remotehub"),
+            // The session's input language on Windows follows it too.
+            (
+                "server-layout",
+                target.keyboard_layout.as_deref().unwrap_or(default_layout),
+            ),
             ("resize-method", "display-update"),
             ("disable-audio", "true"),
             ("disable-download", "true"),
@@ -198,7 +204,13 @@ async fn run(
             Login::Password(password) => password.expose_secret(),
             Login::Key(_) => "",
         };
-        let parameters = parameters(&target, &port, &credentials, password);
+        let parameters = parameters(
+            &target,
+            &port,
+            &credentials,
+            password,
+            &state.settings.rdp_keyboard_layout,
+        );
         guacamole::open(
             &state.settings.guacd,
             &Handshake {
@@ -376,6 +388,49 @@ mod tests {
         for bad in ["", "Europe/Berlin;4.nop", "a b", &"x".repeat(65)] {
             assert_eq!(timezone(Some(bad.to_owned())), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn rdp_gets_the_layout_and_the_domain_it_needs() {
+        let mut target = Target {
+            id: Uuid::nil(),
+            name: "x".into(),
+            protocol: "rdp".into(),
+            host: "desktop".into(),
+            port: 3389,
+            auth_mode: "ask".into(),
+            credential_id: None,
+            host_key: None,
+            keyboard_layout: None,
+        };
+        let credentials = Credentials {
+            username: r"EXAMPLE\alice".into(),
+            domain: String::new(),
+            login: Login::Password(SecretString::from("secret".to_owned())),
+        };
+        let value = |target: &Target, name: &str| {
+            parameters(target, "3389", &credentials, "secret", "en-us-qwerty")
+                .into_iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| value.to_owned())
+        };
+        assert_eq!(
+            value(&target, "server-layout").as_deref(),
+            Some("en-us-qwerty")
+        );
+        assert_eq!(value(&target, "domain").as_deref(), Some("EXAMPLE"));
+        assert_eq!(value(&target, "username").as_deref(), Some("alice"));
+        target.keyboard_layout = Some("de-de-qwertz".into());
+        assert_eq!(
+            value(&target, "server-layout").as_deref(),
+            Some("de-de-qwertz")
+        );
+        target.protocol = "vnc".into();
+        assert_eq!(value(&target, "server-layout"), None);
+        assert_eq!(
+            value(&target, "username").as_deref(),
+            Some(r"EXAMPLE\alice")
+        );
     }
 
     #[test]

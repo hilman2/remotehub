@@ -10,6 +10,7 @@ use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use remotehub_directory::{Principal, Sid};
+use remotehub_gateway::guacamole::KEYBOARD_LAYOUTS;
 use remotehub_gateway::ssh::{KeyError, SshKey};
 use remotehub_model::{Catalog, ObjectId, Role, Subject};
 use secrecy::{ExposeSecret, SecretString};
@@ -138,6 +139,8 @@ struct DeviceRow {
     auth_mode: String,
     credential_id: Option<Uuid>,
     description: String,
+    /// RDP only; `None` uses the instance's default.
+    keyboard_layout: Option<String>,
     #[serde(skip)]
     host_key: Option<String>,
 }
@@ -182,7 +185,8 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
             .fetch_all(&state.db)
             .await?;
     let devices: Vec<DeviceRow> = sqlx::query_as(
-        "SELECT id, folder_id, name, protocol, host, port, auth_mode, credential_id, description, host_key
+        "SELECT id, folder_id, name, protocol, host, port, auth_mode, credential_id, description,
+                keyboard_layout, host_key
          FROM devices ORDER BY lower(name)",
     )
     .fetch_all(&state.db)
@@ -391,6 +395,9 @@ pub struct DeviceInput {
     credential_id: Option<Uuid>,
     #[serde(default)]
     description: String,
+    /// RDP only: one of guacd's layouts, or none for the instance's default.
+    #[serde(default)]
+    keyboard_layout: Option<String>,
 }
 
 struct ValidDevice {
@@ -402,6 +409,7 @@ struct ValidDevice {
     auth_mode: &'static str,
     credential_id: Option<Uuid>,
     description: String,
+    keyboard_layout: Option<&'static str>,
 }
 
 impl DeviceInput {
@@ -437,6 +445,16 @@ impl DeviceInput {
         if self.description.chars().count() > 2000 {
             return Err(invalid("description"));
         }
+        // Other protocols send characters, not scancodes: no layout to keep.
+        let keyboard_layout = match self.keyboard_layout.as_deref().filter(|l| !l.is_empty()) {
+            Some(layout) if protocol == "rdp" => Some(
+                *KEYBOARD_LAYOUTS
+                    .iter()
+                    .find(|known| **known == layout)
+                    .ok_or_else(|| invalid("keyboard_layout"))?,
+            ),
+            _ => None,
+        };
         Ok(ValidDevice {
             folder_id: self.folder_id,
             name: name(&self.name, "name")?,
@@ -446,6 +464,7 @@ impl DeviceInput {
             auth_mode,
             credential_id: self.credential_id,
             description: self.description.trim().to_owned(),
+            keyboard_layout,
         })
     }
 }
@@ -477,8 +496,9 @@ pub async fn create_device(
 
     let mut tx = state.db.begin().await?;
     let id: Uuid = sqlx::query_scalar(
-        "INSERT INTO devices (folder_id, name, protocol, host, port, auth_mode, credential_id, description)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+        "INSERT INTO devices
+             (folder_id, name, protocol, host, port, auth_mode, credential_id, description, keyboard_layout)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
     )
     .bind(device.folder_id)
     .bind(&device.name)
@@ -488,12 +508,14 @@ pub async fn create_device(
     .bind(device.auth_mode)
     .bind(device.credential_id)
     .bind(&device.description)
+    .bind(device.keyboard_layout)
     .fetch_one(&mut *tx)
     .await
     .map_err(database)?;
     let details = json!({
         "name": device.name, "protocol": device.protocol, "host": device.host, "port": device.port,
         "auth_mode": device.auth_mode, "credential_id": device.credential_id,
+        "keyboard_layout": device.keyboard_layout,
     });
     audit::record(
         &mut *tx,
@@ -551,7 +573,8 @@ pub async fn update_device(
     let mut tx = state.db.begin().await?;
     sqlx::query(
         "UPDATE devices SET folder_id = $2, name = $3, protocol = $4, host = $5, port = $6,
-             auth_mode = $7, credential_id = $8, description = $9, updated_at = now(),
+             auth_mode = $7, credential_id = $8, description = $9, keyboard_layout = $11,
+             updated_at = now(),
              host_key = CASE WHEN $10 THEN NULL ELSE host_key END,
              host_key_pinned_at = CASE WHEN $10 THEN NULL ELSE host_key_pinned_at END
          WHERE id = $1",
@@ -566,12 +589,14 @@ pub async fn update_device(
     .bind(device.credential_id)
     .bind(&device.description)
     .bind(target_changed)
+    .bind(device.keyboard_layout)
     .execute(&mut *tx)
     .await
     .map_err(database)?;
     let details = json!({
         "name": device.name, "protocol": device.protocol, "host": device.host, "port": device.port,
         "auth_mode": device.auth_mode, "credential_id": device.credential_id, "folder_id": device.folder_id,
+        "keyboard_layout": device.keyboard_layout,
     });
     audit::record(
         &mut *tx,

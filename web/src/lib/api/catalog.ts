@@ -1,5 +1,8 @@
 /** Folders, devices, credentials and grants (crates/server/src/api/catalog.rs). */
 import { api } from './client';
+import type { KeyboardLayout } from './generated/keyboard';
+
+export { KEYBOARD_LAYOUTS, type KeyboardLayout } from './generated/keyboard';
 
 export type Role = 'list' | 'connect' | 'reveal' | 'edit' | 'manage';
 export const ROLES: readonly Role[] = ['list', 'connect', 'reveal', 'edit', 'manage'];
@@ -31,6 +34,8 @@ export interface Device {
 	auth_mode: AuthMode;
 	credential_id: string | null;
 	description: string;
+	/** RDP only; null uses the instance's default. */
+	keyboard_layout: KeyboardLayout | null;
 	/** SHA-256 fingerprint of the pinned host key (SSH), if pinned. */
 	host_key_fingerprint: string | null;
 	role: Role;
@@ -69,6 +74,7 @@ export interface DeviceInput {
 	auth_mode: AuthMode;
 	credential_id: string | null;
 	description: string;
+	keyboard_layout: KeyboardLayout | null;
 }
 
 export interface CredentialInput {

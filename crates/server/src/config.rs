@@ -12,6 +12,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use remotehub_directory::ldap::LdapConfig;
+use remotehub_gateway::guacamole::KEYBOARD_LAYOUTS;
 use secrecy::SecretString;
 use thiserror::Error;
 
@@ -46,6 +47,8 @@ pub struct Config {
     /// guacd for RDP and VNC (`host:port`), only reachable on an internal
     /// network.
     pub guacd: String,
+    /// Keyboard layout of RDP sessions for devices without one of their own.
+    pub rdp_keyboard_layout: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,6 +188,15 @@ impl Config {
             return Err(invalid("REMOTEHUB_GUACD", &guacd));
         }
 
+        let rdp_keyboard_layout =
+            setting("REMOTEHUB_RDP_KEYBOARD_LAYOUT")?.unwrap_or_else(|| "en-us-qwerty".to_owned());
+        if !KEYBOARD_LAYOUTS.contains(&rdp_keyboard_layout.as_str()) {
+            return Err(invalid(
+                "REMOTEHUB_RDP_KEYBOARD_LAYOUT",
+                &rdp_keyboard_layout,
+            ));
+        }
+
         Ok(Config {
             listen,
             database_url,
@@ -197,6 +209,7 @@ impl Config {
             own_account_connections,
             admin_groups,
             guacd,
+            rdp_keyboard_layout,
         })
     }
 }
@@ -260,6 +273,7 @@ impl fmt::Debug for Config {
             .field("master_key_file", &self.master_key_file)
             .field("admin_groups", &self.admin_groups)
             .field("guacd", &self.guacd)
+            .field("rdp_keyboard_layout", &self.rdp_keyboard_layout)
             .finish()
     }
 }
@@ -307,6 +321,7 @@ mod tests {
         assert!(config.ldap.is_none());
         assert!(config.admin_groups.is_empty());
         assert_eq!(config.guacd, "guacd:4822");
+        assert_eq!(config.rdp_keyboard_layout, "en-us-qwerty");
         assert!(!config.log_json);
 
         assert_eq!(
@@ -384,6 +399,7 @@ mod tests {
             ("REMOTEHUB_PUBLIC_URL", "remotehub.example.com"),
             ("REMOTEHUB_GUACD", "guacd"),
             ("REMOTEHUB_GUACD", "tcp://guacd:4822"),
+            ("REMOTEHUB_RDP_KEYBOARD_LAYOUT", "de"),
         ] {
             assert!(
                 matches!(
