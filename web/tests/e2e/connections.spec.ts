@@ -77,7 +77,7 @@ test('an AD user adds an SSH device and works in its terminal', async ({ page, c
 	// Its terminal opens in a new tab; the first connection pins the host key.
 	const [terminal] = await Promise.all([
 		context.waitForEvent('page'),
-		page.getByRole('link', { name: 'Connect' }).click()
+		page.getByRole('link', { name: 'Connect', exact: true }).click()
 	]);
 	await expect(terminal.getByText(/is now pinned/)).toBeVisible();
 	await terminal.locator('.xterm').click();
@@ -121,7 +121,7 @@ test('an SSH key protected by a passphrase signs in', async ({ page, context }) 
 	await newDevice(page, folder, `lab ssh key ${run}`, credential);
 	const [terminal] = await Promise.all([
 		context.waitForEvent('page'),
-		page.getByRole('link', { name: 'Connect' }).click()
+		page.getByRole('link', { name: 'Connect', exact: true }).click()
 	]);
 	await terminal.locator('.xterm').click();
 	await terminal.keyboard.type('echo "key says $(whoami)"');
@@ -151,7 +151,7 @@ test('an SSH device signs in with a certificate from remotehub', async ({ page, 
 
 	const [terminal] = await Promise.all([
 		context.waitForEvent('page'),
-		page.getByRole('link', { name: 'Connect' }).click()
+		page.getByRole('link', { name: 'Connect', exact: true }).click()
 	]);
 	await terminal.locator('.xterm').click();
 	await terminal.keyboard.type('echo "ca says $(whoami)"');
@@ -189,7 +189,7 @@ test('access asked for just in time is approved by someone else', async ({ page,
 	const entry = bob.getByRole('tree').getByRole('button', { name: `${name} ${sshHost}` });
 	await bob.getByRole('searchbox').fill(name);
 	await entry.click();
-	await expect(bob.getByRole('link', { name: 'Connect' })).toHaveCount(0);
+	await expect(bob.getByRole('link', { name: 'Connect', exact: true })).toHaveCount(0);
 	await bob.getByRole('button', { name: 'Request access' }).click();
 	await bob.getByRole('dialog').getByLabel('Reason').fill('Rotate the logs');
 	await bob.getByRole('dialog').getByRole('button', { name: 'Send request' }).click();
@@ -205,7 +205,7 @@ test('access asked for just in time is approved by someone else', async ({ page,
 	await bob.reload();
 	await bob.getByRole('searchbox').fill(name);
 	await entry.click();
-	await expect(bob.getByRole('link', { name: 'Connect' })).toBeVisible();
+	await expect(bob.getByRole('link', { name: 'Connect', exact: true })).toBeVisible();
 	await bob.getByRole('link', { name: 'Access requests' }).click();
 	await expect(bob.getByText(/Approved · until .* · by alice/)).toBeVisible();
 	await bobs.close();
@@ -234,7 +234,7 @@ test('an RDP desktop opens with the password LAPS keeps in the directory', async
 
 	const [desktop] = await Promise.all([
 		context.waitForEvent('page'),
-		page.getByRole('link', { name: 'Connect' }).click()
+		page.getByRole('link', { name: 'Connect', exact: true }).click()
 	]);
 	await expect(desktop.getByRole('application')).toBeVisible();
 	// The lab desktop's background (#1e5b8c): the sign-in worked.
@@ -361,7 +361,7 @@ test('an RDP desktop opens in the browser', async ({ page, context }) => {
 	});
 	const [desktop] = await Promise.all([
 		context.waitForEvent('page'),
-		page.getByRole('link', { name: 'Connect' }).click()
+		page.getByRole('link', { name: 'Connect', exact: true }).click()
 	]);
 	// The first connection pins the device's certificate.
 	await expect(desktop.getByText(/the certificate .* is now pinned/)).toBeVisible();
@@ -445,7 +445,7 @@ test('a web interface opens signed in, in a browser on the server', async ({ pag
 	});
 	const [appliance] = await Promise.all([
 		context.waitForEvent('page'),
-		page.getByRole('link', { name: 'Connect' }).click()
+		page.getByRole('link', { name: 'Connect', exact: true }).click()
 	]);
 	await expect(appliance.getByText(/the certificate .* is now pinned/)).toBeVisible();
 	await expect(appliance.getByRole('application')).toBeVisible();
