@@ -14,5 +14,9 @@
 	"server_ok": "Server reachable",
 	"server_unreachable": "Server not reachable",
 	"server_database_unavailable": "Database not reachable",
-	"footer_version": "Version {version}"
+	"footer_version": "Version {version}",
+	"error_not_found": "The requested item does not exist.",
+	"error_database_unavailable": "The database is not reachable. Please try again later.",
+	"error_internal": "Something went wrong on the server.",
+	"error_unknown": "Unexpected error ({code})."
 }

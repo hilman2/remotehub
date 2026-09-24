@@ -14,5 +14,9 @@
 	"server_ok": "Server erreichbar",
 	"server_unreachable": "Server nicht erreichbar",
 	"server_database_unavailable": "Datenbank nicht erreichbar",
-	"footer_version": "Version {version}"
+	"footer_version": "Version {version}",
+	"error_not_found": "Das angeforderte Element gibt es nicht.",
+	"error_database_unavailable": "Die Datenbank ist nicht erreichbar. Bitte später erneut versuchen.",
+	"error_internal": "Auf dem Server ist etwas schiefgegangen.",
+	"error_unknown": "Unerwarteter Fehler ({code})."
 }

@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { parse } from 'svelte/compiler';
 import { describe, expect, it } from 'vitest';
 import en from '../../messages/en.json';
+import { ERROR_CODES } from './api/generated/problem';
 
 const SRC = join(import.meta.dirname, '..');
 const GENERATED = /^lib[/\\]paraglide[/\\]/;
@@ -129,6 +130,8 @@ describe('message catalogs', () => {
 				used.add(match[1]);
 			}
 		}
+		// Error messages are looked up by code in errorMessage() (lib/api/errors.ts).
+		for (const code of ERROR_CODES) used.add(`error_${code}`);
 		const unused = Object.keys(en).filter((key) => key !== '$schema' && !used.has(key));
 		expect(unused).toEqual([]);
 	});
