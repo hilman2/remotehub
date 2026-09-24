@@ -8,4 +8,5 @@ web/build
 web/src/lib/paraglide
 web/test-results
 deploy/testlab
+spikes
 .image-check

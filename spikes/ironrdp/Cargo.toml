@@ -1,0 +1,19 @@
+# The IronRDP spike of ADR 0006, kept to repeat its measurements. Not part of
+# the workspace, the build or the CI; see docs/adr/0006-rdp-engine.md.
+[package]
+name = "ironrdp-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+ironrdp = { version = "0.17", features = ["connector", "session", "graphics", "input", "pdu", "displaycontrol", "cliprdr", "svc", "dvc"] }
+ironrdp-blocking = "0.10"
+ironrdp-graphics = "0.9"
+ironrdp-pdu = "0.9"
+anyhow = "1"
+sspi = { version = "0.21", features = ["network_client"] }
+tokio-rustls = "0.26"
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
