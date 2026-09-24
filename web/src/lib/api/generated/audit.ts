@@ -19,7 +19,12 @@ export const AUDIT_ACTIONS = [
 	'credential.updated',
 	'credential.deleted',
 	'grant.added',
-	'grant.removed'
+	'grant.removed',
+	'connection.opened',
+	'connection.closed',
+	'connection.failed',
+	'device.host_key_pinned',
+	'device.host_key_reset'
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

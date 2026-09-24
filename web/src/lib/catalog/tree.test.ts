@@ -13,6 +13,7 @@ function device(id: string, name: string, host: string): Device {
 		auth_mode: 'ask',
 		credential_id: null,
 		description: '',
+		host_key_fingerprint: null,
 		role: 'edit'
 	};
 }

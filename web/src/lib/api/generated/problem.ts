@@ -15,6 +15,10 @@ export const ERROR_CODES = [
 	'forbidden_origin',
 	'name_taken',
 	'folder_not_empty',
+	'host_key_changed',
+	'target_unreachable',
+	'target_auth_failed',
+	'connection_failed',
 	'directory_unavailable',
 	'database_unavailable',
 	'internal'

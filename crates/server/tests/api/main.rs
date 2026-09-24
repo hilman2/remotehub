@@ -14,3 +14,4 @@ mod generated;
 mod http;
 mod secrets;
 mod session;
+mod terminal;

@@ -61,6 +61,7 @@ pub struct SshSession {
     writer: ChannelWriteHalf<Msg>,
     handle: Handle<Client>,
     exit_status: Option<u32>,
+    finished: bool,
 }
 
 /// SHA-256 fingerprint of a key in OpenSSH format.
@@ -174,6 +175,7 @@ async fn open_inner(target: SshTarget<'_>, size: Size) -> Result<SshSession, Ssh
         writer,
         handle,
         exit_status: None,
+        finished: false,
     })
 }
 
@@ -193,18 +195,25 @@ impl SshSession {
             .map_err(|e| SshError::Protocol(e.to_string()))
     }
 
-    /// The next output; `None` once the connection is gone.
+    /// The next output; `Exit` once, then `None`.
     pub async fn next(&mut self) -> Option<Output> {
+        if self.finished {
+            return None;
+        }
         loop {
-            match self.reader.wait().await? {
-                ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => {
+            match self.reader.wait().await {
+                Some(ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. }) => {
                     return Some(Output::Data(data.to_vec()));
                 }
-                ChannelMsg::ExitStatus { exit_status } => self.exit_status = Some(exit_status),
-                ChannelMsg::Eof | ChannelMsg::Close => {
-                    return Some(Output::Exit(self.exit_status.take()));
+                Some(ChannelMsg::ExitStatus { exit_status }) => {
+                    self.exit_status = Some(exit_status)
                 }
-                _ => {}
+                // OpenSSH sends EOF before the exit status; the channel ends with Close.
+                Some(ChannelMsg::Close) | None => {
+                    self.finished = true;
+                    return Some(Output::Exit(self.exit_status));
+                }
+                Some(_) => {}
             }
         }
     }
