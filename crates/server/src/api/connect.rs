@@ -32,6 +32,7 @@ pub struct Target {
     pub credential_id: Option<Uuid>,
     pub host_key: Option<String>,
     pub keyboard_layout: Option<String>,
+    pub certificate_fingerprint: Option<String>,
 }
 
 /// Browsers send `Origin` with every WebSocket handshake; without this check
@@ -60,7 +61,8 @@ pub async fn target(
         None => return Err(Problem::new(ErrorCode::NotFound)),
     }
     let target: Target = sqlx::query_as(
-        "SELECT id, name, protocol, host, port, auth_mode, credential_id, host_key, keyboard_layout
+        "SELECT id, name, protocol, host, port, auth_mode, credential_id, host_key, keyboard_layout,
+                certificate_fingerprint
          FROM devices WHERE id = $1",
     )
     .bind(id)

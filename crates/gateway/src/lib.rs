@@ -3,4 +3,5 @@
 //! guacd, which this crate speaks to.
 
 pub mod guacamole;
+pub mod rdp;
 pub mod ssh;

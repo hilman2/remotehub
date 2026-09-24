@@ -24,6 +24,7 @@ use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use remotehub_gateway::guacamole::{self, Connection, GuacError, Handshake, Parser};
+use remotehub_gateway::rdp::{self, ProbeError};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde_json::json;
@@ -39,6 +40,8 @@ use crate::audit::{self, Action};
 use crate::session::Session;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// Learning an RDP server's certificate: TCP, X.224 and the TLS handshake.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const START_TIMEOUT: Duration = Duration::from_secs(120);
 /// Browser frames are input and clipboard chunks; guacd splits clipboard
 /// data into blobs of a few KiB.
@@ -96,6 +99,7 @@ fn parameters<'a>(
     credentials: &'a Credentials,
     password: &'a str,
     default_layout: &'a str,
+    certificate: &'a str,
 ) -> Vec<(&'static str, &'a str)> {
     let mut parameters = vec![("hostname", target.host.as_str()), ("port", port)];
     if target.protocol == "rdp" {
@@ -109,8 +113,8 @@ fn parameters<'a>(
             ("password", password),
             ("domain", domain),
             ("security", "any"),
-            // TODO(#53): pin the certificate on first use instead.
-            ("ignore-cert", "true"),
+            // FreeRDP accepts this certificate and no other (`sha256:AA:BB:…`).
+            ("cert-fingerprints", certificate),
             ("client-name", "remotehub"),
             // The session's input language on Windows follows it too.
             (
@@ -196,7 +200,42 @@ async fn run(
         }
     };
 
-    // 3. Connect through guacd.
+    // 3. RDP: the certificate the device presents must be the pinned one,
+    // or becomes it (trust on first use, like SSH host keys).
+    let certificate = if target.protocol == "rdp" {
+        let port = u16::try_from(target.port).unwrap_or(3389);
+        match rdp::certificate_fingerprint(&target.host, port, PROBE_TIMEOUT).await {
+            Ok(presented) => match &target.certificate_fingerprint {
+                Some(pinned) if *pinned != presented => {
+                    let problem = Problem::new(ErrorCode::CertificateChanged)
+                        .param("expected", pinned.as_str())
+                        .param("presented", presented.as_str());
+                    fail(&mut socket, &state, &session, &target, &problem, &address).await;
+                    return;
+                }
+                _ => Some(presented),
+            },
+            Err(error) => {
+                tracing::warn!(device = %target.id, %error, "RDP certificate probe failed");
+                let problem = Problem::new(match error {
+                    ProbeError::NoTls => ErrorCode::TlsRequired,
+                    ProbeError::Unreachable(_) | ProbeError::Timeout => {
+                        ErrorCode::TargetUnreachable
+                    }
+                    ProbeError::Protocol(_) | ProbeError::Tls(_) => ErrorCode::ConnectionFailed,
+                });
+                fail(&mut socket, &state, &session, &target, &problem, &address).await;
+                return;
+            }
+        }
+    } else {
+        None
+    };
+    let accepted = certificate
+        .as_ref()
+        .map(|fingerprint| format!("sha256:{fingerprint}"));
+
+    // 4. Connect through guacd.
     let port = target.port.to_string();
     let zone = timezone(zone);
     let opened = {
@@ -210,6 +249,7 @@ async fn run(
             &credentials,
             password,
             &state.settings.rdp_keyboard_layout,
+            accepted.as_deref().unwrap_or_default(),
         );
         guacamole::open(
             &state.settings.guacd,
@@ -263,11 +303,21 @@ async fn run(
         ),
     )
     .await;
+    let pinned_now = match &certificate {
+        Some(fingerprint) if target.certificate_fingerprint.is_none() => {
+            pin_certificate(&state, &session, &target, fingerprint, &address).await
+        }
+        _ => false,
+    };
     tracing::info!(device = %target.id, name = %target.name, user = %session.username,
         protocol = %target.protocol, guacd = %connection.id, "display session opened");
-    send_json(&mut socket, json!({ "type": "connected" })).await;
+    send_json(
+        &mut socket,
+        json!({ "type": "connected", "certificate_fingerprint": certificate, "pinned": pinned_now }),
+    )
+    .await;
 
-    // 4. Relay until either side ends.
+    // 5. Relay until either side ends.
     let started = Instant::now();
     let outcome = relay(&mut socket, &mut connection).await;
     connection.close().await;
@@ -288,6 +338,63 @@ async fn run(
         ),
     )
     .await;
+}
+
+/// Reports a connection that did not start, to the audit log and the browser.
+async fn fail(
+    socket: &mut WebSocket,
+    state: &AppState,
+    session: &Session,
+    target: &Target,
+    problem: &Problem,
+    address: &str,
+) {
+    let _ = audit::record(
+        &state.db,
+        entry(
+            session,
+            Action::ConnectionFailed,
+            target.id,
+            json!({ "protocol": target.protocol, "reason": problem.code, "host": target.host }),
+            address,
+        ),
+    )
+    .await;
+    send_problem(socket, problem).await;
+}
+
+/// Pins the certificate of the device's first connection; false if another
+/// connection was first.
+async fn pin_certificate(
+    state: &AppState,
+    session: &Session,
+    target: &Target,
+    fingerprint: &str,
+    address: &str,
+) -> bool {
+    let pinned = sqlx::query(
+        "UPDATE devices SET certificate_fingerprint = $2, certificate_pinned_at = now()
+         WHERE id = $1 AND certificate_fingerprint IS NULL",
+    )
+    .bind(target.id)
+    .bind(fingerprint)
+    .execute(&state.db)
+    .await
+    .is_ok_and(|r| r.rows_affected() == 1);
+    if pinned {
+        let _ = audit::record(
+            &state.db,
+            entry(
+                session,
+                Action::CertificatePinned,
+                target.id,
+                json!({ "fingerprint": fingerprint }),
+                address,
+            ),
+        )
+        .await;
+    }
+    pinned
 }
 
 #[derive(Default)]
@@ -402,6 +509,7 @@ mod tests {
             credential_id: None,
             host_key: None,
             keyboard_layout: None,
+            certificate_fingerprint: None,
         };
         let credentials = Credentials {
             username: r"EXAMPLE\alice".into(),
@@ -409,15 +517,27 @@ mod tests {
             login: Login::Password(SecretString::from("secret".to_owned())),
         };
         let value = |target: &Target, name: &str| {
-            parameters(target, "3389", &credentials, "secret", "en-us-qwerty")
-                .into_iter()
-                .find(|(key, _)| *key == name)
-                .map(|(_, value)| value.to_owned())
+            parameters(
+                target,
+                "3389",
+                &credentials,
+                "secret",
+                "en-us-qwerty",
+                "sha256:AB:CD",
+            )
+            .into_iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| value.to_owned())
         };
         assert_eq!(
             value(&target, "server-layout").as_deref(),
             Some("en-us-qwerty")
         );
+        assert_eq!(
+            value(&target, "cert-fingerprints").as_deref(),
+            Some("sha256:AB:CD")
+        );
+        assert_eq!(value(&target, "ignore-cert"), None);
         assert_eq!(value(&target, "domain").as_deref(), Some("EXAMPLE"));
         assert_eq!(value(&target, "username").as_deref(), Some("alice"));
         target.keyboard_layout = Some("de-de-qwertz".into());

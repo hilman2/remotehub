@@ -150,7 +150,8 @@ test('an RDP desktop opens in the browser', async ({ page, context }) => {
 		context.waitForEvent('page'),
 		page.getByRole('link', { name: 'Connect' }).click()
 	]);
-	await expect(desktop.getByText('Connected', { exact: true })).toBeVisible();
+	// The first connection pins the device's certificate.
+	await expect(desktop.getByText(/the certificate .* is now pinned/)).toBeVisible();
 	await expect(desktop.getByRole('application')).toBeVisible();
 
 	// The lab desktop's background (#1e5b8c) in the corner of the picture.

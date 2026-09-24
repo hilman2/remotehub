@@ -348,6 +348,25 @@
 								: m.keyboard_layout_default()}
 						</dd>
 					{/if}
+					{#if device.protocol === 'rdp'}
+						<dt class="text-ink-2">{m.device_certificate()}</dt>
+						<dd>
+							{#if device.certificate_fingerprint}
+								<span class="font-mono text-xs break-all">{device.certificate_fingerprint}</span>
+								{#if allows(device.role, 'edit')}
+									<button
+										type="button"
+										class="ml-2 text-xs text-ink-3 underline hover:text-ink"
+										onclick={() => run(resetHostKey(device.id))}
+									>
+										{m.device_forget_host_key()}
+									</button>
+								{/if}
+							{:else}
+								<span class="text-ink-2">{m.device_host_key_pending()}</span>
+							{/if}
+						</dd>
+					{/if}
 					{#if device.protocol === 'ssh'}
 						<dt class="text-ink-2">{m.device_host_key()}</dt>
 						<dd>

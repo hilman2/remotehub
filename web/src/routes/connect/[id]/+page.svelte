@@ -11,11 +11,13 @@
 	import { failureOf, type Failure } from '$lib/display/tunnel';
 	import { m } from '$lib/paraglide/messages';
 	import TerminalView from '$lib/terminal/TerminalView.svelte';
+	import type { ServerEvent as DisplayEvent } from '$lib/display/tunnel';
 	import type { Credentials, ServerEvent } from '$lib/terminal/connection';
 
 	type Status =
 		| { kind: 'connecting' }
-		| { kind: 'connected'; fingerprint: string | null; pinned: boolean }
+		/** `pinned`: SSH host key or RDP certificate, pinned by this connection. */
+		| { kind: 'connected'; fingerprint: string | null; certificate: boolean; pinned: boolean }
 		| { kind: 'closed'; exitStatus: number | null }
 		| { kind: 'lost' }
 		| { kind: 'error'; code: string; params: Record<string, unknown> }
@@ -58,12 +60,22 @@
 		if (device) document.title = `${device.name} · remotehub`;
 	});
 
-	function onevent(event: ServerEvent | { type: 'connected' }) {
+	function onevent(event: ServerEvent | DisplayEvent) {
 		if (event.type === 'connected') {
 			status =
 				'host_key_fingerprint' in event
-					? { kind: 'connected', fingerprint: event.host_key_fingerprint, pinned: event.pinned }
-					: { kind: 'connected', fingerprint: null, pinned: false };
+					? {
+							kind: 'connected',
+							fingerprint: event.host_key_fingerprint,
+							certificate: false,
+							pinned: event.pinned
+						}
+					: {
+							kind: 'connected',
+							fingerprint: event.certificate_fingerprint,
+							certificate: true,
+							pinned: event.pinned
+						};
 		} else if (event.type === 'closed') {
 			status = { kind: 'closed', exitStatus: event.exit_status };
 		} else {
@@ -157,6 +169,10 @@
 					<CircleCheck size={15} class="text-ok" aria-hidden="true" />
 					{#if status.fingerprint === null}
 						{m.display_connected()}
+					{:else if status.certificate}
+						{status.pinned
+							? m.display_certificate_pinned({ fingerprint: status.fingerprint })
+							: m.display_connected_certificate({ fingerprint: status.fingerprint })}
 					{:else if status.pinned}
 						{m.terminal_pinned({ fingerprint: status.fingerprint })}
 					{:else}
@@ -190,12 +206,14 @@
 			<p class="text-xs text-ink-3">{m.display_detail({ detail: status.detail })}</p>
 		{/if}
 
-		{#if status.kind === 'error' && status.code === 'host_key_changed'}
+		{#if status.kind === 'error' && (status.code === 'host_key_changed' || status.code === 'certificate_changed')}
 			<div class="rounded-card border border-critical/50 bg-surface p-4 text-sm" role="alert">
 				<p class="flex items-start gap-2">
 					<ShieldAlert size={18} class="mt-0.5 shrink-0 text-critical" aria-hidden="true" />
 					<span>
-						{m.terminal_host_key_changed({
+						{(status.code === 'certificate_changed'
+							? m.display_certificate_changed
+							: m.terminal_host_key_changed)({
 							name: device.name,
 							expected: param('expected'),
 							presented: param('presented')
@@ -204,7 +222,9 @@
 				</p>
 				{#if allows(device.role, 'edit')}
 					<button type="button" class="{button} mt-3" onclick={trustNewKey}>
-						{m.terminal_trust_new_key()}
+						{status.code === 'certificate_changed'
+							? m.display_trust_new_certificate()
+							: m.terminal_trust_new_key()}
 					</button>
 				{/if}
 			</div>

@@ -2173,9 +2173,12 @@ name = "remotehub-gateway"
 version = "0.1.0"
 dependencies = [
  "russh",
+ "rustls",
  "secrecy",
+ "sha2 0.11.0",
  "thiserror",
  "tokio",
+ "tokio-rustls",
  "tracing",
  "zeroize",
 ]

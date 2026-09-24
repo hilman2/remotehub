@@ -14,6 +14,7 @@ function device(id: string, name: string, host: string): Device {
 		credential_id: null,
 		description: '',
 		keyboard_layout: null,
+		certificate_fingerprint: null,
 		host_key_fingerprint: null,
 		role: 'edit'
 	};

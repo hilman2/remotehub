@@ -16,6 +16,8 @@ export const ERROR_CODES = [
 	'name_taken',
 	'folder_not_empty',
 	'host_key_changed',
+	'certificate_changed',
+	'tls_required',
 	'target_unreachable',
 	'target_auth_failed',
 	'connection_failed',

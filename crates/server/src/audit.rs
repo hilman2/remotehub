@@ -52,6 +52,8 @@ audit_actions! {
     ConnectionFailed = "connection.failed",
     HostKeyPinned = "device.host_key_pinned",
     HostKeyReset = "device.host_key_reset",
+    CertificatePinned = "device.certificate_pinned",
+    CertificateReset = "device.certificate_reset",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).

@@ -90,6 +90,14 @@ async fn instructions_until(socket: &mut Socket, needle: &str) -> String {
     seen
 }
 
+/// The lab certificate's fingerprint (deploy/testlab/desktop/README.md).
+const LAB_CERTIFICATE: &str = "C1:E8:6D:13:4E:8D:B7:A5:D2:72:01:8F:93:8F:C4:44:EC:E4:C0:D5:97:C8:00:EF:25:24:BB:76:22:0B:DF:CD";
+
+/// The server's first frame, JSON.
+async fn connected(socket: &mut Socket) -> Value {
+    serde_json::from_str(&text(socket).await).unwrap()
+}
+
 fn desktop_host() -> String {
     std::env::var("REMOTEHUB_TEST_DESKTOP_HOST")
         .expect("REMOTEHUB_TEST_DESKTOP_HOST points to the test lab")
@@ -199,10 +207,10 @@ async fn a_stored_credential_opens_an_rdp_desktop(pool: PgPool) {
         .await
         .unwrap();
     start(&mut socket, json!({})).await;
-    assert_eq!(
-        text(&mut socket).await,
-        json!({ "type": "connected" }).to_string()
-    );
+    let connected: Value = serde_json::from_str(&text(&mut socket).await).unwrap();
+    assert_eq!(connected["type"], "connected", "{connected}");
+    assert_eq!(connected["certificate_fingerprint"], LAB_CERTIFICATE);
+    assert_eq!(connected["pinned"], true);
     let seen = instructions_until(&mut socket, "3.img,").await;
     assert!(!seen.contains("Tester-Passw0rd!"));
 
@@ -247,10 +255,7 @@ async fn vnc_asks_for_the_password_and_reports_a_wrong_one(pool: PgPool) {
         .await
         .unwrap();
     start(&mut socket, json!({ "password": "Vnc-Pw1!" })).await;
-    assert_eq!(
-        text(&mut socket).await,
-        json!({ "type": "connected" }).to_string()
-    );
+    assert_eq!(connected(&mut socket).await["type"], "connected");
     instructions_until(&mut socket, "3.img,").await;
     drop(socket);
 
@@ -259,10 +264,80 @@ async fn vnc_asks_for_the_password_and_reports_a_wrong_one(pool: PgPool) {
         .await
         .unwrap();
     start(&mut socket, json!({ "password": "wrong" })).await;
-    assert_eq!(
-        text(&mut socket).await,
-        json!({ "type": "connected" }).to_string()
-    );
+    assert_eq!(connected(&mut socket).await["type"], "connected");
     let seen = instructions_until(&mut socket, "5.error,").await;
     assert!(!seen.contains("3.img,"), "{seen:.300}");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn a_changed_rdp_certificate_stops_the_connection_until_the_pin_is_forgotten(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool.clone()).await;
+    let credential = create(
+        &app,
+        &token,
+        "/api/credentials",
+        json!({ "folder_id": folder, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
+    )
+    .await;
+    let rdp = device(
+        &app,
+        &token,
+        &folder,
+        json!({ "protocol": "rdp", "port": 3389, "auth_mode": "stored", "credential_id": credential }),
+    )
+    .await;
+    let other = LAB_CERTIFICATE.replace("C1:E8", "00:00");
+    sqlx::query("UPDATE devices SET certificate_fingerprint = $1, certificate_pinned_at = now()")
+        .bind(&other)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let address = serve(state).await;
+
+    let mut socket = open(address, &rdp, &token, "display", ORIGIN)
+        .await
+        .unwrap();
+    start(&mut socket, json!({})).await;
+    let error = connected(&mut socket).await;
+    assert_eq!(error["code"], "certificate_changed", "{error}");
+    assert_eq!(error["params"]["expected"], other.as_str());
+    assert_eq!(error["params"]["presented"], LAB_CERTIFICATE);
+
+    // Someone with edit forgets the pin; the next connection pins again.
+    let forgotten = send(
+        &app,
+        crate::common::authed(
+            "DELETE",
+            &format!("/api/devices/{rdp}/host-key"),
+            None,
+            &token,
+        ),
+    )
+    .await;
+    assert_eq!(forgotten.status, 204);
+    let mut socket = open(address, &rdp, &token, "display", ORIGIN)
+        .await
+        .unwrap();
+    start(&mut socket, json!({})).await;
+    let connected = connected(&mut socket).await;
+    assert_eq!(connected["pinned"], true, "{connected}");
+    drop(socket);
+
+    let tree = send(&app, get("/api/tree", Some(&token))).await.json();
+    assert_eq!(
+        tree["devices"][0]["certificate_fingerprint"],
+        LAB_CERTIFICATE
+    );
+    let log = send(&app, get("/api/audit", Some(&token)))
+        .await
+        .json()
+        .to_string();
+    for action in [
+        "device.certificate_reset",
+        "device.certificate_pinned",
+        "connection.failed",
+    ] {
+        assert!(log.contains(action), "{action} missing");
+    }
 }

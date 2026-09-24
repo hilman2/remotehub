@@ -55,6 +55,8 @@ error_codes! {
     NameTaken = ("name_taken", CONFLICT, "The name is already taken here"),
     FolderNotEmpty = ("folder_not_empty", CONFLICT, "The folder is not empty"),
     HostKeyChanged = ("host_key_changed", CONFLICT, "The target's host key changed"),
+    CertificateChanged = ("certificate_changed", CONFLICT, "The target's certificate changed"),
+    TlsRequired = ("tls_required", BAD_GATEWAY, "The target offers RDP only without TLS"),
     TargetUnreachable = ("target_unreachable", BAD_GATEWAY, "The target is not reachable"),
     TargetAuthFailed = ("target_auth_failed", BAD_GATEWAY, "The target refused the credentials"),
     ConnectionFailed = ("connection_failed", BAD_GATEWAY, "The connection failed"),
