@@ -19,6 +19,7 @@ export const ERROR_CODES = [
 	'target_unreachable',
 	'target_auth_failed',
 	'connection_failed',
+	'own_account_unavailable',
 	'directory_unavailable',
 	'database_unavailable',
 	'internal'

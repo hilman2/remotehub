@@ -103,6 +103,7 @@ async fn serve() -> anyhow::Result<()> {
         public_origin: config.public_origin,
         session: config.session,
         admin_groups,
+        own_account_connections: config.own_account_connections,
     };
     let state = AppState::new(pool.clone(), directory, settings, vault);
     tokio::spawn(purge_sessions(pool, config.session.idle));

@@ -7,9 +7,9 @@ use axum::extract::rejection::JsonRejection;
 use axum::extract::{ConnectInfo, FromRequestParts, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::IntoResponse;
+use axum::response::{AppendHeaders, IntoResponse};
 use remotehub_directory::{AuthError, Identity};
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgExecutor;
@@ -116,6 +116,13 @@ pub async fn sign_in(
     let mut tx = state.db.begin().await?;
     let user_id = upsert_directory_user(&mut *tx, &identity).await?;
     let token = session::create(&mut *tx, user_id, &groups, state.settings.session.max).await?;
+    let mut cookies = vec![session::set_cookie(&token)];
+    if state.settings.own_account_connections {
+        let key =
+            session::keep_sign_in_password(&mut *tx, &token, password.expose_secret().as_bytes())
+                .await?;
+        cookies.push(session::set_login_key_cookie(&key));
+    }
     audit::record(
         &mut *tx,
         Entry {
@@ -142,7 +149,7 @@ pub async fn sign_in(
         groups,
     };
     let me = Me::of(&session, &state.settings);
-    Ok(([session::set_cookie(&token)], Json(me)))
+    Ok((AppendHeaders(cookies), Json(me)))
 }
 
 #[derive(Deserialize)]
@@ -232,7 +239,8 @@ pub async fn sign_in_break_glass(
         groups: Vec::new(),
     };
     let me = Me::of(&session, &state.settings);
-    Ok(([session::set_cookie(&token)], Json(me)))
+    // Break-glass accounts have no directory account to connect with.
+    Ok((AppendHeaders(vec![session::set_cookie(&token)]), Json(me)))
 }
 
 pub async fn current(State(state): State<AppState>, session: Session) -> Json<Me> {
@@ -265,7 +273,10 @@ pub async fn sign_out(
         .await?;
         tx.commit().await?;
     }
-    Ok((StatusCode::NO_CONTENT, [session::clear_cookie()]))
+    Ok((
+        StatusCode::NO_CONTENT,
+        [session::clear_cookie(), session::clear_login_key_cookie()],
+    ))
 }
 
 /// A typed user name for the audit log, cut to a sane length.
