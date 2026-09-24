@@ -269,8 +269,10 @@ job_code() {
   if [ -n "$rust_pid" ]; then wait "$rust_pid" || rust_rc=$?; fi
   if [ -n "$web_pid" ]; then wait "$web_pid" || web_rc=$?; fi
 
+  # Full runs (and changes under scripts/ci/ or to the tests themselves)
+  # include them; CI_E2E=1 forces them.
   local full=0
-  if [ "${CI_E2E:-0}" = 1 ] || ! changed_files >/dev/null 2>&1; then full=1; fi
+  if [ "${CI_E2E:-0}" = 1 ] || needed web/tests/e2e/ web/playwright.config.ts; then full=1; fi
   if [ "$full" = 1 ] && [ "$lab" = 1 ] && [ "$web" = 1 ] && [ "$rust_rc" = 0 ] && [ "$web_rc" = 0 ]; then
     in_background e2e part_e2e "$tools"
     wait "$e2e_pid" || e2e_rc=$?
