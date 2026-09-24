@@ -137,12 +137,16 @@ struct DeviceRow {
     auth_mode: String,
     credential_id: Option<Uuid>,
     description: String,
+    #[serde(skip)]
+    host_key: Option<String>,
 }
 
 #[derive(Serialize)]
 struct TreeDevice {
     #[serde(flatten)]
     device: DeviceRow,
+    /// SHA-256 fingerprint of the pinned host key, if one is pinned.
+    host_key_fingerprint: Option<String>,
     role: Role,
 }
 
@@ -173,7 +177,7 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
             .fetch_all(&state.db)
             .await?;
     let devices: Vec<DeviceRow> = sqlx::query_as(
-        "SELECT id, folder_id, name, protocol, host, port, auth_mode, credential_id, description
+        "SELECT id, folder_id, name, protocol, host, port, auth_mode, credential_id, description, host_key
          FROM devices ORDER BY lower(name)",
     )
     .fetch_all(&state.db)
@@ -201,7 +205,15 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
             .into_iter()
             .filter_map(|device| {
                 let role = *visible.roles.get(&ObjectId::Device(device.id))?;
-                Some(TreeDevice { device, role })
+                let host_key_fingerprint = device
+                    .host_key
+                    .as_deref()
+                    .and_then(remotehub_gateway::ssh::fingerprint);
+                Some(TreeDevice {
+                    device,
+                    host_key_fingerprint,
+                    role,
+                })
             })
             .collect(),
         credentials: credentials
@@ -532,7 +544,9 @@ pub async fn update_device(
     let mut tx = state.db.begin().await?;
     sqlx::query(
         "UPDATE devices SET folder_id = $2, name = $3, protocol = $4, host = $5, port = $6,
-             auth_mode = $7, credential_id = $8, description = $9, updated_at = now()
+             auth_mode = $7, credential_id = $8, description = $9, updated_at = now(),
+             host_key = CASE WHEN $10 THEN NULL ELSE host_key END,
+             host_key_pinned_at = CASE WHEN $10 THEN NULL ELSE host_key_pinned_at END
          WHERE id = $1",
     )
     .bind(id)
@@ -544,6 +558,7 @@ pub async fn update_device(
     .bind(device.auth_mode)
     .bind(device.credential_id)
     .bind(&device.description)
+    .bind(target_changed)
     .execute(&mut *tx)
     .await
     .map_err(database)?;
@@ -586,6 +601,42 @@ pub async fn delete_device(
             Action::DeviceDeleted,
             ObjectId::Device(id),
             json!({}),
+            &address,
+        ),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Forgets the pinned host key, so the next connection pins the key the
+/// target presents then — after a deliberate key change on the target.
+pub async fn reset_host_key(
+    State(state): State<AppState>,
+    session: Session,
+    ClientAddress(address): ClientAddress,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, Problem> {
+    let (subject, catalog) = context(&state, &session).await?;
+    require(&catalog, &subject, Role::Edit, ObjectId::Device(id))?;
+    let mut tx = state.db.begin().await?;
+    let old: Option<String> = sqlx::query_scalar(
+        "UPDATE devices d SET host_key = NULL, host_key_pinned_at = NULL
+         FROM (SELECT host_key FROM devices WHERE id = $1) old
+         WHERE d.id = $1 RETURNING old.host_key",
+    )
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let details =
+        json!({ "fingerprint": old.as_deref().and_then(remotehub_gateway::ssh::fingerprint) });
+    audit::record(
+        &mut *tx,
+        entry(
+            &session,
+            Action::HostKeyReset,
+            ObjectId::Device(id),
+            details,
             &address,
         ),
     )

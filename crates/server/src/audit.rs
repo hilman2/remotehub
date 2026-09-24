@@ -47,6 +47,11 @@ audit_actions! {
     CredentialDeleted = "credential.deleted",
     GrantAdded = "grant.added",
     GrantRemoved = "grant.removed",
+    ConnectionOpened = "connection.opened",
+    ConnectionClosed = "connection.closed",
+    ConnectionFailed = "connection.failed",
+    HostKeyPinned = "device.host_key_pinned",
+    HostKeyReset = "device.host_key_reset",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).

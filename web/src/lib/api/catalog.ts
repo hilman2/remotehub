@@ -31,6 +31,8 @@ export interface Device {
 	auth_mode: AuthMode;
 	credential_id: string | null;
 	description: string;
+	/** SHA-256 fingerprint of the pinned host key (SSH), if pinned. */
+	host_key_fingerprint: string | null;
 	role: Role;
 }
 
@@ -107,6 +109,8 @@ export const createDevice = (input: DeviceInput) =>
 export const updateDevice = (id: string, input: DeviceInput) =>
 	api('PUT', `/api/devices/${id}`, input);
 export const deleteDevice = (id: string) => api('DELETE', `/api/devices/${id}`);
+/** Forgets the pinned host key; the next connection pins the key presented then. */
+export const resetHostKey = (id: string) => api('DELETE', `/api/devices/${id}/host-key`);
 
 export const createCredential = (input: CredentialInput) =>
 	api<{ id: string }>('POST', '/api/credentials', input);

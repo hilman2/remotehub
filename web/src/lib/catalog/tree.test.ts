@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Device, Tree } from '$lib/api/catalog';
+import { allows, type Device, type Tree } from '$lib/api/catalog';
 import { filter, nest, pathTo } from './tree';
 
 function device(id: string, name: string, host: string): Device {
@@ -13,6 +13,7 @@ function device(id: string, name: string, host: string): Device {
 		auth_mode: 'ask',
 		credential_id: null,
 		description: '',
+		host_key_fingerprint: null,
 		role: 'edit'
 	};
 }
@@ -74,8 +75,7 @@ describe('pathTo', () => {
 });
 
 describe('allows', () => {
-	it('orders the roles', async () => {
-		const { allows } = await import('$lib/api/catalog');
+	it('orders the roles', () => {
 		expect(allows('edit', 'connect')).toBe(true);
 		expect(allows('connect', 'edit')).toBe(false);
 		expect(allows(null, 'list')).toBe(false);

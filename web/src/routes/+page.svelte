@@ -7,6 +7,7 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import Search from '@lucide/svelte/icons/search';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
+	import { resolve } from '$app/paths';
 	import {
 		allows,
 		createCredential,
@@ -17,6 +18,7 @@
 		deleteFolder,
 		loadTree,
 		renameFolder,
+		resetHostKey,
 		updateCredential,
 		updateDevice,
 		type Credential,
@@ -331,6 +333,25 @@
 							</span>
 						{/if}
 					</dd>
+					{#if device.protocol === 'ssh'}
+						<dt class="text-ink-2">{m.device_host_key()}</dt>
+						<dd>
+							{#if device.host_key_fingerprint}
+								<span class="font-mono text-xs break-all">{device.host_key_fingerprint}</span>
+								{#if allows(device.role, 'edit')}
+									<button
+										type="button"
+										class="ml-2 text-xs text-ink-3 underline hover:text-ink"
+										onclick={() => run(resetHostKey(device.id))}
+									>
+										{m.device_forget_host_key()}
+									</button>
+								{/if}
+							{:else}
+								<span class="text-ink-2">{m.device_host_key_pending()}</span>
+							{/if}
+						</dd>
+					{/if}
 					{#if device.description}
 						<dt class="text-ink-2">{m.field_description()}</dt>
 						<dd class="whitespace-pre-line">{device.description}</dd>
@@ -341,14 +362,28 @@
 				</p>
 				<div class="mt-5 flex flex-wrap gap-2">
 					{#if allows(device.role, 'connect')}
-						<button
-							type="button"
-							disabled
-							class="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink disabled:opacity-50"
-						>
-							<Plug size={16} aria-hidden="true" />
-							{m.device_connect()}
-						</button>
+						{#if device.protocol === 'ssh'}
+							<!-- A browser tab per session: several sessions side by side for free. -->
+							<a
+								href={resolve('/connect/[id]', { id: device.id })}
+								target="_blank"
+								rel="noopener"
+								class="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink"
+							>
+								<Plug size={16} aria-hidden="true" />
+								{m.device_connect()}
+							</a>
+						{:else}
+							<button
+								type="button"
+								disabled
+								title={m.terminal_ssh_only()}
+								class="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink disabled:opacity-50"
+							>
+								<Plug size={16} aria-hidden="true" />
+								{m.device_connect()}
+							</button>
+						{/if}
 					{/if}
 					{#if allows(device.role, 'edit')}
 						<button

@@ -6,6 +6,7 @@ mod health;
 mod origin;
 pub mod problem;
 pub mod session;
+mod terminal;
 
 use axum::Router;
 use axum::middleware;
@@ -35,6 +36,8 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/devices/{id}",
             put(catalog::update_device).delete(catalog::delete_device),
         )
+        .route("/devices/{id}/terminal", get(terminal::terminal))
+        .route("/devices/{id}/host-key", delete(catalog::reset_host_key))
         .route("/credentials", post(catalog::create_credential))
         .route(
             "/credentials/{id}",

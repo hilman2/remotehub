@@ -123,7 +123,13 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   and a pinned version. It links GPL-licensed libvncclient and therefore stays a separate process.
 - guacd 1.6 authenticates RDP with NTLM only; Kerberos arrives with guacd 1.7 (GUACAMOLE-2057). Members of
   *Protected Users* and domains without NTLM are not supported until then.
-- RDP certificates and SSH host keys are pinned on first use; a change aborts the connection.
+- RDP certificates and SSH host keys are pinned on first use; a change aborts the connection and shows both
+  fingerprints. Someone with `edit` on the device can forget the pin (audited); changing its host, port or
+  protocol forgets it too.
+- **SSH WebSocket** (`/api/devices/{id}/terminal`): the handshake needs the session cookie, the own `Origin`
+  (against cross-site WebSocket hijacking) and `connect`. The first frame gives the terminal size and, for
+  devices that ask, the credentials for this connection only; then binary frames carry keystrokes and output.
+  Every connection is audited as opened, closed (duration, bytes, exit code) or failed.
 - All engines sit behind the trait `ProtocolEngine`, so an own RDP engine (IronRDP) can replace guacd later
   without changing API or UI.
 
