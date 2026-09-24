@@ -160,5 +160,22 @@
 	"audit_connection_failed": "Verbindung fehlgeschlagen",
 	"audit_device_host_key_pinned": "Host-Schlüssel hinterlegt",
 	"audit_device_host_key_reset": "Host-Schlüssel vergessen",
-	"error_own_account_unavailable": "Das Anmeldepasswort steht in dieser Sitzung nicht zur Verfügung. Bitte neu anmelden — oder die Funktion ist hier abgeschaltet."
+	"error_own_account_unavailable": "Das Anmeldepasswort steht in dieser Sitzung nicht zur Verfügung. Bitte neu anmelden — oder die Funktion ist hier abgeschaltet.",
+	"credential_kind": "Art",
+	"credential_kind_password": "Passwort",
+	"credential_kind_ssh_key": "SSH-Schlüssel",
+	"field_private_key": "Privater Schlüssel",
+	"field_passphrase": "Passphrase",
+	"field_certificate": "OpenSSH-Benutzerzertifikat (optional)",
+	"field_key_keep": "Leer lassen, um Schlüssel, Passphrase und Zertifikat zu behalten.",
+	"credential_key": "Schlüssel",
+	"credential_certificate": "Zertifikat",
+	"credential_certificate_yes": "OpenSSH-Benutzerzertifikat",
+	"credential_certificate_no": "Keins",
+	"credential_key_hidden": "Der private Schlüssel liegt verschlüsselt vor und wird für Verbindungen genutzt, ohne ihn anzuzeigen.",
+	"error_field_private_key": "Das ist kein privater Schlüssel im OpenSSH- oder PEM-Format.",
+	"error_field_passphrase": "Die Passphrase des Schlüssels fehlt oder ist falsch.",
+	"error_field_certificate": "Das Zertifikat ist kein OpenSSH-Benutzerzertifikat zu diesem Schlüssel.",
+	"field_load_private_key": "Schlüssel aus Datei laden",
+	"field_load_certificate": "Zertifikat aus Datei laden"
 }

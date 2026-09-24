@@ -8,9 +8,15 @@ RUN apt-get update \
   && ssh-keygen -A
 
 RUN useradd --create-home --shell /bin/bash tester \
-  && echo 'tester:Tester-Passw0rd!' | chpasswd
-COPY --chown=tester:tester --chmod=600 tester_ed25519.pub /home/tester/.ssh/authorized_keys
-RUN chmod 700 /home/tester/.ssh
+  && echo 'tester:Tester-Passw0rd!' | chpasswd \
+  && mkdir -p /home/tester/.ssh
+COPY tester_ed25519.pub tester_ed25519_passphrase.pub /tmp/keys/
+RUN cat /tmp/keys/*.pub >/home/tester/.ssh/authorized_keys \
+  && rm -rf /tmp/keys \
+  && chown -R tester:tester /home/tester/.ssh \
+  && chmod 700 /home/tester/.ssh \
+  && chmod 600 /home/tester/.ssh/authorized_keys
+COPY user_ca.pub /etc/ssh/remotehub-testlab-user-ca.pub
 COPY sshd.conf /etc/ssh/sshd_config.d/remotehub-testlab.conf
 
 EXPOSE 22
