@@ -300,5 +300,8 @@
 	"error_connector_in_use": "Über diesen Konnektor werden noch Geräte erreicht.",
 	"error_connector_offline": "Der Konnektor des Geräts ist nicht verbunden.",
 	"audit_connector_created": "Standort-Konnektor angelegt",
-	"audit_connector_deleted": "Standort-Konnektor gelöscht"
+	"audit_connector_deleted": "Standort-Konnektor gelöscht",
+	"search_results": "Suchergebnisse",
+	"search_frequent": "Häufig genutzt",
+	"vault_search": "Einträge suchen"
 }

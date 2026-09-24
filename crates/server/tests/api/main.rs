@@ -16,6 +16,7 @@ mod generated;
 mod http;
 mod personal;
 mod requests;
+mod search;
 mod secrets;
 mod session;
 mod terminal;

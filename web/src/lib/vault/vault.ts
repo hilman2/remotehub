@@ -4,6 +4,7 @@
  * the storage). The vault key lives only in memory while unlocked.
  */
 import { api } from '$lib/api/client';
+import type { Pick } from '$lib/search/rank';
 import {
 	PBKDF2_ITERATIONS,
 	fromBase64,
@@ -34,7 +35,15 @@ export interface StoredVault {
 	scheme: string;
 	unlocks: Unlock[];
 	entries: { id: string; nonce: string; ciphertext: string }[];
+	/** What the owner picked after searching, sealed; null before the first pick. */
+	search: { nonce: string; ciphertext: string } | null;
 }
+
+/**
+ * The associated data of the sealed picks: not an entry's UUID, so neither
+ * can be passed off as the other.
+ */
+const SEARCH_ID = 'search';
 
 export interface EntryContent {
 	title: string;
@@ -250,6 +259,31 @@ export async function readEntries(key: CryptoKey, vault: StoredVault): Promise<E
 			}
 		})
 	);
+}
+
+/** The owner's picks (#81); none if there are none yet or they do not open. */
+export async function readPicks(key: CryptoKey, vault: StoredVault): Promise<Pick[]> {
+	if (!vault.search) return [];
+	try {
+		const content = (await open(
+			key,
+			SEARCH_ID,
+			fromBase64(vault.search.nonce),
+			fromBase64(vault.search.ciphertext)
+		)) as { picks?: unknown };
+		return Array.isArray(content.picks) ? (content.picks as Pick[]) : [];
+	} catch {
+		return [];
+	}
+}
+
+/** Seals the picks and stores them in place of the last ones. */
+export async function savePicks(key: CryptoKey, picks: Pick[]) {
+	const { nonce, ciphertext } = await seal(key, SEARCH_ID, { picks });
+	return api('PUT', '/api/personal/search', {
+		nonce: toBase64(nonce),
+		ciphertext: toBase64(ciphertext)
+	});
 }
 
 /** Encrypts and stores an entry; a new one gets a new ID. */
