@@ -32,7 +32,7 @@ Everything goes through the GitHub workflow of the public repository `hilman2/re
    - There are no Actions workflows; self-hosted runners were rejected (tenderhub #106).
    - **PRs from forks:** read the diff before running `lokal.sh --pr N` — the CI mounts the Docker socket.
 3. **Close the issue after merging** ("Closes #N" does it; otherwise `gh issue close N --comment "Done in #PR."`).
-4. **Delivery only as a release.** The version lives in the workspace `Cargo.toml` and is bumped in its own PR; then `bash scripts/ci/release.sh X.Y.Z` (arrives with M2).
+4. **Delivery only as a release.** The version lives in the workspace `Cargo.toml` and in `deploy/ops/.env.example` (`REMOTEHUB_VERSION`); both are bumped in their own PR. Then, on the merged `main` with a green `lokal`: `bash scripts/ci/release.sh X.Y.Z` (`--dry-run` builds and tries without publishing). It pushes both images to GHCR and creates the GitHub release with the ops package; it needs `docker login ghcr.io` with a token that may write packages.
 
 In Git Bash, Claude sessions lack the Unix PATH: `gh` is at `/c/Program Files/GitHub CLI/gh.exe`, and `lokal.sh` needs it on the PATH: `export PATH="$PATH:/c/Program Files/GitHub CLI"`.
 

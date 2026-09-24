@@ -105,9 +105,7 @@ job_base() {
 
 # The production images (deploy/Dockerfile, deploy/guacd) with the ops
 # package (deploy/ops), tried the way an installation uses them: see
-# scripts/ci/image-check.sh. The ops directory is copied into the run's
-# volume, whose path the Docker daemon sees too: compose bind-mounts the
-# secrets from it.
+# scripts/ci/image-check.sh, which the release script runs alike.
 job_image() {
   if ! needed "${IMAGE_INPUTS[@]}"; then
     echo "skipped: nothing under ${IMAGE_INPUTS[*]} changed"
@@ -116,14 +114,7 @@ job_image() {
   local tools version
   tools="$(ci_image scripts/ci/tools.Dockerfile)"
   version="$(git -C "$CI_WURZEL" show "${CI_SHA}:Cargo.toml" | sed -n 's/^version = "\(.*\)"/\1/p' | head -n 1)"
-  ci_docker_run "$tools" bash -euo pipefail -c '
-    echo "── docker build (version $1)"
-    docker build --quiet --file deploy/Dockerfile --build-arg VERSION="$1" --tag remotehub-ci-image:ci .
-    docker build --quiet --tag remotehub-ci-guacd:ci deploy/guacd
-    cp -r deploy/ops .image-check
-    REMOTEHUB_IMAGE=remotehub-ci-image GUACD_IMAGE=remotehub-ci-guacd REMOTEHUB_VERSION=ci \
-      EXPECT_VERSION="$1" bash scripts/ci/image-check.sh "${PWD}/.image-check"
-  ' _ "$version"
+  ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" remotehub-ci-image remotehub-ci-guacd ci
 }
 
 # Runs a script in the Rust tools container with the cargo caches, a fresh

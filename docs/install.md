@@ -9,9 +9,12 @@ for it, and a service account in Active Directory that may read users and groups
 
 ## Install
 
-Copy `deploy/ops` of the release you want to the host, e.g. to `/opt/remotehub`, and prepare it as root:
+Download the ops package `remotehub-ops-X.Y.Z.tar.gz` of the
+[release](https://github.com/hilman2/remotehub/releases) you want, unpack it on the host (it holds the
+directory `remotehub`) and prepare it as root:
 
 ```bash
+sudo tar -xzf remotehub-ops-0.1.0.tar.gz -C /opt
 cd /opt/remotehub
 sudo sh init.sh
 ```

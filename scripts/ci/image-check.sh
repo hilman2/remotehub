@@ -1,21 +1,32 @@
 #!/usr/bin/env bash
-# Tries the production images with the ops package the way an installation
-# uses them: init.sh, docker compose up, then checks the running stack.
-# Used by the local CI (job `image`) and by the release script.
+# Builds the production images from the source in the current directory and
+# tries them with the ops package the way an installation uses them:
+# init.sh, docker compose up, then checks on the running stack. The local CI
+# (job `image`) and the release script run it alike.
 #
-#   image-check.sh DIR
+#   image-check.sh VERSION REMOTEHUB_IMAGE GUACD_IMAGE TAG [docker build options]
 #
-# DIR is a fresh copy of deploy/ops at a path that the Docker daemon sees
-# under the same name, since compose bind-mounts the secrets from there.
-# The environment names the images: REMOTEHUB_IMAGE and GUACD_IMAGE
-# (repositories), REMOTEHUB_VERSION (their tag), EXPECT_VERSION (what
-# /api/health must report). Run it in a container: it joins the stack's
-# network to reach the services.
+# VERSION is the release (Cargo.toml), which /api/health must report; both
+# images are tagged TAG. Run it in a container, in a directory that the
+# Docker daemon sees under the same path (the run's volume, see
+# gemeinsam.sh): compose bind-mounts the secrets from there, and the
+# container joins the stack's network to reach the services.
 set -euo pipefail
 
-dir="$1"
-: "${REMOTEHUB_IMAGE:?}" "${GUACD_IMAGE:?}" "${REMOTEHUB_VERSION:?}" "${EXPECT_VERSION:?}"
-export REMOTEHUB_IMAGE GUACD_IMAGE REMOTEHUB_VERSION
+version="$1" image="$2" guacd="$3" tag="$4"
+shift 4
+
+echo "── docker build (version ${version})"
+docker build --quiet "$@" --file deploy/Dockerfile --build-arg VERSION="$version" --tag "${image}:${tag}" .
+# The source label links the package on GHCR to the repository.
+docker build --quiet "$@" --tag "${guacd}:${tag}" \
+  --label org.opencontainers.image.source=https://github.com/hilman2/remotehub \
+  --label "org.opencontainers.image.version=${version}" deploy/guacd
+
+dir="${PWD}/.image-check"
+rm -rf "$dir"
+cp -r deploy/ops "$dir"
+export REMOTEHUB_IMAGE="$image" GUACD_IMAGE="$guacd" REMOTEHUB_VERSION="$tag"
 export REMOTEHUB_PUBLIC_URL=http://localhost:8080
 # The checks go through the stack's network; any free port on the host.
 export REMOTEHUB_PORT=0
@@ -64,7 +75,7 @@ fi
 echo "── remotehub answers"
 health="$(curl -fsS "http://${remotehub}:8080/api/health")" || fail "/api/health"
 echo "$health"
-grep -q "\"version\":\"${EXPECT_VERSION}\"" <<<"$health" || fail "version is not ${EXPECT_VERSION}"
+grep -q "\"version\":\"${version}\"" <<<"$health" || fail "version is not ${version}"
 grep -q '"database":"ok"' <<<"$health" || fail "the database is not reachable"
 curl -fsS "http://${remotehub}:8080/" | grep -q '<html' || fail "the web UI is not served"
 curl -fsS "http://${remotehub}:8080/devices/any" | grep -q '<html' ||
