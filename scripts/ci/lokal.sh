@@ -26,10 +26,10 @@ E2E_IMAGE="mcr.microsoft.com/playwright:v1.63.0-noble"
 # What each part depends on (path prefixes). scripts/ci/ counts for all.
 RUST_INPUTS=(crates/ migrations/ Cargo.toml Cargo.lock rust-toolchain.toml deploy/dev/rust.Dockerfile)
 WEB_INPUTS=(web/ deploy/dev/web.Dockerfile)
-LAB_INPUTS=("${RUST_INPUTS[@]}" deploy/testlab/ deploy/guacd/)
+LAB_INPUTS=("${RUST_INPUTS[@]}" deploy/testlab/ deploy/guacd/ deploy/browser/)
 # The production images build a release binary; they are tried when they or
 # the ops package change, and in full runs (every commit on main, releases).
-IMAGE_INPUTS=(deploy/Dockerfile .dockerignore deploy/ops/ deploy/guacd/)
+IMAGE_INPUTS=(deploy/Dockerfile .dockerignore deploy/ops/ deploy/guacd/ deploy/browser/)
 
 # Files changed between the merge base with main and the commit under test.
 # Fails when everything has to run: CI_FULL=1, no merge base, or a commit
@@ -78,7 +78,7 @@ job_base() {
     echo "── Rust version"
     wanted="$(sed -n "s/^channel = \"\(.*\)\"/\1/p" rust-toolchain.toml)"
     echo "rust-toolchain.toml: ${wanted}"
-    for file in scripts/ci/tools.Dockerfile deploy/dev/rust.Dockerfile deploy/Dockerfile; do
+    for file in scripts/ci/tools.Dockerfile deploy/dev/rust.Dockerfile deploy/Dockerfile deploy/browser/Dockerfile; do
       grep -q "^FROM rust:${wanted}-" "$file" || {
         echo "${file} does not use rust:${wanted}"
         exit 1
@@ -103,7 +103,7 @@ job_base() {
   '
 }
 
-# The production images (deploy/Dockerfile, deploy/guacd) with the ops
+# The production images (deploy/Dockerfile, deploy/guacd, deploy/browser) with the ops
 # package (deploy/ops), tried the way an installation uses them: see
 # scripts/ci/image-check.sh, which the release script runs alike.
 job_image() {
@@ -114,7 +114,8 @@ job_image() {
   local tools version
   tools="$(ci_image scripts/ci/tools.Dockerfile)"
   version="$(git -C "$CI_WURZEL" show "${CI_SHA}:Cargo.toml" | sed -n 's/^version = "\(.*\)"/\1/p' | head -n 1)"
-  ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" remotehub-ci-image remotehub-ci-guacd ci
+  ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" remotehub-ci-image remotehub-ci-guacd \
+    remotehub-ci-browser-image ci
 }
 
 # Runs a script in the Rust tools container with the cargo caches, a fresh
@@ -138,6 +139,8 @@ cargo_run() { # tools script
     -e REMOTEHUB_TEST_SSH_HOST=ssh-target \
     -e REMOTEHUB_TEST_GUACD=guacd:4822 \
     -e REMOTEHUB_TEST_DESKTOP_HOST=desktop-target \
+    -e REMOTEHUB_TEST_BROWSER=browser:4823 \
+    -e REMOTEHUB_TEST_WEB_HOST=web-target \
     "$1" bash -euo pipefail -c "
       rsync -rlc --delete \\
         --exclude=/web/node_modules/ --exclude=/web/.svelte-kit/ \\
@@ -188,17 +191,25 @@ start_lab() { # tools
     docker build --quiet --tag remotehub-ci-testlab-dc deploy/testlab/dc
     docker build --quiet --tag remotehub-ci-testlab-ssh deploy/testlab/ssh
     docker build --quiet --tag remotehub-ci-testlab-desktop deploy/testlab/desktop
+    docker build --quiet --tag remotehub-ci-testlab-web deploy/testlab/web
     docker build --quiet --tag remotehub-ci-guacd deploy/guacd
+    docker build --quiet --tag remotehub-ci-browser --file deploy/browser/Dockerfile .
   ' >/dev/null
   ci_dienst dc --hostname dc --network-alias dc.remotehub.test remotehub-ci-testlab-dc
   ci_dienst ssh-target --hostname ssh-target remotehub-ci-testlab-ssh
   ci_dienst desktop-target --hostname desktop-target remotehub-ci-testlab-desktop
+  ci_dienst web-target --hostname web-target remotehub-ci-testlab-web
   ci_dienst guacd --read-only --tmpfs /tmp --tmpfs /home/guacd:uid=1000,mode=0700 \
     --cap-drop ALL --security-opt no-new-privileges remotehub-ci-guacd
+  # As deploy/ops/compose.yml runs it: Chromium's sandbox needs seccomp:unconfined.
+  ci_dienst browser --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
+    --security-opt seccomp=unconfined remotehub-ci-browser
   ci_warten dc 60 bash -c '</dev/tcp/127.0.0.1/636'
   ci_warten ssh-target 30 bash -c '</dev/tcp/127.0.0.1/22'
   ci_warten desktop-target 30 bash -c '</dev/tcp/127.0.0.1/3389 && </dev/tcp/127.0.0.1/5900'
+  ci_warten web-target 30 bash -c '</dev/tcp/127.0.0.1/443 && </dev/tcp/127.0.0.1/8080'
   ci_warten guacd 30 bash -c '</dev/tcp/127.0.0.1/4822'
+  ci_warten browser 30 bash -c '</dev/tcp/127.0.0.1/4823'
 }
 
 # User interface: types, formatting and lint, tests (including the

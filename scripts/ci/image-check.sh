@@ -4,17 +4,17 @@
 # init.sh, docker compose up, then checks on the running stack. The local CI
 # (job `image`) and the release script run it alike.
 #
-#   image-check.sh VERSION REMOTEHUB_IMAGE GUACD_IMAGE TAG [docker build options]
+#   image-check.sh VERSION REMOTEHUB_IMAGE GUACD_IMAGE BROWSER_IMAGE TAG [docker build options]
 #
-# VERSION is the release (Cargo.toml), which /api/health must report; both
+# VERSION is the release (Cargo.toml), which /api/health must report; all
 # images are tagged TAG. Run it in a container, in a directory that the
 # Docker daemon sees under the same path (the run's volume, see
 # gemeinsam.sh): compose bind-mounts the secrets from there, and the
 # container joins the stack's network to reach the services.
 set -euo pipefail
 
-version="$1" image="$2" guacd="$3" tag="$4"
-shift 4
+version="$1" image="$2" guacd="$3" browser_image="$4" tag="$5"
+shift 5
 
 echo "── docker build (version ${version})"
 docker build --quiet "$@" --file deploy/Dockerfile --build-arg VERSION="$version" --tag "${image}:${tag}" .
@@ -22,11 +22,13 @@ docker build --quiet "$@" --file deploy/Dockerfile --build-arg VERSION="$version
 docker build --quiet "$@" --tag "${guacd}:${tag}" \
   --label org.opencontainers.image.source=https://github.com/hilman2/remotehub \
   --label "org.opencontainers.image.version=${version}" deploy/guacd
+docker build --quiet "$@" --file deploy/browser/Dockerfile --build-arg VERSION="$version" \
+  --tag "${browser_image}:${tag}" .
 
 dir="${PWD}/.image-check"
 rm -rf "$dir"
 cp -r deploy/ops "$dir"
-export REMOTEHUB_IMAGE="$image" GUACD_IMAGE="$guacd" REMOTEHUB_VERSION="$tag"
+export REMOTEHUB_IMAGE="$image" GUACD_IMAGE="$guacd" BROWSER_IMAGE="$browser_image" REMOTEHUB_VERSION="$tag"
 export REMOTEHUB_PUBLIC_URL=http://localhost:8080
 # The checks go through the stack's network; any free port on the host.
 export REMOTEHUB_PORT=0
@@ -97,6 +99,25 @@ db_networks="$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks
   fail "the database's network has a way out"
 guacd="$(address guacd default)"
 timeout 3 bash -c "</dev/tcp/${guacd}/4822" || fail "guacd is not reachable"
+container="$(docker compose -p "$project" ps -q browser)"
+[ "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$container")" = true ] || fail "the browser's file system is writable"
+users="$(docker top "$container" -o pid,uid | awk 'NR > 1 { print $2 }' | sort -u)"
+[ "$users" = 10001 ] || fail "processes in the browser service run as: ${users}"
+
+echo "── The browser service opens a page"
+# Chromium starts with its sandbox only as compose.yml runs it. Asked for a
+# page on remotehub's plain HTTP port, it shows its error page: the agent
+# answers ready, then page_error. A Chromium that did not start answers
+# something else.
+open_page() { # browser
+  exec 3<>"/dev/tcp/$1/4823"
+  printf '%s\n' '{"host":"remotehub","port":8080,"spki":"AAAA","width":800,"height":600,"login":{"username":"x","password":"x"}}' >&3
+  head -n 2 <&3
+}
+answer="$(timeout 60 bash -c "$(declare -f open_page); open_page $(address browser default)")" || true
+echo "$answer"
+grep -q '"type":"ready"' <<<"$answer" && grep -q '"reason":"page_error"' <<<"$answer" ||
+  fail "the browser service did not show a page"
 
 echo "── CLI with the secrets"
 docker compose -p "$project" exec -T remotehub remotehub break-glass create check >/dev/null ||
@@ -142,4 +163,4 @@ docker compose -p "$project" exec -T remotehub remotehub verify-audit >/dev/null
 
 docker network disconnect "$network" "$(hostname)"
 docker compose -p "$project" down -v
-echo "images ok: ${REMOTEHUB_IMAGE}:${REMOTEHUB_VERSION}, ${GUACD_IMAGE}:${REMOTEHUB_VERSION}"
+echo "images ok: ${REMOTEHUB_IMAGE}:${REMOTEHUB_VERSION}, ${GUACD_IMAGE}:${REMOTEHUB_VERSION}, ${BROWSER_IMAGE}:${REMOTEHUB_VERSION}"

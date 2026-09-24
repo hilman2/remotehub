@@ -2,6 +2,7 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import FolderClosed from '@lucide/svelte/icons/folder-closed';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
+	import Globe from '@lucide/svelte/icons/globe';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import Monitor from '@lucide/svelte/icons/monitor';
 	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
@@ -88,6 +89,8 @@
 					>
 						{#if device.protocol === 'ssh'}
 							<SquareTerminal size={16} class="shrink-0 text-ink-2" aria-hidden="true" />
+						{:else if device.protocol === 'https'}
+							<Globe size={16} class="shrink-0 text-ink-2" aria-hidden="true" />
 						{:else}
 							<Monitor size={16} class="shrink-0 text-ink-2" aria-hidden="true" />
 						{/if}

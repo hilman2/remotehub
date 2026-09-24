@@ -13,6 +13,7 @@ name = "remotehub"
 path = "src/main.rs"
 
 [dependencies]
+remotehub-browser.workspace = true
 remotehub-directory.workspace = true
 remotehub-gateway.workspace = true
 remotehub-i18n.workspace = true

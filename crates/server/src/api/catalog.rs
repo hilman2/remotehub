@@ -423,6 +423,7 @@ impl DeviceInput {
             "ssh" => "ssh",
             "rdp" => "rdp",
             "vnc" => "vnc",
+            "https" => "https",
             _ => return Err(invalid("protocol")),
         };
         let auth_mode = match self.auth_mode.as_str() {
@@ -431,8 +432,9 @@ impl DeviceInput {
             "own" => "own",
             // Certificates are SSH's own; RDP and VNC know nothing like it.
             "certificate" if protocol == "ssh" => "certificate",
-            // VNC has its own password, which LAPS does not keep.
-            "laps" if protocol != "vnc" => "laps",
+            // LAPS keeps the password of a computer's local administrator:
+            // not VNC's own password, nor a web interface's.
+            "laps" if protocol == "ssh" || protocol == "rdp" => "laps",
             _ => return Err(invalid("auth_mode")),
         };
         // A stored credential is exactly what "stored" means, and nothing else.

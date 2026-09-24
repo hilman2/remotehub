@@ -7,7 +7,7 @@
 # 1. The head of origin/main is checked out and clean, Cargo.toml and
 #    deploy/ops/.env.example name the version, and vVERSION is new.
 # 2. The commit has the status `lokal`: success (bash scripts/ci/lokal.sh).
-# 3. Both images are built from the commit and tried with the ops package
+# 3. The images are built from the commit and tried with the ops package
 #    in a fresh compose project (scripts/ci/image-check.sh).
 # 4. The images go to GHCR, and a GitHub release vVERSION gets generated
 #    notes and the ops package as remotehub-ops-VERSION.tar.gz.
@@ -23,6 +23,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/gemeinsam.sh"
 REGISTRY="ghcr.io/hilman2"
 IMAGE="${REGISTRY}/remotehub"
 GUACD_IMAGE="${REGISTRY}/remotehub-guacd"
+BROWSER_IMAGE="${REGISTRY}/remotehub-browser"
 
 version="${1:-}"
 dry_run=0
@@ -75,28 +76,30 @@ ci_umgebung
 echo "── Build and try the images"
 tools="$(ci_image scripts/ci/tools.Dockerfile)"
 # --pull: the base images as they are today, not as the build cache has them.
-ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" "$IMAGE" "$GUACD_IMAGE" "$version" --pull
+ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" "$IMAGE" "$GUACD_IMAGE" "$BROWSER_IMAGE" \
+  "$version" --pull
 
 ops="${CI_ABLAGE}/remotehub-ops-${version}.tar.gz"
 git archive --format=tar.gz --prefix=remotehub/ -o "$ops" "${CI_SHA}:deploy/ops"
 echo "ops package: ${ops}"
 
 if [ "$dry_run" = 1 ]; then
-  echo "✓ dry run: ${IMAGE}:${version} and ${GUACD_IMAGE}:${version} built and tried, nothing published"
+  echo "✓ dry run: ${IMAGE}:${version}, ${GUACD_IMAGE}:${version} and ${BROWSER_IMAGE}:${version} built and tried, nothing published"
   exit 0
 fi
 
 echo "── Publish"
 docker push -q "${IMAGE}:${version}"
 docker push -q "${GUACD_IMAGE}:${version}"
-notes="Images: \`${IMAGE}:${version}\`, \`${GUACD_IMAGE}:${version}\`.
+docker push -q "${BROWSER_IMAGE}:${version}"
+notes="Images: \`${IMAGE}:${version}\`, \`${GUACD_IMAGE}:${version}\`, \`${BROWSER_IMAGE}:${version}\`.
 Install: [docs/install.md](https://github.com/${CI_GITHUB}/blob/${tag}/docs/install.md), upgrade: [docs/install.md#upgrade](https://github.com/${CI_GITHUB}/blob/${tag}/docs/install.md#upgrade)."
 gh release create "$tag" "$ops" --target "$CI_SHA" --title "remotehub ${version}" \
   --notes "$notes" --generate-notes
 
 # GHCR makes a new package private; installations pull without signing in.
 # An anonymous pull of the manifest shows whether they can.
-for repository in remotehub remotehub-guacd; do
+for repository in remotehub remotehub-guacd remotehub-browser; do
   token="$(curl -fsS "https://ghcr.io/token?scope=repository:hilman2/${repository}:pull" 2>/dev/null |
     sed -n 's/.*"token":"\([^"]*\)".*/\1/p' || true)"
   if ! curl -fsS -o /dev/null -H "Authorization: Bearer ${token}" \

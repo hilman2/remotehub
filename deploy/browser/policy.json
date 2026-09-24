@@ -1,0 +1,17 @@
+{
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "DownloadRestrictions": 3,
+  "PrintingEnabled": false,
+  "BrowserSignin": 0,
+  "SyncDisabled": true,
+  "TranslateEnabled": false,
+  "IncognitoModeAvailability": 1,
+  "BrowserGuestModeEnabled": false,
+  "BrowserAddPersonEnabled": false,
+  "ExtensionInstallBlocklist": ["*"],
+  "DefaultNotificationsSetting": 2,
+  "DefaultGeolocationSetting": 2,
+  "URLBlocklist": ["file://*", "view-source:*", "javascript://*", "chrome://*", "devtools://*"]
+}

@@ -634,19 +634,26 @@ async fn without_a_laps_password_there_is_no_connection(pool: PgPool) {
         start(&mut socket, json!({})).await;
         assert_eq!(event(&mut socket).await["code"], code);
     }
-    // VNC has a password of its own, which LAPS does not keep.
-    let response = send(
-        &app,
-        authed(
-            "POST",
-            "/api/devices",
-            Some(json!({
-                "folder_id": folder, "name": "vnc", "protocol": "vnc", "host": "x",
-                "port": 5900, "auth_mode": "laps", "credential_id": null,
-            })),
-            &token,
-        ),
-    )
-    .await;
-    assert_eq!(response.json()["params"]["field"], "auth_mode");
+    // VNC and web interfaces have passwords of their own, which LAPS does
+    // not keep.
+    for (protocol, port) in [("vnc", 5900), ("https", 443)] {
+        let response = send(
+            &app,
+            authed(
+                "POST",
+                "/api/devices",
+                Some(json!({
+                    "folder_id": folder, "name": protocol, "protocol": protocol, "host": "x",
+                    "port": port, "auth_mode": "laps", "credential_id": null,
+                })),
+                &token,
+            ),
+        )
+        .await;
+        assert_eq!(
+            response.json()["params"]["field"],
+            "auth_mode",
+            "{protocol}"
+        );
+    }
 }

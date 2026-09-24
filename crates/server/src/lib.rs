@@ -51,6 +51,8 @@ pub struct Settings {
     pub own_account_connections: bool,
     /// guacd for RDP and VNC (`host:port`).
     pub guacd: String,
+    /// The browser service for HTTPS devices (`host:port`).
+    pub browser: String,
     /// Keyboard layout of RDP sessions for devices without one of their own.
     pub rdp_keyboard_layout: String,
     /// Reverse proxies whose `X-Forwarded-For` names the client.

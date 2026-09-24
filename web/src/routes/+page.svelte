@@ -389,7 +389,7 @@
 								: m.keyboard_layout_default()}
 						</dd>
 					{/if}
-					{#if device.protocol === 'rdp'}
+					{#if device.protocol === 'rdp' || device.protocol === 'https'}
 						<dt class="text-ink-2">{m.device_certificate()}</dt>
 						<dd>
 							{#if device.certificate_fingerprint}

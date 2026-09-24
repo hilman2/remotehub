@@ -30,6 +30,7 @@ remotehub server (Rust, one binary: axum on tokio)
    └─ audit      append-only, hash-chained event log
         │                                 │ internal Docker network, no published ports
 PostgreSQL (sqlx, migrations at start)    guacd 1.6 (own image with FreeRDP 3)
+                                          browser service (Chromium on Xvnc, one per HTTPS session)
 ```
 
 | Crate | Role |
@@ -38,7 +39,8 @@ PostgreSQL (sqlx, migrations at start)    guacd 1.6 (own image with FreeRDP 3)
 | `crates/model` | Domain types (folders, devices, credentials, grants) and `authorize()` |
 | `crates/vault` | Encryption of secrets, `KeyProvider`, credential storage |
 | `crates/directory` | `IdentityProvider` with the LDAP implementation |
-| `crates/gateway` | `ProtocolEngine`: SSH engine, Guacamole tunnel to guacd |
+| `crates/gateway` | `ProtocolEngine`: SSH engine, Guacamole tunnel to guacd, certificates of devices |
+| `crates/browser` | The browser service's agent (`remotehub-browser`) and remotehub's client for it |
 | `crates/i18n` | `Message`, Fluent catalogs, locale negotiation |
 | `crates/kdbx` (M3) | KeePass import and emergency export, isolated because its dependency moves fast |
 
@@ -130,7 +132,7 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 | SSH | russh in `crates/gateway` | xterm.js | asciicast v2 on the server |
 | RDP | guacd 1.6, FreeRDP 3 | Guacamole JS client (vendored from guacamole-client 1.6.0) | `.guac` on the server |
 | VNC | guacd 1.6 | Guacamole JS client | `.guac` on the server |
-| HTTPS (later) | Chromium container shown through guacd | Guacamole JS client | `.guac` on the server |
+| HTTPS | Chromium in the browser service, shown through guacd as VNC | Guacamole JS client | `.guac` on the server |
 
 - SSH signs in with a stored password or key, asked credentials, the own account, or a certificate from
   remotehub's own CA (`crates/gateway/src/ssh_ca.rs`): a fresh Ed25519 key per connection, signed for the
@@ -158,6 +160,12 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   instructions; from the browser only input, display size, clipboard and stream acknowledgements reach
   guacd — `argv` (changing connection parameters), file transfer and pipes are dropped and counted in the
   audit entry. Own-account RDP signs in with the user principal name, which carries the domain.
+- **HTTPS devices** (ADR 0007) use the display WebSocket too. remotehub pins the device's certificate like
+  RDP's, then asks the browser service for a Chromium on the device: its own Xvnc display, a fresh profile,
+  a proxy that reaches only the device's host and port, and the certificate's key as the only one accepted
+  besides valid ones. The service types the credentials into the page's sign-in form through the DevTools
+  Protocol; remotehub opens the display through guacd with the VNC password the service made up. One TCP
+  connection to the service is the session: closing it ends Chromium.
 - All engines sit behind the trait `ProtocolEngine`, so an own RDP engine (IronRDP) can replace guacd later
   without changing API or UI.
 
@@ -177,11 +185,13 @@ English is the base locale, German the second; more can follow (ADR 0002).
 - `crates/`, `web/`, `migrations/`, `deploy/`, `docs/`, `scripts/ci/`.
 - **Development** runs entirely in Docker (`deploy/compose.dev.yml`): PostgreSQL on `127.0.0.1:55440`, UI on
   `127.0.0.1:5180`, the server rebuilt by watchexec, plus a test lab (Samba AD DC, SSH target, a desktop
-  target with RDP and VNC) and guacd on the compose network.
+  target with RDP and VNC, a web target with a sign-in page), guacd and the browser service on the compose
+  network.
 - **CI** runs locally (`scripts/ci/lokal.sh`) and reports the commit status `lokal`; `main` requires it.
-- **Operations:** two images on GHCR, `ghcr.io/hilman2/remotehub` (`deploy/Dockerfile`: the binary and the
-  built UI on distroless, user 65532, read-only) and `ghcr.io/hilman2/remotehub-guacd` (`deploy/guacd`). The
-  ops package `deploy/ops` runs them with PostgreSQL: `compose.yml`, `init.sh` for `.env` and the secrets
+- **Operations:** three images on GHCR, `ghcr.io/hilman2/remotehub` (`deploy/Dockerfile`: the binary and the
+  built UI on distroless, user 65532, read-only), `ghcr.io/hilman2/remotehub-guacd` (`deploy/guacd`) and
+  `ghcr.io/hilman2/remotehub-browser` (`deploy/browser`: Chromium, Xvnc and the agent, user 10001,
+  read-only). The ops package `deploy/ops` runs them with PostgreSQL: `compose.yml`, `init.sh` for `.env` and the secrets
   as files. PostgreSQL sits on an internal network that only remotehub reaches. Installing, backup and
   upgrades: [`docs/install.md`](install.md). The CI job `image` tries both images with the package
   (`scripts/ci/image-check.sh`); releases via `scripts/ci/release.sh`.

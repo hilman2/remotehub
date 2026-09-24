@@ -153,6 +153,7 @@
 	"protocol_ssh": "SSH",
 	"protocol_rdp": "Remotedesktop (RDP)",
 	"protocol_vnc": "VNC",
+	"protocol_https": "Weboberfläche (HTTPS)",
 	"auth_stored": "Hinterlegten Zugangsdaten",
 	"auth_ask": "Beim Verbinden abgefragten Zugangsdaten",
 	"auth_own": "Dem eigenen Verzeichniskonto",

@@ -2213,6 +2213,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "remotehub-browser"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.4.3",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "zeroize",
+]
+
+[[package]]
 name = "remotehub-directory"
 version = "0.1.0"
 dependencies = [
@@ -2232,6 +2247,7 @@ dependencies = [
 name = "remotehub-gateway"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "getrandom 0.4.3",
  "russh",
  "rustls",
@@ -2241,6 +2257,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tracing",
+ "x509-parser",
  "zeroize",
 ]
 
@@ -2276,6 +2293,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hmac",
  "http-body-util",
+ "remotehub-browser",
  "remotehub-directory",
  "remotehub-gateway",
  "remotehub-i18n",

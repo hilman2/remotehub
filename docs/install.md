@@ -1,7 +1,8 @@
 # Installing remotehub
 
-remotehub runs as three containers: the server, PostgreSQL and guacd, the engine for RDP and VNC. The ops
-package in [`deploy/ops`](../deploy/ops) starts them with Docker Compose. Every setting is described in the
+remotehub runs as four containers: the server, PostgreSQL, guacd, the engine for RDP and VNC, and the browser
+service, which opens web interfaces of devices. The ops package in [`deploy/ops`](../deploy/ops) starts them
+with Docker Compose. Every setting is described in the
 [configuration reference](configuration.md).
 
 You need a Linux host with Docker Engine and the Compose plugin, a DNS name for remotehub, a TLS certificate
@@ -106,7 +107,8 @@ exactly that address, not another name of the same host.
 
 The proxy names the client in `X-Forwarded-For`; Caddy does that by itself, nginx with the line above.
 remotehub believes that header only from the gateway of its Docker network, which is how a proxy on the host
-reaches it. The network uses `10.213.213.0/24`; guacd cannot reach devices in that range. If your network uses
+reaches it. The network uses `10.213.213.0/24`; guacd and the browser service cannot reach devices in that
+range. If your network uses
 it, set another range in `.env` before the first start:
 
 ```
@@ -158,6 +160,23 @@ Set-LapsADReadPasswordPermission -Identity "OU=Servers,DC=example,DC=com" -Allow
 
 and for legacy LAPS `Set-AdmPwdReadPasswordPermission` likewise. remotehub reads the plain-text
 `msLAPS-Password` and `ms-Mcs-AdmPwd`; encrypted Windows LAPS passwords and Entra LAPS are not supported yet.
+
+## Open web interfaces of devices
+
+A device with the protocol "Web interface (HTTPS)" opens in a Chromium of the browser service, which reaches
+that one device and nothing else. remotehub fills in its sign-in form, so the password never reaches the
+admin's browser. It pins the device's certificate at the first connection, as for RDP.
+
+The browser service runs with `seccomp:unconfined`, which Chromium's sandbox needs; `compose.yml` sets it.
+Each open web interface takes a Chromium: on the lab's simple sign-in page about 170 MB and 105 processes.
+Heavier interfaces need more. For more than eight at once, raise the limits in `.env`:
+
+```
+REMOTEHUB_BROWSER_SESSIONS=16
+REMOTEHUB_BROWSER_MEMORY=6g
+```
+
+All sessions of the service run as one Unix user. Why, and what that means: [ADR 0007](adr/0007-isolated-browser.md).
 
 ## Back up and restore
 

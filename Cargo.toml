@@ -12,6 +12,7 @@ publish = false
 repository = "https://github.com/hilman2/remotehub"
 
 [workspace.dependencies]
+remotehub-browser = { path = "crates/browser" }
 remotehub-directory = { path = "crates/directory" }
 remotehub-gateway = { path = "crates/gateway" }
 remotehub-i18n = { path = "crates/i18n" }
@@ -52,6 +53,8 @@ tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
 http-body-util = "0.1.5"
 tempfile = "3.27.0"
 tokio-tungstenite = "0.30.0"
+# Already in the tree through ldap3; reads the public key of a certificate.
+x509-parser = "0.18.1"
 futures-util = "0.3.31"
 
 [workspace.lints.rust]

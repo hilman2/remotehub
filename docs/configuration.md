@@ -66,6 +66,7 @@ Without `REMOTEHUB_LDAP_URL`, only break-glass accounts can sign in.
 |---|---|---|
 | `REMOTEHUB_OWN_ACCOUNT_CONNECTIONS` | `true` | Keep the sign-in password, encrypted with a key held only in the user's cookie, so devices can be opened with the user's own directory account. |
 | `REMOTEHUB_GUACD` | `guacd:4822` | guacd for RDP and VNC, as `host:port`. |
+| `REMOTEHUB_BROWSER` | `browser:4823` | The browser service for web interfaces (HTTPS devices), as `host:port`. guacd must reach the same host. |
 | `REMOTEHUB_SSH_CA_KEY_FILE` | – | Path of the SSH CA's private key (Ed25519, OpenSSH format, from `remotehub generate-ssh-ca`). Only as a path. With it, SSH devices can sign in with a certificate, and `/api/ssh-ca.pub` serves the public key. |
 | `REMOTEHUB_RDP_KEYBOARD_LAYOUT` | `en-us-qwerty` | Keyboard layout of RDP sessions for devices without their own. |
 
@@ -74,6 +75,16 @@ Keyboard layouts: `cs-cz-qwertz`, `da-dk-qwerty`, `de-ch-qwertz`, `de-de-qwertz`
 `fr-fr-azerty`, `hu-hu-qwertz`, `it-it-qwerty`, `ja-jp-qwerty`, `no-no-qwerty`, `pl-pl-qwerty`,
 `pt-br-qwerty`, `pt-pt-qwerty`, `ro-ro-qwerty`, `sv-se-qwerty`, `tr-tr-qwerty`, and `failsafe`, which sends
 characters instead of keys.
+
+## Browser service
+
+Settings of the `remotehub-browser` container, which opens web interfaces in Chromium.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `REMOTEHUB_BROWSER_SESSIONS` | `8` | Web interfaces open at once, at most 99. Session n uses VNC port 5900 + n. |
+| `REMOTEHUB_BROWSER_LISTEN` | `0.0.0.0:4823` | Address and port for remotehub. |
+| `REMOTEHUB_BROWSER_MEMORY` | `3g` | Ops package only: the container's memory limit. |
 
 ## Command line
 
