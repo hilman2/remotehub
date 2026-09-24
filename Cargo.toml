@@ -13,6 +13,7 @@ repository = "https://github.com/hilman2/remotehub"
 
 [workspace.dependencies]
 remotehub-directory = { path = "crates/directory" }
+remotehub-model = { path = "crates/model" }
 remotehub-vault = { path = "crates/vault" }
 
 anyhow = "1.0.104"

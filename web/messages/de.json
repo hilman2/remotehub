@@ -63,5 +63,18 @@
 	"break_glass_banner": "Mit einem Notfallkonto angemeldet. Alles, was hier geschieht, wird protokolliert.",
 	"audit_break_glass_created": "Break-Glass-Konto angelegt",
 	"audit_break_glass_reset": "Break-Glass-Konto zurückgesetzt",
-	"audit_break_glass_deleted": "Break-Glass-Konto gelöscht"
+	"audit_break_glass_deleted": "Break-Glass-Konto gelöscht",
+	"error_name_taken": "Dieser Name ist hier schon vergeben.",
+	"error_folder_not_empty": "Der Ordner ist nicht leer. Zuerst den Inhalt verschieben oder löschen.",
+	"audit_folder_created": "Ordner angelegt",
+	"audit_folder_updated": "Ordner geändert",
+	"audit_folder_deleted": "Ordner gelöscht",
+	"audit_device_created": "Gerät angelegt",
+	"audit_device_updated": "Gerät geändert",
+	"audit_device_deleted": "Gerät gelöscht",
+	"audit_credential_created": "Zugangsdaten angelegt",
+	"audit_credential_updated": "Zugangsdaten geändert",
+	"audit_credential_deleted": "Zugangsdaten gelöscht",
+	"audit_grant_added": "Zugriff erteilt",
+	"audit_grant_removed": "Zugriff entzogen"
 }

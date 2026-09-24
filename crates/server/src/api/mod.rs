@@ -1,6 +1,7 @@
 //! HTTP API under `/api`.
 
 mod audit;
+mod catalog;
 mod health;
 mod origin;
 pub mod problem;
@@ -8,7 +9,7 @@ pub mod session;
 
 use axum::Router;
 use axum::middleware;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, patch, post, put};
 
 use crate::AppState;
 use problem::{ErrorCode, Problem};
@@ -23,6 +24,28 @@ pub fn router(state: AppState) -> Router<AppState> {
                 .delete(session::sign_out),
         )
         .route("/session/break-glass", post(session::sign_in_break_glass))
+        .route("/tree", get(catalog::tree))
+        .route("/folders", post(catalog::create_folder))
+        .route(
+            "/folders/{id}",
+            patch(catalog::update_folder).delete(catalog::delete_folder),
+        )
+        .route("/devices", post(catalog::create_device))
+        .route(
+            "/devices/{id}",
+            put(catalog::update_device).delete(catalog::delete_device),
+        )
+        .route("/credentials", post(catalog::create_credential))
+        .route(
+            "/credentials/{id}",
+            put(catalog::update_credential).delete(catalog::delete_credential),
+        )
+        .route(
+            "/grants",
+            get(catalog::list_grants).post(catalog::add_grant),
+        )
+        .route("/grants/{id}", delete(catalog::remove_grant))
+        .route("/directory/principals", get(catalog::search_principals))
         .route("/audit", get(audit::list))
         .route("/audit/verify", post(audit::verify))
         // Unknown API paths are a problem response, never the SPA's index.html.

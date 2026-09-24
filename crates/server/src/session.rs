@@ -20,12 +20,14 @@ use sqlx::{PgExecutor, PgPool};
 use uuid::Uuid;
 
 use crate::api::problem::{ErrorCode, Problem};
+use remotehub_model::Subject;
+
 use crate::{AppState, Settings};
 
 pub const COOKIE_NAME: &str = "__Host-remotehub-session";
 
 /// The signed-in user of a request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
 pub struct Session {
     #[serde(skip)]
     pub user_id: Uuid,
@@ -33,6 +35,9 @@ pub struct Session {
     pub display_name: String,
     /// `directory` or `local` (break-glass).
     pub kind: String,
+    /// The user's own SID (directory users only).
+    #[serde(skip)]
+    pub sid: Option<String>,
     /// Group SIDs from sign-in; they hold for the whole session.
     #[serde(skip)]
     pub groups: Vec<String>,
@@ -47,6 +52,15 @@ impl Session {
                 .groups
                 .iter()
                 .any(|g| settings.admin_groups.contains(g))
+    }
+
+    /// Who asks, for `authorize()`: the own SID, all group SIDs, and whether
+    /// they are an administrator.
+    pub fn subject(&self, settings: &Settings) -> Subject {
+        Subject {
+            sids: self.groups.iter().chain(&self.sid).cloned().collect(),
+            admin: self.is_admin(settings),
+        }
     }
 }
 
@@ -88,8 +102,8 @@ pub async fn lookup(
     idle: Duration,
 ) -> Result<Option<Session>, sqlx::Error> {
     let token_hash = hash(token);
-    let row: Option<(Uuid, Vec<String>, String, String, String)> = sqlx::query_as(
-        "SELECT s.user_id, s.groups, u.username, u.display_name, u.kind
+    let session: Option<Session> = sqlx::query_as(
+        "SELECT s.user_id, s.groups, u.username, u.display_name, u.kind, u.sid
          FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = $1
            AND s.expires_at > now()
@@ -99,7 +113,7 @@ pub async fn lookup(
     .bind(idle.as_secs_f64())
     .fetch_optional(db)
     .await?;
-    let Some((user_id, groups, username, display_name, kind)) = row else {
+    let Some(session) = session else {
         return Ok(None);
     };
     // Keeps the session alive; at most one write per minute and session.
@@ -110,13 +124,7 @@ pub async fn lookup(
     .bind(token_hash.as_slice())
     .execute(db)
     .await?;
-    Ok(Some(Session {
-        user_id,
-        username,
-        display_name,
-        kind,
-        groups,
-    }))
+    Ok(Some(session))
 }
 
 pub async fn delete<'e>(db: impl PgExecutor<'e>, token: &str) -> Result<(), sqlx::Error> {

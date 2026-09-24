@@ -8,7 +8,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
-use remotehub_directory::{AuthError, Identity, IdentityProvider, Sid};
+use remotehub_directory::{AuthError, Identity, IdentityProvider, Principal, PrincipalKind, Sid};
 use remotehub_server::config::SessionConfig;
 use remotehub_server::{AppState, Settings};
 use remotehub_vault::{DynVault, FileKeyring, Vault, generate_key_line};
@@ -50,15 +50,36 @@ pub fn state(db: PgPool) -> AppState {
 }
 
 /// alice / right signs in (member of the admin group), bob / right signs in
-/// without groups; carol is disabled;
+/// without groups, olaf / right is in the operators group; carol is disabled;
 /// "offline" makes the directory unreachable; everything else is wrong.
 pub struct FakeDirectory;
 
 pub const ALICE_SID: &str = "S-1-5-21-1-2-3-1105";
 pub const ADMINS_SID: &str = "S-1-5-21-1-2-3-1201";
 pub const BOB_SID: &str = "S-1-5-21-1-2-3-1106";
+pub const OPS_SID: &str = "S-1-5-21-1-2-3-1202";
+pub const OLAF_SID: &str = "S-1-5-21-1-2-3-1107";
 
 impl IdentityProvider for FakeDirectory {
+    async fn search(&self, query: &str, _limit: i32) -> Result<Vec<Principal>, AuthError> {
+        let all = [
+            (PrincipalKind::Group, ADMINS_SID, "RH Admins"),
+            (PrincipalKind::Group, OPS_SID, "RH Operators"),
+            (PrincipalKind::User, ALICE_SID, "Alice Admin"),
+            (PrincipalKind::User, BOB_SID, "Bob Helpdesk"),
+        ];
+        Ok(all
+            .into_iter()
+            .filter(|(_, _, name)| name.to_lowercase().contains(&query.to_lowercase()))
+            .map(|(kind, sid, name)| Principal {
+                kind,
+                sid: sid.parse().unwrap(),
+                name: name.to_owned(),
+                detail: None,
+            })
+            .collect())
+    }
+
     async fn authenticate(
         &self,
         username: &str,
@@ -82,6 +103,15 @@ impl IdentityProvider for FakeDirectory {
                 display_name: "Bob Helpdesk".into(),
                 email: None,
                 groups: vec![],
+            }),
+            ("olaf", "right") => Ok(Identity {
+                sid: OLAF_SID.parse().unwrap(),
+                guid: Uuid::from_u128(0x01af),
+                username: "olaf".into(),
+                upn: None,
+                display_name: "Olaf Operator".into(),
+                email: None,
+                groups: vec![OPS_SID.parse::<Sid>().unwrap()],
             }),
             ("carol", _) => Err(AuthError::AccountDisabled),
             ("offline", _) => Err(AuthError::Unavailable("connection refused".into())),
@@ -166,4 +196,20 @@ pub fn sign_in_request(username: &str, password: &str) -> Request<Body> {
         serde_json::json!({ "username": username, "password": password }),
         Some(ORIGIN),
     )
+}
+
+/// A request as a signed-in browser sends it: session cookie, own origin,
+/// JSON body if given.
+pub fn authed(method: &str, uri: &str, body: Option<Value>, token: &str) -> Request<Body> {
+    let mut request = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::COOKIE, format!("__Host-remotehub-session={token}"))
+        .header(header::ORIGIN, ORIGIN);
+    if body.is_some() {
+        request = request.header(header::CONTENT_TYPE, "application/json");
+    }
+    request
+        .body(body.map_or_else(Body::empty, |b| Body::from(b.to_string())))
+        .unwrap()
 }

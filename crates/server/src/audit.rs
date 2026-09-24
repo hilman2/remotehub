@@ -36,6 +36,17 @@ audit_actions! {
     BreakGlassCreated = "break_glass.created",
     BreakGlassReset = "break_glass.reset",
     BreakGlassDeleted = "break_glass.deleted",
+    FolderCreated = "folder.created",
+    FolderUpdated = "folder.updated",
+    FolderDeleted = "folder.deleted",
+    DeviceCreated = "device.created",
+    DeviceUpdated = "device.updated",
+    DeviceDeleted = "device.deleted",
+    CredentialCreated = "credential.created",
+    CredentialUpdated = "credential.updated",
+    CredentialDeleted = "credential.deleted",
+    GrantAdded = "grant.added",
+    GrantRemoved = "grant.removed",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).
