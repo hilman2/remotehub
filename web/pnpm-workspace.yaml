@@ -1,0 +1,6 @@
+# pnpm settings (not a multi-package workspace).
+# New versions only after seven days, like the cooldown in .github/dependabot.yml.
+minimumReleaseAge: 10080
+engineStrict: true
+onlyBuiltDependencies:
+  - esbuild

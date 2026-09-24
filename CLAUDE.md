@@ -70,10 +70,11 @@ Built up with the issues of milestone M0:
 Development happens entirely in Docker (`deploy/compose.dev.yml`):
 
 ```bash
-docker compose -f deploy/compose.dev.yml up -d --build     # db, server
+docker compose -f deploy/compose.dev.yml up -d --build     # db, server, web
 docker compose -f deploy/compose.dev.yml logs -f server
 docker compose -f deploy/compose.dev.yml run --rm workbench cargo nextest run
 docker compose -f deploy/compose.dev.yml run --rm workbench cargo clippy --workspace --all-targets
+docker compose -f deploy/compose.dev.yml run --rm --no-deps web pnpm check   # also: lint, test, build, format
 docker compose -f deploy/compose.dev.yml down               # volumes are kept
 ```
 
@@ -81,6 +82,9 @@ docker compose -f deploy/compose.dev.yml down               # volumes are kept
 - **Build output:** `target/` lives in the volume `target` (path `/target`), not in the working copy.
 - **Database:** `127.0.0.1:55440` (user, password and database `remotehub`). Tests with `#[sqlx::test]` create a fresh database per test on the same server.
 - **Configuration:** `REMOTEHUB_*` environment variables, each also as `REMOTEHUB_*_FILE` (Docker secrets); see `crates/server/src/config.rs`.
+- **UI:** http://localhost:5180, Vite with HMR via polling; `/api` is proxied to the server. `node_modules` lives in the volume `web-node-modules`, not in the working copy.
+  - pnpm only takes versions older than seven days (`web/pnpm-workspace.yaml`), so don't pin a range to a brand-new release.
+  - Messages are in `web/messages/{en,de}.json`; `pnpm i18n` compiles them (also part of `pnpm check` and `pnpm test`). Language and theme switch sit in the header.
 - **rust-analyzer** runs via the dev container (`.devcontainer/`, service `workbench`).
 - **Rust version:** it appears in `rust-toolchain.toml`, `scripts/ci/tools.Dockerfile` and `deploy/dev/rust.Dockerfile`; the CI job `base` checks that all three match.
 
