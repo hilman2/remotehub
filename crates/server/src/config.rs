@@ -32,6 +32,9 @@ pub struct Config {
     pub session: SessionConfig,
     /// Active Directory; without it only break-glass accounts can sign in.
     pub ldap: Option<LdapConfig>,
+    /// File with the vault's master keys (a Docker secret), never an
+    /// environment variable.
+    pub master_key_file: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +49,8 @@ pub struct SessionConfig {
 pub enum ConfigError {
     #[error("{0} is not set (also possible as {0}_FILE)")]
     Missing(&'static str),
+    #[error("{0} is not set: the path of a file, never the value itself")]
+    MissingFile(&'static str),
     #[error("{name}_FILE: cannot read {path}: {reason}")]
     File {
         name: &'static str,
@@ -141,6 +146,13 @@ impl Config {
             return Err(invalid("REMOTEHUB_LDAP_STARTTLS", "false with ldap://"));
         }
 
+        // Only as a path: the key itself must never sit in the environment.
+        let master_key_file = PathBuf::from(
+            lookup("REMOTEHUB_MASTER_KEY_FILE")
+                .filter(|p| !p.is_empty())
+                .ok_or(ConfigError::MissingFile("REMOTEHUB_MASTER_KEY_FILE"))?,
+        );
+
         Ok(Config {
             listen,
             database_url,
@@ -149,6 +161,7 @@ impl Config {
             public_origin,
             session,
             ldap,
+            master_key_file,
         })
     }
 }
@@ -209,6 +222,7 @@ impl fmt::Debug for Config {
             .field("public_origin", &self.public_origin)
             .field("session", &self.session)
             .field("ldap", &self.ldap.as_ref().map(|l| &l.url))
+            .field("master_key_file", &self.master_key_file)
             .finish()
     }
 }
@@ -222,9 +236,13 @@ mod tests {
 
     use super::*;
 
-    const BASE: [(&str, &str); 2] = [
+    const BASE: [(&str, &str); 3] = [
         ("REMOTEHUB_DATABASE_URL", "postgres://db/x"),
         ("REMOTEHUB_PUBLIC_URL", "https://remotehub.example.com"),
+        (
+            "REMOTEHUB_MASTER_KEY_FILE",
+            "/run/secrets/remotehub-master-key",
+        ),
     ];
 
     fn lookup(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
@@ -252,6 +270,10 @@ mod tests {
         assert!(config.ldap.is_none());
         assert!(!config.log_json);
 
+        assert_eq!(
+            Config::from_lookup(without("REMOTEHUB_MASTER_KEY_FILE")).unwrap_err(),
+            ConfigError::MissingFile("REMOTEHUB_MASTER_KEY_FILE")
+        );
         for name in ["REMOTEHUB_DATABASE_URL", "REMOTEHUB_PUBLIC_URL"] {
             assert_eq!(
                 Config::from_lookup(without(name)).unwrap_err(),
@@ -360,9 +382,9 @@ mod tests {
     fn never_prints_the_database_url() {
         let config = Config::from_lookup(lookup(&[(
             "REMOTEHUB_DATABASE_URL",
-            "postgres://u:secret@db/x",
+            "postgres://u:hunter2@db/x",
         )]))
         .unwrap();
-        assert!(!format!("{config:?}").contains("secret"));
+        assert!(!format!("{config:?}").contains("hunter2"));
     }
 }

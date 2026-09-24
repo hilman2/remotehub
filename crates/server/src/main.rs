@@ -2,18 +2,56 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use std::path::Path;
+
 use anyhow::Context;
+use clap::{Parser, Subcommand};
 use remotehub_directory::ldap::LdapDirectory;
 use remotehub_server::auth::Authenticator;
 use remotehub_server::config::Config;
 use remotehub_server::{AppState, Settings, VERSION, app, db, session};
+use remotehub_vault::{DynVault, FileKeyring, KeyProvider, Vault, generate_key_line};
 use tracing_subscriber::EnvFilter;
+
+/// remotehub: browser-based remote access and credential vault.
+/// Configuration comes from REMOTEHUB_* environment variables.
+#[derive(Parser)]
+#[command(version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Run the server (the default).
+    Serve,
+    /// Print a new line for the master key file (REMOTEHUB_MASTER_KEY_FILE).
+    /// To rotate, append a line with the next version and restart.
+    GenerateKey {
+        #[arg(long, default_value_t = 1)]
+        version: i32,
+    },
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    match Cli::parse().command.unwrap_or(Command::Serve) {
+        Command::Serve => serve().await,
+        Command::GenerateKey { version } => {
+            anyhow::ensure!(version >= 1, "the version starts at 1");
+            println!("{}", generate_key_line(version).as_str());
+            Ok(())
+        }
+    }
+}
+
+async fn serve() -> anyhow::Result<()> {
     let config = Config::from_env()?;
     init_tracing(config.log_json);
     tracing::info!(version = VERSION, listen = %config.listen, public = %config.public_origin, "starting remotehub");
+
+    let vault = load_vault(&config.master_key_file)?;
 
     let pool = db::connect(&config.database_url)
         .await
@@ -40,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
         public_origin: config.public_origin,
         session: config.session,
     };
-    let state = AppState::new(pool.clone(), directory, settings);
+    let state = AppState::new(pool.clone(), directory, settings, vault);
     tokio::spawn(purge_sessions(pool, config.session.idle));
 
     let app = app(state, config.web_dir.as_deref());
@@ -56,6 +94,27 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("stopped");
     Ok(())
 }
+
+fn load_vault(path: &Path) -> anyhow::Result<DynVault> {
+    warn_if_readable_by_others(path);
+    let keyring = FileKeyring::load(path).context("cannot load the master key file")?;
+    let (id, version) = keyring.current();
+    tracing::info!(file = %path.display(), key = id, version, "vault ready");
+    Ok(Vault::new(Box::new(keyring)))
+}
+
+#[cfg(unix)]
+fn warn_if_readable_by_others(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Ok(meta) = std::fs::metadata(path)
+        && meta.permissions().mode() & 0o077 != 0
+    {
+        tracing::warn!(file = %path.display(), "the master key file is accessible to other users; use mode 0400");
+    }
+}
+
+#[cfg(not(unix))]
+fn warn_if_readable_by_others(_: &Path) {}
 
 /// Deletes sessions that can no longer be used, every ten minutes.
 async fn purge_sessions(pool: sqlx::PgPool, idle: Duration) {

@@ -82,6 +82,10 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - Data keys are wrapped by a versioned master key from a `KeyProvider` (first: a key file mounted as a Docker
   secret; later Vault/OpenBao Transit, Azure Key Vault, PKCS#11). Rows record `scheme`, `kek_id` and
   `kek_version` so keys can be rotated lazily.
+- The key file holds one line per version (`<version>:<base64 key>`, made by `remotehub generate-key`);
+  the highest version is current. Rotation: append a line, restart, rewrap old values.
+- Sealed fields live in `secret_fields`, one row per owner, version and field; the associated data makes a
+  row that is copied or moved elsewhere impossible to open.
 - The server must be able to decrypt stored credentials to inject them. That rules out zero knowledge for
   shared entries; a personal end-to-end scheme (`e2e_user_v1`) is reserved for later.
 - Plaintext lives only in `secrecy`/`zeroize` types and never appears in logs, API responses (except the

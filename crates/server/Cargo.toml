@@ -14,10 +14,12 @@ path = "src/main.rs"
 
 [dependencies]
 remotehub-directory.workspace = true
+remotehub-vault.workspace = true
 
 anyhow.workspace = true
 axum.workspace = true
 base64.workspace = true
+clap.workspace = true
 getrandom.workspace = true
 secrecy.workspace = true
 sha2.workspace = true
@@ -30,6 +32,7 @@ tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 http-body-util.workspace = true
