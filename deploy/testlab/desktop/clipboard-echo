@@ -1,0 +1,14 @@
+#!/bin/sh
+# Answers every text that reaches the desktop's clipboard with `echo:<text>`
+# on the same clipboard. A test puts text in on its side and waits for the
+# answer: that proves both directions, into the session and out of it.
+last=
+while sleep 0.2; do
+  text=$(xclip -o -selection clipboard 2>/dev/null) || continue
+  [ "$text" = "$last" ] && continue
+  last=$text
+  case $text in
+    '' | echo:*) ;;
+    *) printf 'echo:%s' "$text" | xclip -i -selection clipboard ;;
+  esac
+done

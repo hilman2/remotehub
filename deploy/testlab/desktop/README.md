@@ -8,6 +8,8 @@
   name. One shared display, 1280×800.
 - Both desktops show the background colour `#1e5b8c` and an xterm titled `remotehub lab RDP` or
   `remotehub lab VNC`, for tests that look at the picture.
+- The clipboard answers: text that arrives on it is replaced with `echo:<text>` a moment later
+  (`clipboard-echo`), so a test can check both directions of the clipboard.
 
 The passwords and the private key are public on purpose: they open nothing but this container. Never use
 them anywhere else.

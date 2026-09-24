@@ -129,6 +129,8 @@ test('an SSH key protected by a passphrase signs in', async ({ page, context }) 
 });
 
 test('an RDP desktop opens in the browser', async ({ page, context }) => {
+	// Chromium asks before a page reads the clipboard; the test says yes.
+	await context.grantPermissions(['clipboard-read', 'clipboard-write']);
 	await signIn(page);
 	const dialog = page.getByRole('dialog');
 	const folder = `E2E desktops ${run}`;
@@ -166,5 +168,19 @@ test('an RDP desktop opens in the browser', async ({ page, context }) => {
 			{ timeout: 15_000 }
 		)
 		.toEqual([30, 91, 140]);
+
+	// The clipboard, both ways: the lab desktop answers every text that
+	// reaches its clipboard with `echo:<text>`, which comes back to the
+	// browser's clipboard. First what was copied before the view had focus…
+	const clipboard = () => desktop.evaluate(() => navigator.clipboard.readText());
+	const copy = (text: string) =>
+		desktop.evaluate((text) => navigator.clipboard.writeText(text), text);
+	await copy('copied in the browser');
+	await desktop.getByRole('application').click();
+	await expect.poll(clipboard).toBe('echo:copied in the browser');
+	// …then what was copied while it had focus, with the paste key.
+	await copy('pasted with Ctrl+V');
+	await desktop.keyboard.press('Control+V');
+	await expect.poll(clipboard).toBe('echo:pasted with Ctrl+V');
 	await desktop.close();
 });

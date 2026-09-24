@@ -3,7 +3,7 @@
 FROM debian:trixie-slim
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-       tigervnc-standalone-server tigervnc-tools x11-xserver-utils xrdp xterm \
+       tigervnc-standalone-server tigervnc-tools x11-xserver-utils xclip xrdp xterm \
   && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --shell /bin/bash tester \
@@ -13,6 +13,7 @@ RUN useradd --create-home --shell /bin/bash tester \
   && chown tester /etc/vnc/passwd \
   && chmod 600 /etc/vnc/passwd
 COPY --chmod=755 xsession /home/tester/.xsession
+COPY --chmod=755 clipboard-echo /usr/local/bin/clipboard-echo
 COPY xrdp.ini /etc/xrdp/xrdp.ini
 # A fresh session for every sign-in, gone when it disconnects: tests always
 # see the same desktop. No drive redirection (no FUSE in a container).

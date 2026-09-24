@@ -341,3 +341,121 @@ async fn a_changed_rdp_certificate_stops_the_connection_until_the_pin_is_forgott
         assert!(log.contains(action), "{action} missing");
     }
 }
+
+/// A desktop of the test lab, open and drawn: RDP with a stored credential,
+/// VNC with the password as asked.
+async fn open_desktop(pool: PgPool, protocol: &str) -> Socket {
+    let (state, app, token, folder) = setup(pool).await;
+    let (id, start_with) = if protocol == "rdp" {
+        let credential = create(
+            &app,
+            &token,
+            "/api/credentials",
+            json!({ "folder_id": folder, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
+        )
+        .await;
+        let rdp = json!({ "protocol": "rdp", "port": 3389, "auth_mode": "stored", "credential_id": credential });
+        (device(&app, &token, &folder, rdp).await, json!({}))
+    } else {
+        let vnc =
+            json!({ "protocol": "vnc", "port": 5900, "auth_mode": "ask", "credential_id": null });
+        (
+            device(&app, &token, &folder, vnc).await,
+            json!({ "password": "Vnc-Pw1!" }),
+        )
+    };
+    let address = serve(state).await;
+    let mut socket = open(address, &id, &token, "display", ORIGIN).await.unwrap();
+    start(&mut socket, start_with).await;
+    assert_eq!(connected(&mut socket).await["type"], "connected");
+    instructions_until(&mut socket, "3.img,").await;
+    socket
+}
+
+/// Puts `text` on the session's clipboard and waits for the lab desktop's
+/// answer (`echo:<text>`, deploy/testlab/desktop/clipboard-echo) to come back
+/// as a clipboard stream.
+async fn clipboard_round_trip(socket: &mut Socket, text: &str) {
+    use base64::Engine;
+    let base64 = base64::engine::general_purpose::STANDARD;
+    let blob = base64.encode(text);
+    socket
+        .send(Message::Text(
+            format!(
+                "9.clipboard,1.0,10.text/plain;4.blob,1.0,{}.{blob};3.end,1.0;",
+                blob.len()
+            )
+            .into(),
+        ))
+        .await
+        .unwrap();
+    let expected = format!("echo:{text}");
+    let mut received = Vec::new();
+    let mut parser = remotehub_gateway::guacamole::Parser::default();
+    // Clipboard streams by index, with the blobs so far.
+    let mut streams = std::collections::HashMap::<String, Vec<u8>>::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while !received.contains(&expected) {
+        let message = tokio::time::timeout_at(deadline, socket.next())
+            .await
+            .unwrap_or_else(|_| panic!("{expected:?} not among the clipboards {received:?}"))
+            .unwrap()
+            .unwrap();
+        let Message::Text(frame) = message else {
+            continue;
+        };
+        parser.push(frame.as_bytes());
+        while let Some(instruction) = parser.next_instruction().unwrap() {
+            let args = &instruction.args;
+            match instruction.opcode.as_str() {
+                "clipboard" => {
+                    streams.insert(args[0].clone(), Vec::new());
+                }
+                "blob" if streams.contains_key(&args[0]) => {
+                    let data = base64.decode(&args[1]).unwrap();
+                    streams.get_mut(&args[0]).unwrap().extend(data);
+                }
+                "end" => {
+                    if let Some(data) = streams.remove(&args[0]) {
+                        received.push(String::from_utf8_lossy(&data).into_owned());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn text_crosses_the_rdp_clipboard_both_ways(pool: PgPool) {
+    let mut socket = open_desktop(pool, "rdp").await;
+    // Not beyond U+FFFF: guacd 1.6.0 writes the RDP clipboard's UTF-16
+    // without surrogate pairs (GUAC_WRITE_UTF16 in src/common/iconv.c), so
+    // U+1F600 arrives as U+F600.
+    clipboard_round_trip(&mut socket, "über RDP €").await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn text_crosses_the_vnc_clipboard_both_ways(pool: PgPool) {
+    let mut socket = open_desktop(pool, "vnc").await;
+    // VNC carries Latin-1 only; the VNC display is shared with other tests,
+    // so the text is this test's own.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap();
+    clipboard_round_trip(&mut socket, &format!("vnc {}", now.as_nanos())).await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn an_rdp_desktop_follows_the_browser_window(pool: PgPool) {
+    let mut socket = open_desktop(pool, "rdp").await;
+    // Opened at 1024×768 (`start`); the browser's window changes.
+    socket
+        .send(Message::Text("4.size,4.1280,3.720;".into()))
+        .await
+        .unwrap();
+    instructions_until(&mut socket, "4.size,1.0,4.1280,3.720;").await;
+}

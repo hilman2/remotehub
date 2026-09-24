@@ -63,11 +63,43 @@ declare namespace Guacamole {
 		onEach(types: string[], listener: (event: Mouse.Event) => void): void;
 	}
 
+	namespace Keyboard {
+		class ModifierState {
+			shift: boolean;
+			ctrl: boolean;
+			alt: boolean;
+			meta: boolean;
+			hyper: boolean;
+		}
+	}
+
 	class Keyboard {
 		constructor(element?: HTMLElement | Document);
+		modifiers: Keyboard.ModifierState;
 		onkeydown: ((keysym: number) => boolean | void) | null;
 		onkeyup: ((keysym: number) => void) | null;
 		reset(): void;
+	}
+
+	class InputStream {
+		index: number;
+		sendAck(message: string, code: number): void;
+	}
+
+	class OutputStream {
+		index: number;
+	}
+
+	class StringReader {
+		constructor(stream: InputStream);
+		ontext: ((text: string) => void) | null;
+		onend: (() => void) | null;
+	}
+
+	class StringWriter {
+		constructor(stream: OutputStream);
+		sendText(text: string): void;
+		sendEnd(): void;
 	}
 
 	class Client {
@@ -78,6 +110,8 @@ declare namespace Guacamole {
 		sendSize(width: number, height: number): void;
 		sendKeyEvent(pressed: 0 | 1 | boolean, keysym: number): void;
 		sendMouseState(state: Mouse.State, applyDisplayScale?: boolean): void;
+		createClipboardStream(mimetype: string): OutputStream;
+		onclipboard: ((stream: InputStream, mimetype: string) => void) | null;
 		onstatechange: ((state: number) => void) | null;
 		onerror: ((status: Status) => void) | null;
 		static State: {
