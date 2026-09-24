@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { parse } from 'svelte/compiler';
 import { describe, expect, it } from 'vitest';
 import en from '../../messages/en.json';
+import { AUDIT_ACTIONS } from './api/generated/audit';
 import { ERROR_CODES } from './api/generated/problem';
 
 const SRC = join(import.meta.dirname, '..');
@@ -132,6 +133,8 @@ describe('message catalogs', () => {
 		}
 		// Error messages are looked up by code in errorMessage() (lib/api/errors.ts).
 		for (const code of ERROR_CODES) used.add(`error_${code}`);
+		// Audit actions are looked up by name in auditActionLabel() (lib/api/audit.ts).
+		for (const action of AUDIT_ACTIONS) used.add(`audit_${action.replaceAll('.', '_')}`);
 		const unused = Object.keys(en).filter((key) => key !== '$schema' && !used.has(key));
 		expect(unused).toEqual([]);
 	});

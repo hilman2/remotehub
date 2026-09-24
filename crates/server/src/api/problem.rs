@@ -44,6 +44,7 @@ error_codes! {
     NotFound = ("not_found", NOT_FOUND, "Not found"),
     InvalidRequest = ("invalid_request", BAD_REQUEST, "Invalid request"),
     Unauthenticated = ("unauthenticated", UNAUTHORIZED, "Not signed in"),
+    Forbidden = ("forbidden", FORBIDDEN, "Not permitted"),
     InvalidCredentials = ("invalid_credentials", UNAUTHORIZED, "Invalid user name or password"),
     AccountDisabled = ("account_disabled", FORBIDDEN, "Account disabled"),
     AccountLocked = ("account_locked", FORBIDDEN, "Account locked out"),

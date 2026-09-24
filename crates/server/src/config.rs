@@ -35,6 +35,9 @@ pub struct Config {
     /// File with the vault's master keys (a Docker secret), never an
     /// environment variable.
     pub master_key_file: PathBuf,
+    /// Groups whose members administer remotehub: SIDs or group names
+    /// (names are looked up in the directory at startup).
+    pub admin_groups: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,6 +156,16 @@ impl Config {
                 .ok_or(ConfigError::MissingFile("REMOTEHUB_MASTER_KEY_FILE"))?,
         );
 
+        let admin_groups = setting("REMOTEHUB_ADMIN_GROUPS")?
+            .map(|list| {
+                list.split([',', ';'])
+                    .map(str::trim)
+                    .filter(|g| !g.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+
         Ok(Config {
             listen,
             database_url,
@@ -162,6 +175,7 @@ impl Config {
             session,
             ldap,
             master_key_file,
+            admin_groups,
         })
     }
 }
@@ -223,6 +237,7 @@ impl fmt::Debug for Config {
             .field("session", &self.session)
             .field("ldap", &self.ldap.as_ref().map(|l| &l.url))
             .field("master_key_file", &self.master_key_file)
+            .field("admin_groups", &self.admin_groups)
             .finish()
     }
 }
@@ -268,6 +283,7 @@ mod tests {
         assert_eq!(config.session.idle, Duration::from_secs(30 * 60));
         assert_eq!(config.session.max, Duration::from_secs(12 * 3600));
         assert!(config.ldap.is_none());
+        assert!(config.admin_groups.is_empty());
         assert!(!config.log_json);
 
         assert_eq!(
@@ -280,6 +296,16 @@ mod tests {
                 ConfigError::Missing(name)
             );
         }
+    }
+
+    #[test]
+    fn lists_admin_groups() {
+        let config = Config::from_lookup(lookup(&[(
+            "REMOTEHUB_ADMIN_GROUPS",
+            " RH Admins , S-1-5-21-1-2-3-512;;",
+        )]))
+        .unwrap();
+        assert_eq!(config.admin_groups, ["RH Admins", "S-1-5-21-1-2-3-512"]);
     }
 
     #[test]

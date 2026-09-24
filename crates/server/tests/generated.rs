@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use remotehub_server::api::problem;
+use remotehub_server::audit;
 
 fn check(relative: &str, expected: &str) {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -27,4 +28,9 @@ fn generated_error_codes_are_up_to_date() {
         "web/src/lib/api/generated/problem.ts",
         &problem::typescript(),
     );
+}
+
+#[test]
+fn generated_audit_actions_are_up_to_date() {
+    check("web/src/lib/api/generated/audit.ts", &audit::typescript());
 }

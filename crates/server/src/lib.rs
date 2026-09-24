@@ -2,6 +2,7 @@
 //! the web UI in one binary. See docs/architecture.md.
 
 pub mod api;
+pub mod audit;
 pub mod auth;
 pub mod config;
 pub mod db;
@@ -41,6 +42,8 @@ pub struct Settings {
     /// e.g. `https://remotehub.example.com`
     pub public_origin: String,
     pub session: SessionConfig,
+    /// SIDs of the groups whose members are administrators.
+    pub admin_groups: Vec<String>,
 }
 
 impl AppState {

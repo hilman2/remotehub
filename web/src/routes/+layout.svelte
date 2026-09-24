@@ -61,11 +61,20 @@
 				<nav class="flex items-center gap-1 text-sm text-ink-2" aria-label={m.nav_label()}>
 					<a
 						href={resolve('/')}
-						class="rounded-md px-2.5 py-1.5 hover:bg-surface-2 hover:text-ink"
-						aria-current="page"
+						class="rounded-md px-2.5 py-1.5 hover:bg-surface-2 hover:text-ink aria-[current=page]:text-ink"
+						aria-current={page.url.pathname === resolve('/') ? 'page' : undefined}
 					>
 						{m.nav_devices()}
 					</a>
+					{#if session.user.admin}
+						<a
+							href={resolve('/audit')}
+							class="rounded-md px-2.5 py-1.5 hover:bg-surface-2 hover:text-ink aria-[current=page]:text-ink"
+							aria-current={page.url.pathname === resolve('/audit') ? 'page' : undefined}
+						>
+							{m.nav_audit()}
+						</a>
+					{/if}
 				</nav>
 				<div class="ml-auto flex items-center gap-2">
 					<span

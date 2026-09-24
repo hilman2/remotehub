@@ -37,5 +37,22 @@
 	"sign_in_submit": "Sign in",
 	"sign_in_busy": "Signing in …",
 	"sign_out": "Sign out",
-	"signed_in_as": "Signed in as {name}"
+	"signed_in_as": "Signed in as {name}",
+	"nav_audit": "Audit log",
+	"audit_title": "Audit log",
+	"audit_intro": "Every sign-in, connection and change, newest first.",
+	"audit_col_time": "Time",
+	"audit_col_actor": "Who",
+	"audit_col_action": "What",
+	"audit_col_address": "From",
+	"audit_empty": "No entries yet.",
+	"audit_more": "Older entries",
+	"audit_verify": "Verify integrity",
+	"audit_verify_ok": "The log is intact: {entries} entries checked.",
+	"audit_verify_broken": "The log was changed from entry {seq} on.",
+	"audit_session_sign_in": "Signed in",
+	"audit_session_sign_in_failed": "Sign-in failed",
+	"audit_session_sign_out": "Signed out",
+	"audit_audit_verified": "Verified the audit log",
+	"error_forbidden": "You are not permitted to do this."
 }

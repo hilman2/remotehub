@@ -10,18 +10,42 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use remotehub_directory::{AuthError, Identity};
 use secrecy::SecretString;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use sqlx::PgExecutor;
 use uuid::Uuid;
 
 use super::problem::{ErrorCode, Problem};
-use crate::AppState;
+use crate::audit::{self, Action, Actor, Entry};
 use crate::auth::{PER_ADDRESS, PER_USER};
 use crate::session::{self, Session};
+use crate::{AppState, Settings};
 
 #[derive(Deserialize)]
 pub struct SignIn {
     username: String,
     password: SecretString,
+}
+
+/// The signed-in user as the UI sees them.
+#[derive(Debug, Serialize)]
+pub struct Me {
+    username: String,
+    display_name: String,
+    kind: String,
+    /// May manage remotehub: folders at the top, grants, the audit log.
+    admin: bool,
+}
+
+impl Me {
+    pub fn of(session: &Session, settings: &Settings) -> Self {
+        Me {
+            username: session.username.clone(),
+            display_name: session.display_name.clone(),
+            kind: session.kind.clone(),
+            admin: session.is_admin(settings),
+        }
+    }
 }
 
 /// The client's address as seen by this server (a reverse proxy's address
@@ -66,42 +90,105 @@ pub async fn sign_in(
             if !matches!(error, AuthError::Unavailable(_) | AuthError::Directory(_)) {
                 state.limiter.failed(&keys);
             }
+            let problem = problem_for(&error);
             tracing::warn!(username = ?username, %address, reason = %error, "sign-in failed");
-            return Err(problem_for(&error));
+            audit::record(
+                &state.db,
+                Entry {
+                    actor: Actor {
+                        id: None,
+                        name: typed_name(&username),
+                    },
+                    action: Action::SignInFailed,
+                    object: None,
+                    details: json!({ "reason": problem.code }),
+                    address: Some(&address),
+                },
+            )
+            .await?;
+            return Err(problem);
         }
     };
     state.limiter.succeeded(&username);
 
-    let user_id = upsert_directory_user(&state, &identity).await?;
     let groups: Vec<String> = identity.groups.iter().map(ToString::to_string).collect();
-    let token = session::create(&state.db, user_id, &groups, state.settings.session.max).await?;
+    let mut tx = state.db.begin().await?;
+    let user_id = upsert_directory_user(&mut *tx, &identity).await?;
+    let token = session::create(&mut *tx, user_id, &groups, state.settings.session.max).await?;
+    audit::record(
+        &mut *tx,
+        Entry {
+            actor: Actor {
+                id: Some(user_id),
+                name: &identity.username,
+            },
+            action: Action::SignIn,
+            object: None,
+            details: json!({ "sid": identity.sid, "kind": "directory" }),
+            address: Some(&address),
+        },
+    )
+    .await?;
+    tx.commit().await?;
     tracing::info!(username = %identity.username, sid = %identity.sid, %address, "signed in");
 
-    let me = Session {
+    let session = Session {
         user_id,
         username: identity.username,
         display_name: identity.display_name,
         kind: "directory".to_owned(),
         groups,
     };
+    let me = Me::of(&session, &state.settings);
     Ok(([session::set_cookie(&token)], Json(me)))
 }
 
-pub async fn current(session: Session) -> Json<Session> {
-    Json(session)
+pub async fn current(State(state): State<AppState>, session: Session) -> Json<Me> {
+    Json(Me::of(&session, &state.settings))
 }
 
 pub async fn sign_out(
     State(state): State<AppState>,
+    ClientAddress(address): ClientAddress,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, Problem> {
-    if let Some(token) = session::token(&headers) {
-        session::delete(&state.db, &token).await?;
+    if let Some(token) = session::token(&headers)
+        && let Some(ended) = session::lookup(&state.db, &token, state.settings.session.idle).await?
+    {
+        let mut tx = state.db.begin().await?;
+        session::delete(&mut *tx, &token).await?;
+        audit::record(
+            &mut *tx,
+            Entry {
+                actor: Actor {
+                    id: Some(ended.user_id),
+                    name: &ended.username,
+                },
+                action: Action::SignOut,
+                object: None,
+                details: json!({}),
+                address: Some(&address),
+            },
+        )
+        .await?;
+        tx.commit().await?;
     }
     Ok((StatusCode::NO_CONTENT, [session::clear_cookie()]))
 }
 
-async fn upsert_directory_user(state: &AppState, identity: &Identity) -> Result<Uuid, sqlx::Error> {
+/// A typed user name for the audit log, cut to a sane length.
+fn typed_name(username: &str) -> &str {
+    let name = username.trim();
+    match name.char_indices().nth(128) {
+        Some((cut, _)) => &name[..cut],
+        None => name,
+    }
+}
+
+async fn upsert_directory_user<'e>(
+    db: impl PgExecutor<'e>,
+    identity: &Identity,
+) -> Result<Uuid, sqlx::Error> {
     sqlx::query_scalar(
         "INSERT INTO users (kind, sid, guid, username, display_name, email, last_sign_in_at)
          VALUES ('directory', $1, $2, $3, $4, $5, now())
@@ -118,7 +205,7 @@ async fn upsert_directory_user(state: &AppState, identity: &Identity) -> Result<
     .bind(&identity.username)
     .bind(&identity.display_name)
     .bind(&identity.email)
-    .fetch_one(&state.db)
+    .fetch_one(db)
     .await
 }
 
@@ -136,4 +223,16 @@ fn problem_for(error: &AuthError) -> Problem {
         }
         AuthError::Unavailable(_) | AuthError::Directory(_) => ErrorCode::DirectoryUnavailable,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_names_are_cut_at_a_character_boundary() {
+        assert_eq!(typed_name(" alice "), "alice");
+        let long = "ä".repeat(200);
+        assert_eq!(typed_name(&long).chars().count(), 128);
+    }
 }

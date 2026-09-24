@@ -91,6 +91,17 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - Plaintext lives only in `secrecy`/`zeroize` types and never appears in logs, API responses (except the
   audited `reveal`), environment variables or command lines. Core dumps are disabled.
 
+## 4a. Audit log
+
+- Table `audit_log`, written in the same transaction as the action it records. A trigger numbers every
+  entry without gaps (advisory lock) and stores the hash of its predecessor and its own SHA-256 over all
+  fields; the chain starts from a hash of the installation id.
+- Triggers refuse UPDATE, DELETE and TRUNCATE. A superuser can bypass them, but not unnoticed:
+  `remotehub verify-audit` and `POST /api/audit/verify` recompute the chain and name the first broken entry.
+- Actions have stable names (`session.sign_in` …), defined once in `crates/server/src/audit.rs`; the UI
+  translates them (generated list, type-checked messages). Details never contain secrets.
+- Administrators (members of `REMOTEHUB_ADMIN_GROUPS`, break-glass accounts) read the log in the UI.
+
 ## 5. Protocol engines
 
 | Protocol | Engine | Browser | Recording (M5) |

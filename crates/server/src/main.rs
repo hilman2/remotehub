@@ -1,15 +1,15 @@
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use std::path::Path;
-
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use remotehub_directory::Sid;
 use remotehub_directory::ldap::LdapDirectory;
 use remotehub_server::auth::Authenticator;
 use remotehub_server::config::Config;
-use remotehub_server::{AppState, Settings, VERSION, app, db, session};
+use remotehub_server::{AppState, Settings, VERSION, app, audit, db, session};
 use remotehub_vault::{DynVault, FileKeyring, KeyProvider, Vault, generate_key_line};
 use tracing_subscriber::EnvFilter;
 
@@ -32,6 +32,8 @@ enum Command {
         #[arg(long, default_value_t = 1)]
         version: i32,
     },
+    /// Recompute the audit log's hash chain; exits with 1 if it is broken.
+    VerifyAudit,
 }
 
 #[tokio::main]
@@ -43,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", generate_key_line(version).as_str());
             Ok(())
         }
+        Command::VerifyAudit => verify_audit().await,
     }
 }
 
@@ -61,7 +64,7 @@ async fn serve() -> anyhow::Result<()> {
         .await
         .context("cannot apply database migrations")?;
 
-    let directory: Option<Arc<dyn Authenticator>> = match config.ldap {
+    let ldap = match config.ldap {
         Some(ldap) => {
             tracing::info!(url = %ldap.url, base = %ldap.base_dn, "signing in against LDAP");
             Some(Arc::new(
@@ -73,10 +76,13 @@ async fn serve() -> anyhow::Result<()> {
             None
         }
     };
+    let admin_groups = resolve_admin_groups(&config.admin_groups, ldap.as_deref()).await?;
+    let directory = ldap.map(|ldap| ldap as Arc<dyn Authenticator>);
 
     let settings = Settings {
         public_origin: config.public_origin,
         session: config.session,
+        admin_groups,
     };
     let state = AppState::new(pool.clone(), directory, settings, vault);
     tokio::spawn(purge_sessions(pool, config.session.idle));
@@ -93,6 +99,62 @@ async fn serve() -> anyhow::Result<()> {
     .await?;
     tracing::info!("stopped");
     Ok(())
+}
+
+/// Turns the configured admin groups into SIDs; names are looked up in the
+/// directory (exact name, case-insensitive).
+async fn resolve_admin_groups(
+    entries: &[String],
+    ldap: Option<&LdapDirectory>,
+) -> anyhow::Result<Vec<String>> {
+    let mut sids = Vec::new();
+    for entry in entries {
+        if entry.parse::<Sid>().is_ok() {
+            sids.push(entry.clone());
+            continue;
+        }
+        let ldap = ldap.with_context(|| {
+            format!(
+                "REMOTEHUB_ADMIN_GROUPS names the group {entry:?}, but no directory is configured"
+            )
+        })?;
+        let group = ldap
+            .search_groups(entry, 50)
+            .await
+            .with_context(|| format!("cannot look up the admin group {entry:?}"))?
+            .into_iter()
+            .find(|g| g.name.eq_ignore_ascii_case(entry))
+            .with_context(|| format!("the admin group {entry:?} does not exist"))?;
+        tracing::info!(group = %group.name, sid = %group.sid, "admin group");
+        sids.push(group.sid.to_string());
+    }
+    if sids.is_empty() {
+        tracing::warn!(
+            "REMOTEHUB_ADMIN_GROUPS is empty: only break-glass accounts can administer remotehub"
+        );
+    }
+    Ok(sids)
+}
+
+async fn verify_audit() -> anyhow::Result<()> {
+    let config = Config::from_env()?;
+    let pool = db::connect(&config.database_url)
+        .await
+        .context("cannot connect to the database")?;
+    let result = audit::verify(&pool).await?;
+    match result.first_broken {
+        None => {
+            println!("audit log intact: {} entries", result.entries);
+            Ok(())
+        }
+        Some(seq) => {
+            eprintln!(
+                "audit log BROKEN from entry {seq} on ({} entries)",
+                result.entries
+            );
+            std::process::exit(1);
+        }
+    }
 }
 
 fn load_vault(path: &Path) -> anyhow::Result<DynVault> {
