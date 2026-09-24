@@ -11,6 +11,7 @@ use http_body_util::BodyExt;
 use remotehub_directory::{AuthError, Identity, IdentityProvider, Sid};
 use remotehub_server::config::SessionConfig;
 use remotehub_server::{AppState, Settings};
+use remotehub_vault::{DynVault, FileKeyring, Vault, generate_key_line};
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
 use sqlx::PgPool;
@@ -38,8 +39,13 @@ pub fn unreachable_pool() -> PgPool {
         .unwrap()
 }
 
+/// A vault with a fresh random master key.
+pub fn vault() -> DynVault {
+    Vault::new(Box::new(FileKeyring::parse(&generate_key_line(1)).unwrap()))
+}
+
 pub fn state(db: PgPool) -> AppState {
-    AppState::new(db, Some(Arc::new(FakeDirectory)), settings())
+    AppState::new(db, Some(Arc::new(FakeDirectory)), settings(), vault())
 }
 
 /// alice / right signs in (member of one group); carol is disabled;

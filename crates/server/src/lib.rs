@@ -5,6 +5,7 @@ pub mod api;
 pub mod auth;
 pub mod config;
 pub mod db;
+pub mod secrets;
 pub mod session;
 
 use std::path::Path;
@@ -18,6 +19,7 @@ use tower_http::trace::TraceLayer;
 
 use auth::{Authenticator, SignInLimiter};
 use config::SessionConfig;
+use remotehub_vault::DynVault;
 
 /// Version of this build; also the release version (workspace Cargo.toml).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -29,6 +31,8 @@ pub struct AppState {
     pub directory: Option<Arc<dyn Authenticator>>,
     pub settings: Arc<Settings>,
     pub limiter: Arc<SignInLimiter>,
+    /// Seals and opens stored secrets (ADR 0004).
+    pub vault: Arc<DynVault>,
 }
 
 /// Settings the request handlers need.
@@ -40,12 +44,18 @@ pub struct Settings {
 }
 
 impl AppState {
-    pub fn new(db: PgPool, directory: Option<Arc<dyn Authenticator>>, settings: Settings) -> Self {
+    pub fn new(
+        db: PgPool,
+        directory: Option<Arc<dyn Authenticator>>,
+        settings: Settings,
+        vault: DynVault,
+    ) -> Self {
         AppState {
             db,
             directory,
             settings: Arc::new(settings),
             limiter: Arc::new(SignInLimiter::new(Duration::from_secs(5 * 60))),
+            vault: Arc::new(vault),
         }
     }
 }

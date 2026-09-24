@@ -250,6 +250,6 @@ async fn invalid_bodies_and_missing_directory_are_problems(pool: PgPool) {
 }
 
 fn app_without_directory(pool: PgPool) -> axum::Router {
-    let state = AppState::new(pool, None, settings());
+    let state = AppState::new(pool, None, settings(), common::vault());
     app(state, None)
 }
