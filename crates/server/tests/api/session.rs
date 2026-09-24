@@ -313,6 +313,62 @@ async fn the_sign_in_password_is_kept_sealed_with_a_key_only_the_browser_has(poo
     );
 }
 
+/// A sign-in from `client` that reaches the server through the reverse proxy
+/// at 127.0.0.1.
+fn through_proxy(
+    username: &str,
+    password: &str,
+    client: &str,
+) -> axum::http::Request<axum::body::Body> {
+    let mut request = sign_in_request(username, password);
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+            [127, 0, 0, 1],
+            41000,
+        ))));
+    request
+        .headers_mut()
+        .insert("x-forwarded-for", client.parse().unwrap());
+    request
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn behind_a_trusted_proxy_every_client_counts_for_itself(pool: PgPool) {
+    let mut settings = settings();
+    settings.trusted_proxies = vec!["127.0.0.1".parse().unwrap()];
+    let app = app(
+        AppState::new(
+            pool.clone(),
+            Some(std::sync::Arc::new(crate::common::FakeDirectory)),
+            settings,
+            crate::common::vault(),
+        ),
+        None,
+    );
+    // One client fails for many names, until its address is blocked.
+    let mut last = String::new();
+    for n in 0..40 {
+        last = send(
+            &app,
+            through_proxy(&format!("guess{n}"), "x", "203.0.113.7"),
+        )
+        .await
+        .code();
+    }
+    assert_eq!(last, "too_many_attempts");
+    // Another client behind the same proxy still signs in.
+    let other = send(&app, through_proxy("alice", "right", "203.0.113.8")).await;
+    assert_eq!(other.status, StatusCode::OK);
+
+    let addresses: Vec<String> =
+        sqlx::query_scalar("SELECT DISTINCT address FROM audit_log ORDER BY address")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(addresses, ["203.0.113.7", "203.0.113.8"]);
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn keeping_the_password_can_be_switched_off(pool: PgPool) {
     let mut settings = settings();

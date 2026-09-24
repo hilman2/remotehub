@@ -79,6 +79,7 @@ server {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
         proxy_read_timeout 12h;
@@ -93,8 +94,19 @@ map $http_upgrade $connection_upgrade {
 ```
 
 remotehub refuses changes from pages under any origin other than `REMOTEHUB_PUBLIC_URL`, so people must open
-exactly that address, not another name of the same host. For now, remotehub sees the proxy's address as every client's address: in the audit
-log, and for the limit on failed sign-ins per address.
+exactly that address, not another name of the same host.
+
+The proxy names the client in `X-Forwarded-For`; Caddy does that by itself, nginx with the line above.
+remotehub believes that header only from the gateway of its Docker network, which is how a proxy on the host
+reaches it. The network uses `10.213.213.0/24`; guacd cannot reach devices in that range. If your network uses
+it, set another range in `.env` before the first start:
+
+```
+REMOTEHUB_SUBNET=10.99.99.0/24
+REMOTEHUB_GATEWAY=10.99.99.1
+```
+
+A proxy elsewhere than on this host goes into `REMOTEHUB_TRUSTED_PROXIES` in `compose.yml` instead.
 
 ## First sign-in
 

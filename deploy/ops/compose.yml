@@ -39,6 +39,9 @@ services:
       REMOTEHUB_RDP_KEYBOARD_LAYOUT: ${REMOTEHUB_RDP_KEYBOARD_LAYOUT:-en-us-qwerty}
       REMOTEHUB_SESSION_IDLE_MINUTES: ${REMOTEHUB_SESSION_IDLE_MINUTES:-30}
       REMOTEHUB_SESSION_MAX_HOURS: ${REMOTEHUB_SESSION_MAX_HOURS:-12}
+      # The reverse proxy on this host reaches remotehub through the gateway
+      # of the network below; it names the client in X-Forwarded-For.
+      REMOTEHUB_TRUSTED_PROXIES: ${REMOTEHUB_GATEWAY:-10.213.213.1}
     secrets: [db_password, master_key, ldap_bind_password]
     volumes:
       - ./certs:/run/certs:ro
@@ -82,7 +85,14 @@ services:
     pids_limit: 256
 
 networks:
+  # A fixed range, so the gateway that remotehub trusts stays the same.
+  # guacd cannot reach devices in this range: change both in .env if your
+  # network uses it.
   default:
+    ipam:
+      config:
+        - subnet: ${REMOTEHUB_SUBNET:-10.213.213.0/24}
+          gateway: ${REMOTEHUB_GATEWAY:-10.213.213.1}
   database:
     internal: true
 

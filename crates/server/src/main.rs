@@ -119,6 +119,7 @@ async fn serve() -> anyhow::Result<()> {
         own_account_connections: config.own_account_connections,
         guacd: config.guacd,
         rdp_keyboard_layout: config.rdp_keyboard_layout,
+        trusted_proxies: config.trusted_proxies,
     };
     let state = AppState::new(pool.clone(), directory, settings, vault);
     tokio::spawn(purge_sessions(pool, config.session.idle));
