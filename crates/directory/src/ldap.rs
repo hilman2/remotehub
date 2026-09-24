@@ -25,7 +25,7 @@ use rustls_pki_types::pem::PemObject;
 use secrecy::{ExposeSecret, SecretString};
 use uuid::Uuid;
 
-use crate::{AuthError, Group, Identity, IdentityProvider, Sid};
+use crate::{AuthError, Group, Identity, IdentityProvider, Principal, PrincipalKind, Sid};
 
 /// LDAP result codes.
 const SIZE_LIMIT_EXCEEDED: u32 = 4;
@@ -144,6 +144,52 @@ impl LdapDirectory {
         Ok(groups)
     }
 
+    /// Users whose account name, display name or UPN contains `query`.
+    pub async fn search_users(&self, query: &str, limit: i32) -> Result<Vec<Principal>, AuthError> {
+        let query = ldap3::ldap_escape(query.trim());
+        let filter = format!(
+            "(&(objectCategory=person)(objectClass=user)(|(sAMAccountName=*{query}*)(displayName=*{query}*)(userPrincipalName=*{query}*)){})",
+            self.config.user_filter.as_deref().unwrap_or_default()
+        );
+        let mut ldap = self.service().await?;
+        let SearchResult(entries, result) = ldap
+            .with_timeout(self.config.timeout)
+            .with_search_options(SearchOptions::new().sizelimit(limit))
+            .search(
+                &self.config.base_dn,
+                Scope::Subtree,
+                &filter,
+                vec![
+                    "sAMAccountName",
+                    "displayName",
+                    "userPrincipalName",
+                    "objectSid",
+                ],
+            )
+            .await
+            .map_err(unavailable)?;
+        let _ = ldap.unbind().await;
+        if result.rc != 0 && result.rc != SIZE_LIMIT_EXCEEDED {
+            return Err(AuthError::Directory(format!(
+                "user search failed with code {}: {}",
+                result.rc, result.text
+            )));
+        }
+        Ok(entries
+            .into_iter()
+            .filter_map(|entry| {
+                let entry = SearchEntry::construct(entry);
+                let account = first_text(&entry, "sAMAccountName")?;
+                Some(Principal {
+                    kind: PrincipalKind::User,
+                    sid: Sid::from_bytes(first_binary(&entry, "objectSid")?.as_slice()).ok()?,
+                    name: first_text(&entry, "displayName").unwrap_or_else(|| account.clone()),
+                    detail: first_text(&entry, "userPrincipalName").or(Some(account)),
+                })
+            })
+            .collect())
+    }
+
     async fn find_user(
         &self,
         ldap: &mut Ldap,
@@ -213,6 +259,26 @@ impl LdapDirectory {
 }
 
 impl IdentityProvider for LdapDirectory {
+    async fn search(&self, query: &str, limit: i32) -> Result<Vec<Principal>, AuthError> {
+        if query.trim().chars().count() < 2 {
+            return Ok(Vec::new());
+        }
+        let mut found: Vec<Principal> = self
+            .search_groups(query, limit)
+            .await?
+            .into_iter()
+            .map(|group| Principal {
+                kind: PrincipalKind::Group,
+                sid: group.sid,
+                name: group.name,
+                detail: None,
+            })
+            .collect();
+        found.extend(self.search_users(query, limit).await?);
+        found.sort_by_key(|p| (p.kind, p.name.to_lowercase()));
+        Ok(found)
+    }
+
     async fn authenticate(
         &self,
         username: &str,

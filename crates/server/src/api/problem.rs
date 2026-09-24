@@ -52,6 +52,8 @@ error_codes! {
     PasswordChangeRequired = ("password_change_required", FORBIDDEN, "Password must be changed"),
     TooManyAttempts = ("too_many_attempts", TOO_MANY_REQUESTS, "Too many failed sign-ins"),
     ForbiddenOrigin = ("forbidden_origin", FORBIDDEN, "Request from a foreign origin"),
+    NameTaken = ("name_taken", CONFLICT, "The name is already taken here"),
+    FolderNotEmpty = ("folder_not_empty", CONFLICT, "The folder is not empty"),
     DirectoryUnavailable = ("directory_unavailable", SERVICE_UNAVAILABLE, "Directory unavailable"),
     DatabaseUnavailable = ("database_unavailable", SERVICE_UNAVAILABLE, "Database unavailable"),
     Internal = ("internal", INTERNAL_SERVER_ERROR, "Internal server error"),

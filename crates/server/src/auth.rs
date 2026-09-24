@@ -7,7 +7,7 @@ use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use remotehub_directory::{AuthError, Identity, IdentityProvider};
+use remotehub_directory::{AuthError, Identity, IdentityProvider, Principal};
 use secrecy::SecretString;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -20,6 +20,12 @@ pub trait Authenticator: Send + Sync {
         username: &'a str,
         password: &'a SecretString,
     ) -> BoxFuture<'a, Result<Identity, AuthError>>;
+
+    fn search<'a>(
+        &'a self,
+        query: &'a str,
+        limit: i32,
+    ) -> BoxFuture<'a, Result<Vec<Principal>, AuthError>>;
 }
 
 impl<T: IdentityProvider> Authenticator for T {
@@ -29,6 +35,14 @@ impl<T: IdentityProvider> Authenticator for T {
         password: &'a SecretString,
     ) -> BoxFuture<'a, Result<Identity, AuthError>> {
         Box::pin(IdentityProvider::authenticate(self, username, password))
+    }
+
+    fn search<'a>(
+        &'a self,
+        query: &'a str,
+        limit: i32,
+    ) -> BoxFuture<'a, Result<Vec<Principal>, AuthError>> {
+        Box::pin(IdentityProvider::search(self, query, limit))
     }
 }
 

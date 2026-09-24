@@ -33,6 +33,23 @@ pub struct Identity {
     pub groups: Vec<Sid>,
 }
 
+/// A user or group found in the directory, for choosing whom to grant access.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Principal {
+    pub kind: PrincipalKind,
+    pub sid: Sid,
+    pub name: String,
+    /// For users: the UPN or account name, to tell people apart.
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrincipalKind {
+    Group,
+    User,
+}
+
 /// A group found in the directory, e.g. for choosing whom to grant access.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Group {
@@ -72,4 +89,11 @@ pub trait IdentityProvider: Send + Sync {
         username: &str,
         password: &SecretString,
     ) -> impl Future<Output = Result<Identity, AuthError>> + Send;
+
+    /// Users and groups whose name contains `query` (at least two characters).
+    fn search(
+        &self,
+        query: &str,
+        limit: i32,
+    ) -> impl Future<Output = Result<Vec<Principal>, AuthError>> + Send;
 }

@@ -63,5 +63,18 @@
 	"break_glass_banner": "Signed in with an emergency account. Everything you do is recorded.",
 	"audit_break_glass_created": "Created a break-glass account",
 	"audit_break_glass_reset": "Reset a break-glass account",
-	"audit_break_glass_deleted": "Deleted a break-glass account"
+	"audit_break_glass_deleted": "Deleted a break-glass account",
+	"error_name_taken": "This name is already used here.",
+	"error_folder_not_empty": "The folder is not empty. Move or delete its contents first.",
+	"audit_folder_created": "Created a folder",
+	"audit_folder_updated": "Changed a folder",
+	"audit_folder_deleted": "Deleted a folder",
+	"audit_device_created": "Created a device",
+	"audit_device_updated": "Changed a device",
+	"audit_device_deleted": "Deleted a device",
+	"audit_credential_created": "Created a credential",
+	"audit_credential_updated": "Changed a credential",
+	"audit_credential_deleted": "Deleted a credential",
+	"audit_grant_added": "Granted access",
+	"audit_grant_removed": "Removed access"
 }

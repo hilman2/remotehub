@@ -13,6 +13,8 @@ export const ERROR_CODES = [
 	'password_change_required',
 	'too_many_attempts',
 	'forbidden_origin',
+	'name_taken',
+	'folder_not_empty',
 	'directory_unavailable',
 	'database_unavailable',
 	'internal'

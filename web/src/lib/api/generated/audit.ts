@@ -8,7 +8,18 @@ export const AUDIT_ACTIONS = [
 	'audit.verified',
 	'break_glass.created',
 	'break_glass.reset',
-	'break_glass.deleted'
+	'break_glass.deleted',
+	'folder.created',
+	'folder.updated',
+	'folder.deleted',
+	'device.created',
+	'device.updated',
+	'device.deleted',
+	'credential.created',
+	'credential.updated',
+	'credential.deleted',
+	'grant.added',
+	'grant.removed'
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

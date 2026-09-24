@@ -76,6 +76,11 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - **Permissions:** a folder tree holds devices and credentials. A grant gives an AD group or a user a role
   on a folder or an entry: `list < connect < reveal < edit < manage`. Grants are inherited downwards and
   only allow. `authorize()` is the single decision point and is tested table-driven.
+- **Stored credentials only go where their users may send them:** linking a credential to a device, or
+  changing protocol, host or port of a device that has one, needs `connect` on that credential. Otherwise
+  anyone with `edit` on a device could point it at their own server and capture the password.
+- Objects a user cannot see answer `not_found`, so their existence does not leak; visible objects the user
+  may not change answer `forbidden`. Folders on the way to something visible are shown without a role.
 
 ## 4. Vault
 

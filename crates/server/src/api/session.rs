@@ -138,6 +138,7 @@ pub async fn sign_in(
         username: identity.username,
         display_name: identity.display_name,
         kind: "directory".to_owned(),
+        sid: Some(identity.sid.to_string()),
         groups,
     };
     let me = Me::of(&session, &state.settings);
@@ -227,6 +228,7 @@ pub async fn sign_in_break_glass(
         username: account.username,
         display_name: account.display_name,
         kind: "local".to_owned(),
+        sid: None,
         groups: Vec::new(),
     };
     let me = Me::of(&session, &state.settings);
