@@ -155,12 +155,22 @@ test('a stored password is shown and copied, and the audit log knows', async ({
 	await expect(page.getByRole('status').filter({ hasText: 'Copied' })).toBeVisible();
 	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Shown-Passw0rd!');
 
-	// The newest two entries, whatever an earlier run left.
+	// This credential's entries: other tests write to the log meanwhile.
+	const purposes = await page.evaluate(async (name) => {
+		const tree = await (await fetch('/api/tree')).json();
+		const id = tree.credentials.find((c: { name: string }) => c.name === name).id;
+		const log = (await (await fetch('/api/audit')).json()) as {
+			action: string;
+			object_id: string | null;
+			details: { purpose?: string };
+		}[];
+		return log
+			.filter((e) => e.action === 'credential.revealed' && e.object_id === id)
+			.map((e) => e.details.purpose);
+	}, credential);
+	expect(purposes).toEqual(['copy', 'show']);
 	await page.getByRole('link', { name: 'Audit log' }).click();
-	const rows = page.getByRole('row');
-	for (const row of [rows.nth(1), rows.nth(2)]) {
-		await expect(row).toContainText('Showed or copied a stored credential');
-	}
+	await expect(page.getByText('Showed or copied a stored credential').first()).toBeVisible();
 });
 
 test('the vault keeps folders, fields and icons, and shows what is shared', async ({ page }) => {
