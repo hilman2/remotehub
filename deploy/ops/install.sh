@@ -48,7 +48,7 @@ while [ $# -gt 0 ]; do
     --from) from="$2"; shift 2 ;;
     --package) package="$2"; shift 2 ;;
     --dir) dir="$2"; shift 2 ;;
-    -h | --help) sed -n '2,22p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,21p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
