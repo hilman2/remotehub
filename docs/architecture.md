@@ -114,6 +114,12 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   protected field makes a new version, into which the unchanged sealed values are copied. Personal vault
   entries carry the same inside their browser-sealed content, and personal folders are entries of kind
   `folder`.
+- **Files and history (`api/attachments.rs`, `api/reveal.rs`):** a credential's files are sealed under
+  their own ID (field `content`), at most 5 MiB each; downloading one needs `reveal` and is audited like a
+  reveal. Every sealed version of a credential stays, and `reveal` opens an older one by number. Personal
+  entries keep up to ten earlier states inside their sealed content, and their files are sealed in the
+  browser under an associated data of their own (`…\nfile\n<id>`), so a file never opens as an entry. The
+  browser makes passwords (Web Crypto, no look-alikes) and shows TOTP codes of `otpauth://` fields.
 - **Reveal (`api/reveal.rs`):** with `reveal`, a stored credential or a device's own credentials are shown
   or copied on their page. Each time is audited (`credential.revealed`, with `show` or `copy`) before the
   value leaves the server, and the answer is `no-store`. The UI hides a shown value and clears a copied

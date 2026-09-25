@@ -8,7 +8,7 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import Search from '@lucide/svelte/icons/search';
 	import { errorMessage } from '$lib/api/errors';
-	import { getLocale } from '$lib/i18n';
+	import { formatLocale, getLocale } from '$lib/i18n';
 	import { frequent, queryKey, rank, remember, type Pick } from '$lib/search/rank';
 	import Dialog from '$lib/components/Dialog.svelte';
 	import { m } from '$lib/paraglide/messages';
@@ -33,9 +33,18 @@
 		unlockWithRecovery,
 		type Entry,
 		type EntryContent,
+		type FileRef,
 		type StoredVault,
-		type UnlockKind
+		type UnlockKind,
+		MAX_FILE,
+		deleteFile,
+		readFile,
+		saveFile,
+		withHistory
 	} from '$lib/vault/vault';
+	import PasswordInput from '$lib/vault/PasswordInput.svelte';
+	import TotpCode from '$lib/vault/TotpCode.svelte';
+	import { totpOf } from '$lib/vault/totp';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
 	import FieldsEditor, { type EditedField } from '$lib/vault/FieldsEditor.svelte';
@@ -285,22 +294,81 @@
 		content.icon ??= 0;
 		editing = { id: entry?.id ?? null, content };
 		editedFields = (entry?.content?.fields ?? []).map((field) => ({ ...field }));
+		pendingFiles = [];
+		removedFiles = [];
 		error = null;
 		editorOpen = true;
 	}
 
+	/** Files chosen in the editor, sealed and stored on save. */
+	let pendingFiles = $state<File[]>([]);
+	/** Files removed in the editor, deleted once the entry is saved. */
+	let removedFiles = $state<string[]>([]);
+
+	function addFiles(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const chosen = [...(input.files ?? [])];
+		input.value = '';
+		if (chosen.some((file) => file.size > MAX_FILE)) {
+			error = m.vault_file_too_large({ megabytes: MAX_FILE / 1024 / 1024 });
+			return;
+		}
+		pendingFiles = [...pendingFiles, ...chosen];
+	}
+
+	/** Opens a file in the browser and hands it over as a download. */
+	async function download(ref: FileRef) {
+		if (!key) return;
+		const blob = await readFile(key, ref);
+		if (!blob) {
+			error = errorMessage('not_found');
+			return;
+		}
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = ref.name;
+		link.click();
+		setTimeout(() => URL.revokeObjectURL(url), 10_000);
+	}
+
+	const when = new Intl.DateTimeFormat(formatLocale(), { dateStyle: 'short', timeStyle: 'short' });
+	const kilobytes = new Intl.NumberFormat(formatLocale(), { style: 'unit', unit: 'kilobyte' });
+	const size = (bytes: number) => kilobytes.format(Math.max(1, Math.round(bytes / 1024)));
+
 	async function save(event: SubmitEvent) {
 		event.preventDefault();
 		if (!key || !editing) return;
-		const content: EntryContent = {
+		busy = true;
+		const added: FileRef[] = [];
+		for (const file of pendingFiles) {
+			const saved = await saveFile(key, file);
+			if (!saved) {
+				busy = false;
+				error = errorMessage('internal');
+				return;
+			}
+			added.push(saved);
+		}
+		let content: EntryContent = {
 			...editing.content,
 			fields: editedFields.map(({ name, value, protected: hidden }) => ({
 				name: name.trim(),
 				value,
 				protected: hidden
-			}))
+			})),
+			attachments: [
+				...(editing.content.attachments ?? []).filter((f) => !removedFiles.includes(f.id)),
+				...added
+			]
 		};
+		const before = entries.find((entry) => entry.id === editing?.id)?.content;
+		if (before) content = withHistory(before, content);
 		const result = await saveEntry(key, editing.id, content);
+		busy = false;
+		if (result.ok) {
+			for (const id of removedFiles) await deleteFile(id);
+		}
 		if (!result.ok) {
 			error = errorMessage(result.code);
 			return;
@@ -593,15 +661,42 @@
 								<p class="mt-1 font-mono break-all">{entry.content.password}</p>
 							{/if}
 							{#each entry.content.fields ?? [] as field (field.name)}
+								{@const totp = totpOf(field.name, field.value)}
 								<p class="mt-1 text-xs text-ink-2">
 									{field.name}:
-									{#if field.protected && revealed !== entry.id}
+									{#if totp && revealed === entry.id}
+										<TotpCode params={totp} />
+									{:else if (field.protected || totp) && revealed !== entry.id}
 										<span aria-hidden="true">••••••</span>
 									{:else}
 										<span class="font-mono break-all">{field.value}</span>
 									{/if}
 								</p>
 							{/each}
+							{#each entry.content.attachments ?? [] as file (file.id)}
+								<button
+									type="button"
+									class="mt-1 block text-xs text-accent hover:underline"
+									onclick={() => download(file)}
+								>
+									{file.name} ({size(file.size)})
+								</button>
+							{/each}
+							{#if revealed === entry.id && entry.content.history?.length}
+								<details class="mt-2 text-xs text-ink-2">
+									<summary class="cursor-pointer">{m.vault_history()}</summary>
+									<ul class="mt-1 space-y-1">
+										{#each entry.content.history as earlier (earlier.at)}
+											<li>
+												<span class="tabular-nums">{when.format(new Date(earlier.at))}</span>:
+												<span class="font-mono break-all" data-testid="earlier-password"
+													>{earlier.password}</span
+												>
+											</li>
+										{/each}
+									</ul>
+								</details>
+							{/if}
 						</div>
 						<div class="ml-auto flex flex-wrap gap-2">
 							<button
@@ -703,19 +798,50 @@
 				bind:value={editing.content.username}
 			/>
 			<label class={label} for="entry-password">{m.field_password()}</label>
-			<input
-				id="entry-password"
-				type="password"
-				class={field}
-				autocomplete="new-password"
-				bind:value={editing.content.password}
-			/>
+			<PasswordInput id="entry-password" bind:value={editing.content.password} />
 			<label class={label} for="entry-url">{m.field_url()}</label>
 			<input id="entry-url" class={field} bind:value={editing.content.url} />
 			<label class={label} for="entry-notes">{m.field_notes()}</label>
 			<textarea id="entry-notes" class={field} rows="3" bind:value={editing.content.notes}
 			></textarea>
 			<FieldsEditor id="entry" bind:fields={editedFields} />
+			<fieldset class="mt-3">
+				<legend class="text-sm font-medium">{m.vault_files()}</legend>
+				<ul class="mt-1 text-sm">
+					{#each (editing.content.attachments ?? []).filter((f) => !removedFiles.includes(f.id)) as file (file.id)}
+						<li class="flex items-center gap-2">
+							<span class="truncate">{file.name}</span>
+							<span class="text-xs text-ink-3">{size(file.size)}</span>
+							<button
+								type="button"
+								class="ml-auto rounded-md px-2 py-0.5 text-xs text-ink-3 hover:text-critical"
+								onclick={() => (removedFiles = [...removedFiles, file.id])}
+							>
+								{m.vault_remove()}
+							</button>
+						</li>
+					{/each}
+					{#each pendingFiles as file, index (index)}
+						<li class="flex items-center gap-2">
+							<span class="truncate">{file.name}</span>
+							<span class="text-xs text-ink-3">{size(file.size)}</span>
+							<button
+								type="button"
+								class="ml-auto rounded-md px-2 py-0.5 text-xs text-ink-3 hover:text-critical"
+								onclick={() => (pendingFiles = pendingFiles.filter((_, i) => i !== index))}
+							>
+								{m.vault_remove()}
+							</button>
+						</li>
+					{/each}
+				</ul>
+				<label
+					class="mt-1 inline-block cursor-pointer rounded-md px-2 py-1 text-sm text-ink-2 underline hover:text-ink"
+				>
+					{m.vault_add_file()}
+					<input type="file" class="sr-only" multiple onchange={addFiles} />
+				</label>
+			</fieldset>
 			<label class={label} for="entry-folder">{m.vault_folder()}</label>
 			<select id="entry-folder" class={field} bind:value={editing.content.parent}>
 				<option value={null}>{m.vault_title()}</option>

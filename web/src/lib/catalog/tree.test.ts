@@ -56,6 +56,7 @@ const tree: Tree = {
 			notes: '',
 			icon: 0,
 			fields: [],
+			attachments: [],
 			role: 'connect'
 		}
 	]

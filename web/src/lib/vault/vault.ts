@@ -11,10 +11,12 @@ import {
 	newRecoveryKey,
 	newVaultKey,
 	open,
+	openFile,
 	parseRecoveryKey,
 	passphraseKey,
 	randomBytes,
 	seal,
+	sealFile,
 	secretKey,
 	toBase64,
 	unwrapKey,
@@ -59,7 +61,89 @@ export interface EntryContent {
 	icon?: number;
 	/** Custom fields; protected ones are shown only on request. */
 	fields?: { name: string; value: string; protected: boolean }[];
+	/** Files, sealed apart (#100); here only what finds and names them. */
+	attachments?: FileRef[];
+	/** Earlier states of the entry, newest first (#100). */
+	history?: EarlierContent[];
 }
+
+export interface FileRef {
+	id: string;
+	name: string;
+	size: number;
+	type: string;
+}
+
+/** An entry as it was, with when it stopped being so. */
+export type EarlierContent = Omit<EntryContent, 'history' | 'attachments' | 'kind'> & {
+	at: string;
+};
+
+/** How many earlier states an entry keeps. */
+const HISTORY = 10;
+/** Sealed entries hold at most 64 KiB; the history makes room for the rest. */
+const ENTRY_BUDGET = 60_000;
+
+/**
+ * `next` with `before` added to its history, as far as the entry's size
+ * allows; unchanged content adds nothing.
+ */
+export function withHistory(before: EntryContent, next: EntryContent): EntryContent {
+	/** What a version of the entry is, without history and files. */
+	const state = (content: EntryContent) => ({
+		title: content.title,
+		username: content.username,
+		password: content.password,
+		url: content.url,
+		notes: content.notes,
+		fields: content.fields,
+		icon: content.icon,
+		parent: content.parent
+	});
+	if (JSON.stringify(state(before)) === JSON.stringify(state(next))) {
+		return { ...next, history: before.history };
+	}
+	const earlier: EarlierContent = { ...state(before), at: new Date().toISOString() };
+	const history = [earlier, ...(before.history ?? [])].slice(0, HISTORY);
+	while (history.length > 0 && JSON.stringify({ ...next, history }).length > ENTRY_BUDGET) {
+		history.pop();
+	}
+	return { ...next, history };
+}
+
+/** The largest file of the personal vault, in bytes. */
+export const MAX_FILE = 5 * 1024 * 1024;
+
+/** Seals a file and stores it; its reference goes into the entry. */
+export async function saveFile(key: CryptoKey, file: File): Promise<FileRef | null> {
+	const id = globalThis.crypto.randomUUID();
+	const bytes = new Uint8Array(await file.arrayBuffer());
+	const { nonce, ciphertext } = await sealFile(key, id, bytes);
+	const result = await api('PUT', `/api/personal/attachments/${id}`, {
+		nonce: toBase64(nonce),
+		ciphertext: toBase64(ciphertext)
+	});
+	if (!result.ok) return null;
+	return { id, name: file.name, size: file.size, type: file.type || 'application/octet-stream' };
+}
+
+/** The file's bytes, opened in the browser. */
+export async function readFile(key: CryptoKey, ref: FileRef): Promise<Blob | null> {
+	const result = await api<{ nonce: string; ciphertext: string }>(
+		'GET',
+		`/api/personal/attachments/${ref.id}`
+	);
+	if (!result.ok) return null;
+	const bytes = await openFile(
+		key,
+		ref.id,
+		fromBase64(result.data.nonce),
+		fromBase64(result.data.ciphertext)
+	);
+	return new Blob([bytes], { type: ref.type });
+}
+
+export const deleteFile = (id: string) => api('DELETE', `/api/personal/attachments/${id}`);
 
 /** An entry as read; `content` is null if it would not open with this key. */
 export interface Entry {

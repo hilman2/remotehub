@@ -36,6 +36,7 @@
 	 * a file. With `keep`, fields left empty keep what is stored.
 	 */
 	import { m } from '$lib/paraglide/messages';
+	import PasswordInput from '$lib/vault/PasswordInput.svelte';
 
 	let {
 		id,
@@ -74,14 +75,11 @@
 
 {#if kind === 'password'}
 	<label class={label} for="{id}-password">{m.field_password()}</label>
-	<input
+	<PasswordInput
 		id="{id}-password"
-		class={field}
-		type="password"
-		autocomplete="new-password"
 		required={!keep}
 		bind:value={password}
-		aria-describedby={keep ? `${id}-secret-hint` : undefined}
+		describedby={keep ? `${id}-secret-hint` : undefined}
 	/>
 	{#if keep}
 		<p id="{id}-secret-hint" class="mt-1 text-xs text-ink-3">{m.field_password_keep()}</p>

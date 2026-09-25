@@ -481,5 +481,15 @@
 	"vault_remove_folder": "Diesen leeren Ordner entfernen",
 	"vault_shared": "Mit mir geteilt",
 	"vault_shared_hint": "Zugangsdaten der sichtbaren Ordner. Mit dem Recht zum Anzeigen lassen sie sich auch hier anzeigen oder kopieren; jedes Mal wird protokolliert.",
-	"vault_shared_none": "Noch nichts geteilt."
+	"vault_shared_none": "Noch nichts geteilt.",
+	"vault_generate": "Passwort erzeugen",
+	"vault_files": "Dateien",
+	"vault_add_file": "Datei hinzufügen",
+	"vault_file_too_large": "Dateien dürfen bis zu {megabytes} MB groß sein.",
+	"vault_history": "Frühere Versionen",
+	"vault_totp_left": "{seconds} s",
+	"audit_credential_attachment_added": "Datei zu Zugangsdaten hinzugefügt",
+	"audit_credential_attachment_deleted": "Datei von Zugangsdaten entfernt",
+	"audit_personal_attachment_saved": "Datei im persönlichen Tresor gespeichert",
+	"audit_personal_attachment_deleted": "Datei im persönlichen Tresor gelöscht"
 }
