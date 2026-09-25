@@ -13,7 +13,15 @@ import {
 	secretKey,
 	toBase64,
 	unwrapKey,
-	wrapKey
+	wrapKey,
+	importOrganisationKey,
+	newOrganisationKey,
+	openKeyFile,
+	parsePrivateKey,
+	privateKeyText,
+	sealKeyFile,
+	unwrapForOrganisation,
+	wrapForOrganisation
 } from './crypto';
 
 const ENTRY = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
@@ -103,5 +111,46 @@ describe('personal vault encryption', () => {
 	it('carries bytes through base64', () => {
 		const bytes = randomBytes(40);
 		expect(fromBase64(toBase64(bytes))).toEqual(bytes);
+	});
+});
+
+describe('organisation recovery key', () => {
+	/** Whether `key` is the vault key: it opens what the vault key sealed. */
+	async function opens(key: CryptoKey, vaultKey: CryptoKey) {
+		const { nonce, ciphertext } = await seal(vaultKey, ENTRY, 'secret');
+		return (await open(key, ENTRY, nonce, ciphertext)) === 'secret';
+	}
+
+	it('opens a vault key wrapped for it, and only with its own private key', async () => {
+		const organisation = await newOrganisationKey();
+		const other = await newOrganisationKey();
+		const vaultKey = await newVaultKey();
+		const { ephemeral, wrapped } = await wrapForOrganisation(vaultKey, organisation.publicKey);
+		expect(ephemeral).toHaveLength(65);
+		const own = await importOrganisationKey(organisation.privateKey, organisation.publicKey);
+		const opened = await unwrapForOrganisation(new Uint8Array(wrapped), ephemeral, own);
+		expect(await opens(opened, vaultKey)).toBe(true);
+		// Another key pair's scalar with this public point opens nothing.
+		const stranger = importOrganisationKey(other.privateKey, organisation.publicKey).then((key) =>
+			unwrapForOrganisation(new Uint8Array(wrapped), ephemeral, key)
+		);
+		await expect(stranger).rejects.toThrow();
+	});
+
+	it('comes back from its printed text and from its sealed file', async () => {
+		const { publicKey, privateKey } = await newOrganisationKey();
+		const text = privateKeyText(privateKey);
+		expect(text).toMatch(/^([A-Z2-7]{4}-){12}[A-Z2-7]{4}$/);
+		expect(parsePrivateKey(text.toLowerCase().replaceAll('-', ' '))).toEqual(privateKey);
+		expect(parsePrivateKey(text.slice(0, -1))).toBeNull();
+
+		const file = await sealKeyFile('key-1', publicKey, privateKey, 'long enough passphrase');
+		expect(JSON.stringify(file)).not.toContain(toBase64(privateKey));
+		expect(await openKeyFile(file, 'long enough passphrase')).toEqual(privateKey);
+		await expect(openKeyFile(file, 'wrong passphrase')).rejects.toThrow();
+		// The key ID is bound to the file: another one does not open.
+		await expect(
+			openKeyFile({ ...file, key_id: 'key-2' }, 'long enough passphrase')
+		).rejects.toThrow();
 	});
 });

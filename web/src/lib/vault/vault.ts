@@ -5,6 +5,7 @@
  */
 import { api, lasting } from '$lib/api/client';
 import type { Pick } from '$lib/search/rank';
+import type { KdbxEntry } from './kdbx';
 import {
 	PBKDF2_ITERATIONS,
 	fromBase64,
@@ -20,10 +21,13 @@ import {
 	secretKey,
 	toBase64,
 	unwrapKey,
-	wrapKey
+	wrapForOrganisation,
+	wrapKey,
+	base64url,
+	fromBase64url
 } from './crypto';
 
-export type UnlockKind = 'passkey' | 'passphrase' | 'recovery';
+export type UnlockKind = 'passkey' | 'passphrase' | 'recovery' | 'organisation';
 
 export interface Unlock {
 	id: string;
@@ -39,6 +43,8 @@ export interface StoredVault {
 	entries: { id: string; nonce: string; ciphertext: string }[];
 	/** What the owner picked after searching, sealed; null before the first pick. */
 	search: { nonce: string; ciphertext: string } | null;
+	/** The organisation recovery key to wrap the vault key for (#95). */
+	organisation_key: { id: string; public_key: string } | null;
 }
 
 /**
@@ -127,12 +133,16 @@ export async function saveFile(key: CryptoKey, file: File): Promise<FileRef | nu
 	return { id, name: file.name, size: file.size, type: file.type || 'application/octet-stream' };
 }
 
-/** The file's bytes, opened in the browser. */
-export async function readFile(key: CryptoKey, ref: FileRef): Promise<Blob | null> {
-	const result = await api<{ nonce: string; ciphertext: string }>(
-		'GET',
-		`/api/personal/attachments/${ref.id}`
-	);
+/**
+ * The file's bytes, opened in the browser. `from` is where the sealed files
+ * are: the own vault's, or those of a vault being recovered (#95).
+ */
+export async function readFile(
+	key: CryptoKey,
+	ref: FileRef,
+	from = '/api/personal/attachments'
+): Promise<Blob | null> {
+	const result = await api<{ nonce: string; ciphertext: string }>('GET', `${from}/${ref.id}`);
 	if (!result.ok) return null;
 	const bytes = await openFile(
 		key,
@@ -222,6 +232,31 @@ export async function unlockWithPassphrase(vault: StoredVault, passphrase: strin
 	}
 }
 
+/**
+ * Wraps the vault key for the organisation recovery key (#95) unless it is
+ * already, for that key. Runs whenever the vault is open, so a vault set up
+ * before the key, or before a new one, is covered at its next unlock.
+ * Returns whether it stored a new wrap.
+ */
+export async function coverForOrganisation(key: CryptoKey, vault: StoredVault): Promise<boolean> {
+	const target = vault.organisation_key;
+	if (!target) return false;
+	const covered = vault.unlocks.some(
+		(unlock) => unlock.kind === 'organisation' && unlock.params.key_id === target.id
+	);
+	if (covered) return false;
+	const { ephemeral, wrapped } = await wrapForOrganisation(key, fromBase64(target.public_key));
+	const params = { key_id: target.id, ephemeral: toBase64(ephemeral) };
+	return (await addUnlock('organisation', params, wrapped)).ok;
+}
+
+/**
+ * Whether the recovery key was given by an administrator after a recovery
+ * (#95): used once, it is to be replaced, together with the passphrase.
+ */
+export const oneTimeRecovery = (vault: StoredVault) =>
+	find(vault, 'recovery')?.params.one_time === true;
+
 /** The vault key, or null if the recovery key is malformed or wrong. */
 export async function unlockWithRecovery(vault: StoredVault, text: string) {
 	const unlock = find(vault, 'recovery');
@@ -237,15 +272,6 @@ export async function unlockWithRecovery(vault: StoredVault, text: string) {
 // WebAuthn's PRF extension: a secret per credential and salt, which the
 // authenticator computes only after user verification.
 type PrfResults = { prf?: { enabled?: boolean; results?: { first?: ArrayBuffer } } };
-
-function base64url(bytes: Uint8Array): string {
-	return toBase64(bytes).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
-}
-
-function fromBase64url(text: string): Uint8Array<ArrayBuffer> {
-	const padded = text.replaceAll('-', '+').replaceAll('_', '/');
-	return fromBase64(padded + '='.repeat((4 - (padded.length % 4)) % 4));
-}
 
 /** Whether the browser offers passkeys at all; PRF support shows only when adding one. */
 export function passkeysAvailable(): boolean {
@@ -335,7 +361,10 @@ export async function unlockWithPasskey(vault: StoredVault) {
 	}
 }
 
-export async function readEntries(key: CryptoKey, vault: StoredVault): Promise<Entry[]> {
+export async function readEntries(
+	key: CryptoKey,
+	vault: { entries: StoredVault['entries'] }
+): Promise<Entry[]> {
 	return Promise.all(
 		vault.entries.map(async ({ id, nonce, ciphertext }) => {
 			try {
@@ -378,6 +407,49 @@ export async function savePicks(key: CryptoKey, picks: Pick[]) {
 		{ nonce: toBase64(nonce), ciphertext: toBase64(ciphertext) },
 		lasting
 	);
+}
+
+/**
+ * The readable entries as KeePass entries (#99), each with the path of its
+ * personal folders. `file` opens a file of an entry.
+ */
+export async function asKdbx(
+	entries: Entry[],
+	file: (ref: FileRef) => Promise<Blob | null>
+): Promise<KdbxEntry[]> {
+	const folders = entries.filter((entry) => entry.content?.kind === 'folder');
+	const pathOf = (parent: string | null | undefined): string[] => {
+		const names: string[] = [];
+		let at = folders.find((f) => f.id === parent);
+		// A bound, since the parents are what the entries say.
+		while (at && names.length < 20) {
+			names.unshift(at.content?.title ?? '');
+			at = folders.find((f) => f.id === at?.content?.parent);
+		}
+		return names;
+	};
+	const out: KdbxEntry[] = [];
+	for (const entry of entries) {
+		const content = entry.content;
+		if (!content || content.kind === 'folder') continue;
+		const files: KdbxEntry['files'] = [];
+		for (const ref of content.attachments ?? []) {
+			const blob = await file(ref);
+			if (blob) files.push({ name: ref.name, data: new Uint8Array(await blob.arrayBuffer()) });
+		}
+		out.push({
+			path: pathOf(content.parent),
+			title: content.title,
+			username: content.username,
+			password: content.password,
+			url: content.url,
+			notes: content.notes,
+			icon: content.icon ?? 0,
+			fields: content.fields ?? [],
+			files
+		});
+	}
+	return out;
 }
 
 /** Encrypts and stores an entry; a new one gets a new ID. */

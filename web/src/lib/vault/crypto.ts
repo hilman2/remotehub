@@ -11,6 +11,8 @@
  *   wrapping key comes from a passkey's PRF output or the recovery key
  *   (HKDF-SHA-256), or from the passphrase (PBKDF2-SHA-256; WebCrypto has
  *   no memory-hard function).
+ * - It is also wrapped for the organisation recovery key (#95), so an
+ *   approved recovery can open it with the organisation's private key.
  */
 
 export const SCHEME = 'e2e_user_v1';
@@ -154,26 +156,183 @@ export async function openFile(
 	return new Uint8Array(plaintext);
 }
 
-/** A recovery key: random bytes, and as text in groups of four (`ABCD-EFGH-…`). */
-export function newRecoveryKey(): { bytes: Uint8Array<ArrayBuffer>; text: string } {
-	const bytes = randomBytes(RECOVERY_BYTES);
+/** Bytes as base32 text in groups of four (`ABCD-EFGH-…`), for typing off paper. */
+function toGroups(bytes: Uint8Array): string {
 	let bits = '';
 	for (const byte of bytes) bits += byte.toString(2).padStart(8, '0');
+	bits = bits.padEnd(Math.ceil(bits.length / 5) * 5, '0');
 	let text = '';
 	for (let i = 0; i < bits.length; i += 5) text += BASE32[parseInt(bits.slice(i, i + 5), 2)];
-	return { bytes, text: text.match(/.{4}/g)!.join('-') };
+	return text.match(/.{1,4}/g)!.join('-');
 }
 
-/** The bytes of a recovery key as typed: any case, with or without dashes and spaces; `null` if it is none. */
-export function parseRecoveryKey(text: string): Uint8Array<ArrayBuffer> | null {
+/** `length` bytes from text as `toGroups` wrote it, typed in any case, with or without dashes and spaces; `null` if it is none. */
+function fromGroups(text: string, length: number): Uint8Array<ArrayBuffer> | null {
 	const clean = text.toUpperCase().replace(/[\s-]/g, '');
-	if (clean.length !== (RECOVERY_BYTES * 8) / 5 || [...clean].some((c) => !BASE32.includes(c))) {
+	if (clean.length !== Math.ceil((length * 8) / 5) || [...clean].some((c) => !BASE32.includes(c))) {
 		return null;
 	}
 	const bits = [...clean].map((c) => BASE32.indexOf(c).toString(2).padStart(5, '0')).join('');
-	const bytes = new Uint8Array(RECOVERY_BYTES);
-	for (let i = 0; i < RECOVERY_BYTES; i++) bytes[i] = parseInt(bits.slice(i * 8, i * 8 + 8), 2);
+	const bytes = new Uint8Array(length);
+	for (let i = 0; i < length; i++) bytes[i] = parseInt(bits.slice(i * 8, i * 8 + 8), 2);
 	return bytes;
+}
+
+/** A recovery key: random bytes, and as text in groups of four (`ABCD-EFGH-…`). */
+export function newRecoveryKey(): { bytes: Uint8Array<ArrayBuffer>; text: string } {
+	const bytes = randomBytes(RECOVERY_BYTES);
+	return { bytes, text: toGroups(bytes) };
+}
+
+/** The bytes of a recovery key as typed; `null` if it is none. */
+export function parseRecoveryKey(text: string): Uint8Array<ArrayBuffer> | null {
+	return fromGroups(text, RECOVERY_BYTES);
+}
+
+// The organisation recovery key (#95, ADR 0009): an ECDH key pair on P-256.
+// A vault key is wrapped for its public key with an ephemeral key pair: the
+// shared secret goes through HKDF into an AES-KW key.
+const ECDH = { name: 'ECDH', namedCurve: 'P-256' } as const;
+const SCALAR_BYTES = 32;
+
+export function base64url(bytes: Uint8Array): string {
+	return toBase64(bytes).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+}
+
+export function fromBase64url(text: string): Uint8Array<ArrayBuffer> {
+	const padded = text.replaceAll('-', '+').replaceAll('_', '/');
+	return fromBase64(padded + '='.repeat((4 - (padded.length % 4)) % 4));
+}
+
+/**
+ * A new organisation key pair: the public key as an uncompressed point (65
+ * bytes) and the private key as its scalar (32 bytes).
+ */
+export async function newOrganisationKey(): Promise<{
+	publicKey: Uint8Array<ArrayBuffer>;
+	privateKey: Uint8Array<ArrayBuffer>;
+}> {
+	const pair = await subtle().generateKey(ECDH, true, ['deriveBits']);
+	const publicKey = new Uint8Array(await subtle().exportKey('raw', pair.publicKey));
+	const { d } = await subtle().exportKey('jwk', pair.privateKey);
+	return { publicKey, privateKey: fromBase64url(d!) };
+}
+
+/** The private key as printable text, for a safe. */
+export const privateKeyText = (privateKey: Uint8Array) => toGroups(privateKey);
+
+/** The private key's scalar as typed off paper; `null` if it is none. */
+export const parsePrivateKey = (text: string) => fromGroups(text, SCALAR_BYTES);
+
+/**
+ * The private key for ECDH. WebCrypto takes a private key as JWK only with
+ * its public point, so both are needed. A scalar that does not belong to
+ * `publicKey` is refused here (Node, Chromium) or unwraps nothing later.
+ */
+export function importOrganisationKey(
+	privateKey: Uint8Array,
+	publicKey: Uint8Array
+): Promise<CryptoKey> {
+	const jwk: JsonWebKey = {
+		kty: 'EC',
+		crv: 'P-256',
+		d: base64url(privateKey),
+		x: base64url(publicKey.subarray(1, 33)),
+		y: base64url(publicKey.subarray(33, 65))
+	};
+	return subtle().importKey('jwk', jwk, ECDH, false, ['deriveBits']);
+}
+
+async function sharedKey(own: CryptoKey, other: Uint8Array<ArrayBuffer>): Promise<CryptoKey> {
+	const point = await subtle().importKey('raw', other, ECDH, false, []);
+	const secret = await subtle().deriveBits({ name: 'ECDH', public: point }, own, 256);
+	return secretKey(new Uint8Array(secret), 'organisation');
+}
+
+/** The vault key wrapped for the organisation's public key, with the ephemeral public key that opens it again. */
+export async function wrapForOrganisation(
+	vaultKey: CryptoKey,
+	publicKey: Uint8Array<ArrayBuffer>
+): Promise<{ ephemeral: Uint8Array<ArrayBuffer>; wrapped: Uint8Array }> {
+	const pair = await subtle().generateKey(ECDH, true, ['deriveBits']);
+	const ephemeral = new Uint8Array(await subtle().exportKey('raw', pair.publicKey));
+	const wrapped = await wrapKey(vaultKey, await sharedKey(pair.privateKey, publicKey));
+	return { ephemeral, wrapped };
+}
+
+/** The vault key; throws if `privateKey` is not the one it was wrapped for. */
+export async function unwrapForOrganisation(
+	wrapped: Uint8Array<ArrayBuffer>,
+	ephemeral: Uint8Array<ArrayBuffer>,
+	privateKey: CryptoKey
+): Promise<CryptoKey> {
+	return unwrapKey(wrapped, await sharedKey(privateKey, ephemeral));
+}
+
+/** The private key as a file, sealed with a passphrase of its own. */
+export interface KeyFile {
+	format: 'remotehub-recovery-key-1';
+	key_id: string;
+	public_key: string;
+	salt: string;
+	iterations: number;
+	nonce: string;
+	ciphertext: string;
+}
+
+const keyFileAad = (keyId: string) => encoder.encode(`remotehub recovery key\n${keyId}`);
+
+async function keyFileKey(passphrase: string, salt: Uint8Array<ArrayBuffer>, iterations: number) {
+	const material = await subtle().importKey('raw', encoder.encode(passphrase), 'PBKDF2', false, [
+		'deriveKey'
+	]);
+	return subtle().deriveKey(
+		{ name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
+		material,
+		{ name: 'AES-GCM', length: 256 },
+		false,
+		['encrypt', 'decrypt']
+	);
+}
+
+export async function sealKeyFile(
+	keyId: string,
+	publicKey: Uint8Array,
+	privateKey: Uint8Array<ArrayBuffer>,
+	passphrase: string
+): Promise<KeyFile> {
+	const salt = randomBytes(16);
+	const nonce = randomBytes(12);
+	const key = await keyFileKey(passphrase, salt, PBKDF2_ITERATIONS);
+	const ciphertext = await subtle().encrypt(
+		{ name: 'AES-GCM', iv: nonce, additionalData: keyFileAad(keyId) },
+		key,
+		privateKey
+	);
+	return {
+		format: 'remotehub-recovery-key-1',
+		key_id: keyId,
+		public_key: toBase64(publicKey),
+		salt: toBase64(salt),
+		iterations: PBKDF2_ITERATIONS,
+		nonce: toBase64(nonce),
+		ciphertext: toBase64(new Uint8Array(ciphertext))
+	};
+}
+
+/** The private key's scalar; throws if the passphrase or the file is wrong. */
+export async function openKeyFile(
+	file: KeyFile,
+	passphrase: string
+): Promise<Uint8Array<ArrayBuffer>> {
+	if (file.format !== 'remotehub-recovery-key-1') throw new Error('not a recovery key file');
+	const key = await keyFileKey(passphrase, fromBase64(file.salt), file.iterations);
+	const scalar = await subtle().decrypt(
+		{ name: 'AES-GCM', iv: fromBase64(file.nonce), additionalData: keyFileAad(file.key_id) },
+		key,
+		fromBase64(file.ciphertext)
+	);
+	return new Uint8Array(scalar);
 }
 
 export function toBase64(bytes: Uint8Array): string {

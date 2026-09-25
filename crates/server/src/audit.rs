@@ -91,6 +91,13 @@ audit_actions! {
     CredentialAttachmentDeleted = "credential.attachment_deleted",
     PersonalAttachmentSaved = "personal.attachment_saved",
     PersonalAttachmentDeleted = "personal.attachment_deleted",
+    RecoveryKeyCreated = "recovery_key.created",
+    RecoveryKeyDeleted = "recovery_key.deleted",
+    VaultRecoveryRequested = "vault_recovery.requested",
+    VaultRecoveryApproved = "vault_recovery.approved",
+    VaultRecoveryCancelled = "vault_recovery.cancelled",
+    VaultRecoveryOpened = "vault_recovery.opened",
+    VaultRecoveryCompleted = "vault_recovery.completed",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).
