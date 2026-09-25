@@ -1,5 +1,7 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Download, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readKdbx } from '../../src/lib/vault/kdbx';
 
 // Connections end to end: an AD user of the test lab signs in, sets up
 // folders, credentials and devices through the UI, and works on them in the
@@ -931,4 +933,68 @@ test('a web interface opens signed in, in a browser on the server', async ({ pag
 			{ timeout: 15_000 }
 		)
 		.toEqual([46, 125, 50]);
+});
+
+/** Made by KeePassXC: the group Servers with the entry Router and its file vpn.txt. */
+const keepassFixture = join(process.cwd(), 'src', 'lib', 'vault', 'fixtures', 'keepassxc.kdbx');
+
+/** Opens the KeePass file a download hands over. */
+async function openDownload(downloading: Promise<Download>, password: string) {
+	const file = readFileSync(await (await downloading).path());
+	return readKdbx(file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength), password);
+}
+
+test('the vault takes in a KeePass file and gives one back', async ({ page }) => {
+	await signIn(page);
+	await freshVault(page, 'long enough passphrase');
+	const dialog = page.getByRole('dialog');
+	await page.getByRole('button', { name: 'Import a KeePass file' }).click();
+	await dialog.getByLabel('KeePass file').setInputFiles(keepassFixture);
+	await dialog.getByLabel('Its master password').fill('Fixture-Passw0rd');
+	await dialog.getByRole('button', { name: 'Import a KeePass file' }).click();
+	await expect(dialog.getByRole('status')).toHaveText('Entries imported: 1.');
+	await page.keyboard.press('Escape');
+	await page.getByRole('button', { name: 'Servers', exact: true }).click();
+	await expect(page.getByText('admin · https://router.lan')).toBeVisible();
+
+	await page.getByRole('button', { name: 'Export as a KeePass file' }).click();
+	await dialog.getByLabel('Master password of the new file').fill('Export-Passw0rd');
+	await dialog.getByLabel('Passphrase again').fill('Export-Passw0rd');
+	const downloading = page.waitForEvent('download');
+	await dialog.getByRole('button', { name: 'Export as a KeePass file' }).click();
+	const [router, ...rest] = await openDownload(downloading, 'Export-Passw0rd');
+	expect(rest).toEqual([]);
+	expect(router).toMatchObject({ path: ['Servers'], title: 'Router', password: 'Entry-Pass!' });
+	expect(router.files.map((f) => new TextDecoder().decode(f.data))).toEqual(['remote vpn']);
+});
+
+test('a shared folder takes in a KeePass file and exports it, audited', async ({ page }) => {
+	await signIn(page);
+	const dialog = page.getByRole('dialog');
+	const folder = `E2E keepass ${run}`;
+	await newFolder(page, folder);
+	await page.getByRole('button', { name: 'Settings' }).click();
+	await page.getByRole('menuitem', { name: 'Import a KeePass file' }).click();
+	await dialog.getByLabel('KeePass file').setInputFiles(keepassFixture);
+	await dialog.getByLabel('Its master password').fill('Fixture-Passw0rd');
+	await dialog.getByRole('button', { name: 'Import a KeePass file' }).click();
+	await expect(dialog.getByRole('status')).toHaveText('Entries imported: 1.');
+	await page.keyboard.press('Escape');
+
+	// The export reads back the group as a folder below the one exported.
+	await page.getByRole('tree').getByRole('button', { name: folder, exact: true }).click();
+	await page.getByRole('button', { name: 'Settings' }).click();
+	await page.getByRole('menuitem', { name: 'Export as a KeePass file' }).click();
+	await dialog.getByLabel('Master password of the new file').fill('Export-Passw0rd');
+	await dialog.getByLabel('Passphrase again').fill('Export-Passw0rd');
+	const downloading = page.waitForEvent('download');
+	await dialog.getByRole('button', { name: 'Export as a KeePass file' }).click();
+	const [router, ...rest] = await openDownload(downloading, 'Export-Passw0rd');
+	expect(rest).toEqual([]);
+	expect(router).toMatchObject({ path: ['Servers'], title: 'Router', password: 'Entry-Pass!' });
+	expect(router.files.map((f) => new TextDecoder().decode(f.data))).toEqual(['remote vpn']);
+	await page.keyboard.press('Escape');
+
+	await page.getByRole('link', { name: 'Audit log' }).click();
+	await expect(page.getByRole('row').nth(1)).toContainText('Showed or copied a stored credential');
 });

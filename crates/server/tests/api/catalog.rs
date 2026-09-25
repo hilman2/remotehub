@@ -957,6 +957,16 @@ async fn stored_secrets_are_shown_only_with_reveal_and_audited(pool: PgPool) {
     )
     .await;
     assert_eq!(odd.json()["params"]["field"], "purpose");
+    // A KeePass export reveals each entry on its own, logged as such.
+    let exported = call(
+        &f.app,
+        &bob,
+        "POST",
+        &credential,
+        Some(json!({ "purpose": "export" })),
+    )
+    .await;
+    assert_eq!(exported.json()["password"], "T0p-Secret!");
 
     let log = call(&f.app, &f.alice, "GET", "/api/audit", None)
         .await
@@ -976,7 +986,11 @@ async fn stored_secrets_are_shown_only_with_reveal_and_audited(pool: PgPool) {
         .collect();
     assert_eq!(
         revealed,
-        [("bob", "device", "copy"), ("bob", "credential", "show")]
+        [
+            ("bob", "credential", "export"),
+            ("bob", "device", "copy"),
+            ("bob", "credential", "show")
+        ]
     );
     assert!(!log.to_string().contains("T0p-Secret!"));
 }

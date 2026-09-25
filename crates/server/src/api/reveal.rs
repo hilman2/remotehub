@@ -29,7 +29,7 @@ use crate::session::Session;
 
 #[derive(Deserialize)]
 pub struct Reveal {
-    /// `show` or `copy`, for the audit log.
+    /// `show`, `copy` or `export`, for the audit log.
     purpose: String,
     /// An older version of a credential (#100); the current one without.
     #[serde(default)]
@@ -129,7 +129,8 @@ async fn record(
 
 fn purpose(input: &Reveal) -> Result<&str, Problem> {
     match input.purpose.as_str() {
-        "show" | "copy" => Ok(&input.purpose),
+        // `export`: into a KeePass file, in the browser (#99).
+        "show" | "copy" | "export" => Ok(&input.purpose),
         _ => Err(invalid("purpose")),
     }
 }

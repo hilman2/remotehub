@@ -44,7 +44,6 @@ Other networks: site connector (remotehub connector) ──WebSocket, outbound�
 | `crates/gateway` | `ProtocolEngine`: SSH engine, Guacamole tunnel to guacd, certificates of devices |
 | `crates/browser` | The browser service's agent (`remotehub-browser`) and remotehub's client for it |
 | `crates/i18n` | `Message`, Fluent catalogs, locale negotiation |
-| `crates/kdbx` (M3) | KeePass import and emergency export, isolated because its dependency moves fast |
 
 Crates are created with the issue that first needs them.
 
@@ -114,6 +113,11 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   protected field makes a new version, into which the unchanged sealed values are copied. Personal vault
   entries carry the same inside their browser-sealed content, and personal folders are entries of kind
   `folder`.
+- **KeePass files** are read and written in the browser (`web/src/lib/vault/kdbx.ts`, kdbxweb with
+  hash-wasm for Argon2), so the server never sees a file's master password. An import creates folders,
+  entries and files through the normal API. An export of a shared folder needs `reveal` on every
+  credential in it and reveals each with the purpose `export`, which the audit log records; the personal
+  vault exports what the browser has already opened.
 - **Files and history (`api/attachments.rs`, `api/reveal.rs`):** a credential's files are sealed under
   their own ID (field `content`), at most 5 MiB each; downloading one needs `reveal` and is audited like a
   reveal. Every sealed version of a credential stays, and `reveal` opens an older one by number. Personal

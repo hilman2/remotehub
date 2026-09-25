@@ -15,7 +15,7 @@ export interface Revealed {
 }
 
 /** Why it is revealed; the audit log keeps it. */
-export type RevealPurpose = 'show' | 'copy';
+export type RevealPurpose = 'show' | 'copy' | 'export';
 
 export const reveal = (
 	owner: 'credentials' | 'devices',

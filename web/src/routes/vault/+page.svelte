@@ -43,6 +43,10 @@
 		withHistory
 	} from '$lib/vault/vault';
 	import PasswordInput from '$lib/vault/PasswordInput.svelte';
+	import KdbxForm from '$lib/vault/KdbxForm.svelte';
+	import { writeKdbx, type KdbxEntry } from '$lib/vault/kdbx';
+	import FileDown from '@lucide/svelte/icons/file-down';
+	import FileUp from '@lucide/svelte/icons/file-up';
 	import TotpCode from '$lib/vault/TotpCode.svelte';
 	import { totpOf } from '$lib/vault/totp';
 	import FolderIcon from '@lucide/svelte/icons/folder';
@@ -316,6 +320,107 @@
 		pendingFiles = [...pendingFiles, ...chosen];
 	}
 
+	let kdbxMode = $state<'import' | 'export' | null>(null);
+	let kdbxOpen = $state(false);
+	let kdbxResult = $state<string | null>(null);
+
+	function openKdbx(mode: 'import' | 'export') {
+		kdbxMode = mode;
+		kdbxResult = null;
+		error = null;
+		kdbxOpen = true;
+	}
+
+	/** Takes a KeePass file's entries into the folder shown (#99). */
+	async function importPersonal(imported: KdbxEntry[]) {
+		if (!key) return;
+		busy = true;
+		const made: Record<string, string | null> = { '': folder };
+		const folderOf = async (path: string[]): Promise<string | null> => {
+			const at = path.join('\n');
+			if (at in made) return made[at];
+			const parent = await folderOf(path.slice(0, -1));
+			const saved = await saveEntry(key!, null, {
+				...EMPTY,
+				kind: 'folder',
+				parent,
+				title: path[path.length - 1],
+				icon: FOLDER_ICON
+			});
+			const id = saved.ok ? saved.id : parent;
+			made[at] = id;
+			return id;
+		};
+		let count = 0;
+		for (const item of imported) {
+			const attachments: FileRef[] = [];
+			for (const file of item.files) {
+				const saved = await saveFile(key, new File([file.data], file.name));
+				if (saved) attachments.push(saved);
+			}
+			const saved = await saveEntry(key, null, {
+				title: item.title,
+				username: item.username,
+				password: item.password,
+				url: item.url,
+				notes: item.notes,
+				icon: item.icon,
+				fields: item.fields,
+				attachments,
+				parent: await folderOf(item.path)
+			});
+			if (saved.ok) count += 1;
+		}
+		busy = false;
+		kdbxResult = m.kdbx_imported({ count });
+		await load();
+	}
+
+	/** Writes the whole vault into a new KeePass file (#99). */
+	async function exportPersonal(password: string) {
+		if (!key) return;
+		busy = true;
+		const pathOf = (parent: string | null | undefined): string[] => {
+			const names: string[] = [];
+			let at = folders.find((f) => f.id === parent);
+			while (at && names.length < 20) {
+				names.unshift(at.content?.title ?? '');
+				at = folders.find((f) => f.id === at?.content?.parent);
+			}
+			return names;
+		};
+		const out: KdbxEntry[] = [];
+		for (const entry of entries) {
+			const content = entry.content;
+			if (!content || content.kind === 'folder') continue;
+			const files: KdbxEntry['files'] = [];
+			for (const ref of content.attachments ?? []) {
+				const blob = await readFile(key, ref);
+				if (blob) files.push({ name: ref.name, data: new Uint8Array(await blob.arrayBuffer()) });
+			}
+			out.push({
+				path: pathOf(content.parent),
+				title: content.title,
+				username: content.username,
+				password: content.password,
+				url: content.url,
+				notes: content.notes,
+				icon: content.icon ?? 0,
+				fields: content.fields ?? [],
+				files
+			});
+		}
+		const file = await writeKdbx(out, password, m.vault_title());
+		busy = false;
+		const url = URL.createObjectURL(new Blob([file], { type: 'application/octet-stream' }));
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = 'remotehub-vault.kdbx';
+		link.click();
+		setTimeout(() => URL.revokeObjectURL(url), 10_000);
+		kdbxResult = m.kdbx_exported({ count: out.length });
+	}
+
 	/** Opens a file in the browser and hands it over as a download. */
 	async function download(ref: FileRef) {
 		if (!key) return;
@@ -578,7 +683,15 @@
 {:else if stage === 'open'}
 	<div class="mt-6 flex items-center gap-3">
 		<h2 class="text-lg font-semibold">{m.vault_entries()}</h2>
-		<button type="button" class="{button} ml-auto" onclick={() => (folderOpen = true)}>
+		<button type="button" class="{button} ml-auto" onclick={() => openKdbx('import')}>
+			<FileUp size={16} aria-hidden="true" />
+			{m.kdbx_import()}
+		</button>
+		<button type="button" class={button} onclick={() => openKdbx('export')}>
+			<FileDown size={16} aria-hidden="true" />
+			{m.kdbx_export()}
+		</button>
+		<button type="button" class={button} onclick={() => (folderOpen = true)}>
 			<FolderPlus size={16} aria-hidden="true" />
 			{m.vault_new_folder()}
 		</button>
@@ -872,6 +985,15 @@
 			</div>
 			{@render problem()}
 		</form>
+	{/if}
+</Dialog>
+
+<Dialog bind:open={kdbxOpen} title={kdbxMode === 'import' ? m.kdbx_import() : m.kdbx_export()}>
+	{#if kdbxOpen && kdbxMode}
+		<KdbxForm mode={kdbxMode} {busy} onimport={importPersonal} onexport={exportPersonal} />
+		{#if kdbxResult}
+			<p class="mt-3 text-sm" role="status">{kdbxResult}</p>
+		{/if}
 	{/if}
 </Dialog>
 
