@@ -53,6 +53,9 @@ tower-http = { version = "0.7.1", features = ["fs", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
 http-body-util = "0.1.5"
+# Already in the tree through axum: the client that forwards to Ory Kratos.
+hyper = { version = "1.11", features = ["client", "http1"] }
+hyper-util = { version = "0.1.20", features = ["client-legacy", "http1", "tokio"] }
 tempfile = "3.27.0"
 tokio-tungstenite = "0.30.0"
 # Already in the tree through ldap3; reads the public key of a certificate.

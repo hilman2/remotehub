@@ -1,5 +1,6 @@
 //! HTTP API under `/api`.
 
+mod accounts;
 mod audit;
 mod catalog;
 mod connect;
@@ -17,7 +18,7 @@ mod terminal;
 
 use axum::Router;
 use axum::middleware;
-use axum::routing::{delete, get, patch, post, put};
+use axum::routing::{any, delete, get, patch, post, put};
 
 use crate::AppState;
 use problem::{ErrorCode, Problem};
@@ -32,6 +33,9 @@ pub fn router(state: AppState) -> Router<AppState> {
                 .delete(session::sign_out),
         )
         .route("/session/break-glass", post(session::sign_in_break_glass))
+        .route("/session/local", post(accounts::sign_in))
+        .route("/session/methods", get(accounts::methods))
+        .route("/auth/{*path}", any(accounts::forward))
         .route("/tree", get(catalog::tree))
         .route("/folders", post(catalog::create_folder))
         .route(

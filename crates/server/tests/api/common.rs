@@ -37,6 +37,8 @@ pub fn settings() -> Settings {
         rdp_keyboard_layout: "en-us-qwerty".to_owned(),
         trusted_proxies: Vec::new(),
         ssh_ca: None,
+        kratos: None,
+        admin_accounts: Vec::new(),
     }
 }
 

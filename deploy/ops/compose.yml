@@ -39,6 +39,11 @@ services:
       # put it at certs/ldap-ca.crt and set this to /run/certs/ldap-ca.crt.
       REMOTEHUB_LDAP_CA_FILE: ${REMOTEHUB_LDAP_CA_FILE:-}
       REMOTEHUB_OWN_ACCOUNT_CONNECTIONS: ${REMOTEHUB_OWN_ACCOUNT_CONNECTIONS:-true}
+      # Local accounts (ADR 0010): Kratos below, and the accounts that
+      # administer remotehub, by e-mail address.
+      REMOTEHUB_KRATOS_URL: http://kratos:4433
+      REMOTEHUB_KRATOS_ADMIN_URL: http://kratos:4434
+      REMOTEHUB_ADMIN_ACCOUNTS: ${REMOTEHUB_ADMIN_ACCOUNTS:-}
       REMOTEHUB_RDP_KEYBOARD_LAYOUT: ${REMOTEHUB_RDP_KEYBOARD_LAYOUT:-en-us-qwerty}
       REMOTEHUB_SESSION_IDLE_MINUTES: ${REMOTEHUB_SESSION_IDLE_MINUTES:-30}
       REMOTEHUB_SESSION_MAX_HOURS: ${REMOTEHUB_SESSION_MAX_HOURS:-12}
@@ -57,6 +62,8 @@ services:
       guacd:
         condition: service_started
       browser:
+        condition: service_started
+      kratos:
         condition: service_started
 
   db:
@@ -77,6 +84,63 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
+
+  # Ory Kratos for local accounts (kratos/, ADR 0010), with its own
+  # database on the same server. People reach it only through remotehub
+  # (/api/auth/); its admin API serves anyone who reaches port 4434, so it is
+  # never published. Database and secrets come from secrets/kratos.yml.
+  kratos-db:
+    image: postgres:18.6-trixie
+    command: >
+      sh -c 'PGPASSWORD="$$(cat /run/secrets/db_password)"
+      createdb -h db -U remotehub kratos 2>/dev/null || true'
+    secrets: [db_password]
+    networks: [database]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  kratos-migrate:
+    image: oryd/kratos:v26.2.0
+    command: -c /etc/config/kratos/kratos.yml -c /run/secrets/kratos.yml migrate sql up -e --yes
+    environment: &kratos-env
+      SQA_OPT_OUT: "true"
+      SERVE_PUBLIC_BASE_URL: ${REMOTEHUB_PUBLIC_URL}/api/auth/
+      SELFSERVICE_DEFAULT_BROWSER_RETURN_URL: ${REMOTEHUB_PUBLIC_URL}/
+      SELFSERVICE_ALLOWED_RETURN_URLS: '["${REMOTEHUB_PUBLIC_URL}/"]'
+      SELFSERVICE_FLOWS_ERROR_UI_URL: ${REMOTEHUB_PUBLIC_URL}/sign-in
+      SELFSERVICE_FLOWS_LOGIN_UI_URL: ${REMOTEHUB_PUBLIC_URL}/sign-in
+      SELFSERVICE_FLOWS_SETTINGS_UI_URL: ${REMOTEHUB_PUBLIC_URL}/account
+      SELFSERVICE_FLOWS_RECOVERY_UI_URL: ${REMOTEHUB_PUBLIC_URL}/sign-in/recovery
+      SELFSERVICE_FLOWS_LOGOUT_AFTER_DEFAULT_BROWSER_RETURN_URL: ${REMOTEHUB_PUBLIC_URL}/sign-in
+    volumes:
+      - ./kratos:/etc/config/kratos:ro
+    # Kratos tells a configuration's format by its file name.
+    secrets: &kratos-secret
+      - source: kratos
+        target: kratos.yml
+    networks: [database]
+    depends_on:
+      kratos-db:
+        condition: service_completed_successfully
+
+  kratos:
+    <<: *hardened
+    image: oryd/kratos:v26.2.0
+    # The courier sends the codes of a forgotten password; it needs the SMTP
+    # server in secrets/kratos.yml (docs/install.md#local-accounts).
+    command: serve -c /etc/config/kratos/kratos.yml -c /run/secrets/kratos.yml --watch-courier
+    environment: *kratos-env
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./kratos:/etc/config/kratos:ro
+    secrets: *kratos-secret
+    networks: [default, database]
+    depends_on:
+      kratos-migrate:
+        condition: service_completed_successfully
+    mem_limit: 512m
 
   # RDP and VNC (deploy/guacd). guacd serves anyone who reaches port 4822, so
   # it is never published; it needs a way out to the devices.
@@ -130,3 +194,5 @@ secrets:
     file: ./secrets/ssh_ca_key
   ldap_bind_password:
     file: ./secrets/ldap_bind_password
+  kratos:
+    file: ./secrets/kratos.yml

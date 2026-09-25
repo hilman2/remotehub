@@ -173,8 +173,8 @@ pub async fn create(
 
     let mut tx = db.begin().await?;
     let user_id: Option<Uuid> = sqlx::query_scalar(
-        "INSERT INTO users (kind, username, display_name) VALUES ('local', $1, $1)
-         ON CONFLICT (lower(username)) WHERE kind = 'local' DO NOTHING
+        "INSERT INTO users (kind, username, display_name) VALUES ('break_glass', $1, $1)
+         ON CONFLICT (lower(username)) WHERE kind = 'break_glass' DO NOTHING
          RETURNING id",
     )
     .bind(username)
@@ -282,7 +282,7 @@ async fn find(db: &PgPool, username: &str) -> Result<Option<Account>, sqlx::Erro
     let row: Option<(Uuid, String, String)> = sqlx::query_as(
         "SELECT u.id, u.username, u.display_name FROM users u
          JOIN local_accounts l ON l.user_id = u.id
-         WHERE u.kind = 'local' AND lower(u.username) = lower($1)",
+         WHERE u.kind = 'break_glass' AND lower(u.username) = lower($1)",
     )
     .bind(username.trim())
     .fetch_optional(db)
@@ -317,7 +317,7 @@ pub async fn authenticate_at(
     let row: Option<(Uuid, String, String, String, i32)> = sqlx::query_as(
         "SELECT u.id, u.username, u.display_name, l.password_hash, l.totp_version
          FROM users u JOIN local_accounts l ON l.user_id = u.id
-         WHERE u.kind = 'local' AND lower(u.username) = lower($1)",
+         WHERE u.kind = 'break_glass' AND lower(u.username) = lower($1)",
     )
     .bind(username.trim())
     .fetch_optional(db)

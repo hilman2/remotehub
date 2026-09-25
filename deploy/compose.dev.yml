@@ -76,6 +76,11 @@ services:
       REMOTEHUB_ADMIN_GROUPS: RH Admins
       REMOTEHUB_RDP_KEYBOARD_LAYOUT: de-de-qwertz
       REMOTEHUB_BROWSER: browser:4823
+      # Local accounts (#103); the first one is invited with
+      #   docker compose -f deploy/compose.dev.yml exec server cargo run -q -p remotehub-server -- account invite you@example.com
+      REMOTEHUB_KRATOS_URL: http://kratos:4433
+      REMOTEHUB_KRATOS_ADMIN_URL: http://kratos:4434
+      REMOTEHUB_ADMIN_ACCOUNTS: admin@remotehub.test
     command: >
       watchexec --poll 1000ms --restart --watch crates --watch migrations --watch Cargo.toml
       --exts rs,toml,sql,ftl -- cargo run --package remotehub-server
@@ -84,6 +89,55 @@ services:
         condition: service_healthy
       dc:
         condition: service_healthy
+
+  # Ory Kratos for local accounts (#103, deploy/ops/kratos): its own database on
+  # the same server. The browser reaches it only through the server
+  # (/api/auth/); --dev lets its cookies work over http://localhost.
+  kratos-db:
+    image: postgres:18.6-trixie
+    environment:
+      PGPASSWORD: remotehub
+    command: sh -c 'createdb -h db -U remotehub kratos 2>/dev/null || true'
+    depends_on:
+      db:
+        condition: service_healthy
+
+  kratos-migrate:
+    image: oryd/kratos:v26.2.0
+    environment: &kratos-env
+      DSN: postgres://remotehub:remotehub@db:5432/kratos?sslmode=disable
+      SERVE_PUBLIC_BASE_URL: http://localhost:5180/api/auth/
+      SELFSERVICE_DEFAULT_BROWSER_RETURN_URL: http://localhost:5180/
+      SELFSERVICE_ALLOWED_RETURN_URLS: '["http://localhost:5180/"]'
+      SELFSERVICE_FLOWS_ERROR_UI_URL: http://localhost:5180/sign-in
+      SELFSERVICE_FLOWS_LOGIN_UI_URL: http://localhost:5180/sign-in
+      SELFSERVICE_FLOWS_SETTINGS_UI_URL: http://localhost:5180/account
+      SELFSERVICE_FLOWS_RECOVERY_UI_URL: http://localhost:5180/sign-in/recovery
+      SELFSERVICE_FLOWS_LOGOUT_AFTER_DEFAULT_BROWSER_RETURN_URL: http://localhost:5180/sign-in
+      # Development secrets, public on purpose.
+      SECRETS_COOKIE: '["dev-cookie-secret-not-for-production"]'
+      SECRETS_CIPHER: '["dev-cipher-secret-32-characters!"]'
+      SECRETS_DEFAULT: '["dev-default-secret-not-for-production"]'
+      # No courier in development: invitations hand out their code.
+      LOG_FORMAT: text
+      # No usage reports to Ory.
+      SQA_OPT_OUT: "true"
+    volumes:
+      - ./ops/kratos:/etc/config/kratos:ro
+    command: -c /etc/config/kratos/kratos.yml migrate sql up -e --yes
+    depends_on:
+      kratos-db:
+        condition: service_completed_successfully
+
+  kratos:
+    image: oryd/kratos:v26.2.0
+    environment: *kratos-env
+    volumes:
+      - ./ops/kratos:/etc/config/kratos:ro
+    command: serve -c /etc/config/kratos/kratos.yml --dev
+    depends_on:
+      kratos-migrate:
+        condition: service_completed_successfully
 
   # Workbench for a shell, tests and rust-analyzer (dev container, .devcontainer/):
   #   docker compose -f deploy/compose.dev.yml run --rm workbench cargo nextest run

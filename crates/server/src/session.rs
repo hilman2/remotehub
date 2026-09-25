@@ -35,7 +35,7 @@ pub struct Session {
     pub user_id: Uuid,
     pub username: String,
     pub display_name: String,
-    /// `directory` or `local` (break-glass).
+    /// `directory`, `break_glass`, or `local` (an account in Kratos, #103).
     pub kind: String,
     /// The user's own SID (directory users only).
     #[serde(skip)]
@@ -46,24 +46,45 @@ pub struct Session {
     /// Group SIDs from sign-in; they hold for the whole session.
     #[serde(skip)]
     pub groups: Vec<String>,
+    /// The Kratos identity of a local account (#103).
+    #[serde(skip)]
+    pub identity_id: Option<Uuid>,
 }
 
 impl Session {
-    /// Administrators manage remotehub itself: break-glass accounts and
-    /// members of the configured admin groups.
+    /// Administrators manage remotehub itself: break-glass accounts, members
+    /// of the configured admin groups, and the configured local accounts
+    /// (their user name is their e-mail address).
     pub fn is_admin(&self, settings: &Settings) -> bool {
-        self.kind == "local"
+        self.kind == "break_glass"
+            || (self.kind == "local"
+                && settings
+                    .admin_accounts
+                    .contains(&self.username.to_lowercase()))
             || self
                 .groups
                 .iter()
                 .any(|g| settings.admin_groups.contains(g))
     }
 
-    /// Who asks, for `authorize()`: the own SID, all group SIDs, and whether
-    /// they are an administrator.
+    /// The principal grants name this user by: the SID of a directory user,
+    /// `local:<identity>` for a local account; never a name.
+    pub fn principal(&self) -> Option<String> {
+        self.sid
+            .clone()
+            .or_else(|| self.identity_id.map(|id| format!("local:{id}")))
+    }
+
+    /// Who asks, for `authorize()`: the own principal, all group SIDs, and
+    /// whether they are an administrator.
     pub fn subject(&self, settings: &Settings) -> Subject {
         Subject {
-            sids: self.groups.iter().chain(&self.sid).cloned().collect(),
+            sids: self
+                .groups
+                .iter()
+                .cloned()
+                .chain(self.principal())
+                .collect(),
             admin: self.is_admin(settings),
         }
     }
@@ -110,7 +131,8 @@ pub async fn lookup(
 ) -> Result<Option<Session>, sqlx::Error> {
     let token_hash = hash(token);
     let session: Option<Session> = sqlx::query_as(
-        "SELECT s.user_id, s.groups, u.username, u.display_name, u.kind, u.sid, u.upn
+        "SELECT s.user_id, s.groups, u.username, u.display_name, u.kind, u.sid, u.upn,
+                u.identity_id
          FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = $1
            AND s.expires_at > now()

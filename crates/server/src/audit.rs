@@ -67,6 +67,7 @@ audit_actions! {
     ConnectorDeleted = "connector.deleted",
     PurposeRequired = "purpose.required",
     PurposeWaived = "purpose.waived",
+    AccountInvited = "account.invited",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).

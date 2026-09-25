@@ -31,6 +31,9 @@ export const ERROR_CODES = [
 	'connector_in_use',
 	'connector_offline',
 	'purpose_required',
+	'accounts_unavailable',
+	'second_factor_required',
+	'second_factor_setup_required',
 	'directory_unavailable',
 	'database_unavailable',
 	'internal'

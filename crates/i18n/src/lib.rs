@@ -126,6 +126,11 @@ messages! {
     BreakGlassTotpUriLabel = "break-glass-totp-uri-label" {}
     BreakGlassSignIn = "break-glass-sign-in" { url: String }
     BreakGlassDeleted = "break-glass-deleted" { username: String }
+    /// `remotehub account invite` succeeded. The one-time code follows on
+    /// its own line, after the label, so it never passes through a message.
+    AccountInvited = "account-invited" { email: String, expires: String }
+    AccountCodeLabel = "account-code-label" {}
+    AccountLinkLabel = "account-link-label" {}
     /// `remotehub verify-audit`: the hash chain holds.
     AuditIntact = "audit-intact" { entries: i64 }
     /// `remotehub verify-audit`: the chain breaks at entry `first`.

@@ -72,8 +72,11 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 
 - **Sign-in (M1):** bind to AD via LDAPS as the user to verify the password; read attributes and all
   nested groups through a service account from `tokenGroups` (fallback `LDAP_MATCHING_RULE_IN_CHAIN`).
+- **Local accounts (ADR 0010):** Ory Kratos keeps accounts without a directory: password, authenticator
+  app (required), recovery codes, invitations. Browsers reach it through remotehub under `/api/auth/`;
+  `POST /api/session/local` turns its session into remotehub's (`api/accounts.rs`).
 - **Identifiers:** users and groups are stored by `objectSid`/`objectGUID` (Entra object IDs later), never
-  by name, so renames do not change permissions.
+  by name, so renames do not change permissions. Local accounts are `local:<Kratos identity>`.
 - **Sessions:** server-side in PostgreSQL; cookie HttpOnly, Secure, SameSite=Strict; CSRF protection.
 - **Break-glass:** local accounts (argon2id + TOTP, each code accepted once), created, reset and deleted
   only via `remotehub break-glass …`, which prints password and TOTP secret once. The TOTP secret is sealed

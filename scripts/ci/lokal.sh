@@ -22,6 +22,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/gemeinsam.sh"
 # `base` checks both), and web/package.json for Playwright.
 POSTGRES_IMAGE="postgres:18.6-trixie"
 E2E_IMAGE="mcr.microsoft.com/playwright:v1.63.0-noble"
+# Keep equal to deploy/compose.dev.yml and deploy/ops/compose.yml.
+KRATOS_IMAGE="oryd/kratos:v26.2.0"
 
 # What each part depends on (path prefixes). scripts/ci/ counts for all.
 RUST_INPUTS=(crates/ migrations/ Cargo.toml Cargo.lock rust-toolchain.toml deploy/dev/rust.Dockerfile)
@@ -257,6 +259,39 @@ part_web() { # tools
     '
 }
 
+# Ory Kratos for the local accounts of the end-to-end tests (#103): its own
+# database next to e2e's, the configuration of deploy/ops/kratos with the
+# addresses of this run. The source volume cannot be mounted where the
+# configuration expects its identity schema, so the schema's path is set too.
+start_kratos() {
+  docker exec "${CI_ID}-db-e2e" createdb -U ci kratos
+  local base=http://localhost:8080
+  local config="${CI_SRC}/deploy/ops/kratos/kratos.yml"
+  local env=(
+    -v "${CI_VOLUME}:${CI_SRC}:ro"
+    -e "DSN=postgres://ci:ci@db-e2e:5432/kratos?sslmode=disable"
+    -e "SERVE_PUBLIC_BASE_URL=${base}/api/auth/"
+    -e "SELFSERVICE_DEFAULT_BROWSER_RETURN_URL=${base}/"
+    -e "SELFSERVICE_ALLOWED_RETURN_URLS=[\"${base}/\"]"
+    -e "SELFSERVICE_FLOWS_ERROR_UI_URL=${base}/sign-in"
+    -e "SELFSERVICE_FLOWS_LOGIN_UI_URL=${base}/sign-in"
+    -e "SELFSERVICE_FLOWS_SETTINGS_UI_URL=${base}/account"
+    -e "SELFSERVICE_FLOWS_RECOVERY_UI_URL=${base}/sign-in/recovery"
+    -e "SELFSERVICE_FLOWS_LOGOUT_AFTER_DEFAULT_BROWSER_RETURN_URL=${base}/sign-in"
+    -e "IDENTITY_SCHEMAS=[{\"id\":\"user\",\"url\":\"file://${CI_SRC}/deploy/ops/kratos/identity.schema.json\"}]"
+    -e 'SECRETS_COOKIE=["ci-cookie-secret-not-for-production"]'
+    -e 'SECRETS_CIPHER=["ci-cipher-secret-32-characters!!"]'
+    -e 'SECRETS_DEFAULT=["ci-default-secret-not-for-production"]'
+    -e SQA_OPT_OUT=true
+    -e LOG_FORMAT=text
+  )
+  docker run --rm --label "ci-lokal=${CI_ID}" --network "$CI_NETZ" "${env[@]}" \
+    "$KRATOS_IMAGE" -c "$config" migrate sql up -e --yes >/dev/null
+  ci_dienst kratos "${env[@]}" "$KRATOS_IMAGE" serve -c "$config" --dev
+  # The image has no shell: the database's container asks for it.
+  ci_warten db-e2e 30 bash -c '</dev/tcp/kratos/4433'
+}
+
 # End-to-end tests in a real browser (web/tests/e2e) with the server binary
 # and the UI built in this run, a fresh database and the lab. The browser
 # shares the server's network namespace, so it reaches it as localhost —
@@ -264,6 +299,7 @@ part_web() { # tools
 part_e2e() { # tools
   ci_dienst db-e2e -e POSTGRES_USER=ci -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=e2e "$POSTGRES_IMAGE"
   ci_warten db-e2e 60 pg_isready -h 127.0.0.1 -U ci -d e2e
+  start_kratos
   ci_dienst e2e-server \
     -v remotehub-ci-target:/ci-target -v "${CI_VOLUME}:${CI_SRC}" \
     -e REMOTEHUB_DATABASE_URL=postgres://ci:ci@db-e2e:5432/e2e \
@@ -277,12 +313,15 @@ part_e2e() { # tools
     -e 'REMOTEHUB_LDAP_BIND_PASSWORD=Svc-Passw0rd!' \
     -e REMOTEHUB_LDAP_BASE_DN=DC=remotehub,DC=test \
     -e 'REMOTEHUB_ADMIN_GROUPS=RH Admins' \
+    -e REMOTEHUB_KRATOS_URL=http://kratos:4433 \
+    -e REMOTEHUB_KRATOS_ADMIN_URL=http://kratos:4434 \
     "$1" /ci-target/debug/remotehub
   ci_warten e2e-server 60 bash -c '</dev/tcp/127.0.0.1/8080'
   local rc=0
   docker run --rm --label "ci-lokal=${CI_ID}" --network "container:${CI_ID}-e2e-server" \
     -v "${CI_VOLUME}:${CI_SRC}" -w "${CI_SRC}/web" \
     -e E2E_BASE_URL=http://localhost:8080 -e E2E_SSH_HOST=ssh-target -e CI=1 \
+    -e E2E_KRATOS_ADMIN_URL=http://kratos:4434 \
     "$E2E_IMAGE" node node_modules/@playwright/test/cli.js test || rc=$?
   if [ "$rc" != 0 ]; then
     # The run's volume is removed afterwards: keep traces, page snapshots and

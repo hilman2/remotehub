@@ -64,6 +64,21 @@ pub struct Config {
     pub rdp_keyboard_layout: String,
     /// Reverse proxies whose `X-Forwarded-For` names the client.
     pub trusted_proxies: Vec<Network>,
+    /// Ory Kratos for local accounts (#103); without it, only AD and
+    /// break-glass accounts sign in.
+    pub kratos: Option<KratosConfig>,
+    /// Local accounts, by e-mail address, that administer remotehub.
+    pub admin_accounts: Vec<String>,
+}
+
+/// Where remotehub reaches Kratos, on an internal network like guacd.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KratosConfig {
+    /// The public API (`http://kratos:4433`); browsers reach it only
+    /// through remotehub.
+    pub public_url: String,
+    /// The admin API (`http://kratos:4434`); never reachable from outside.
+    pub admin_url: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,15 +198,40 @@ impl Config {
             .filter(|p| !p.is_empty())
             .map(PathBuf::from);
 
-        let admin_groups = setting("REMOTEHUB_ADMIN_GROUPS")?
-            .map(|list| {
-                list.split([',', ';'])
-                    .map(str::trim)
-                    .filter(|g| !g.is_empty())
-                    .map(str::to_owned)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let list = |value: Option<String>| -> Vec<String> {
+            value
+                .map(|list| {
+                    list.split([',', ';'])
+                        .map(str::trim)
+                        .filter(|g| !g.is_empty())
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let admin_groups = list(setting("REMOTEHUB_ADMIN_GROUPS")?);
+        let admin_accounts = list(setting("REMOTEHUB_ADMIN_ACCOUNTS")?)
+            .into_iter()
+            .map(|email| email.to_lowercase())
+            .collect();
+
+        let kratos = match setting("REMOTEHUB_KRATOS_URL")? {
+            None => None,
+            Some(public_url) => {
+                let admin_url = required("REMOTEHUB_KRATOS_ADMIN_URL")?;
+                let service = |name: &'static str, url: String| {
+                    if url.starts_with("http://") || url.starts_with("https://") {
+                        Ok(url.trim_end_matches('/').to_owned())
+                    } else {
+                        Err(invalid(name, &url))
+                    }
+                };
+                Some(KratosConfig {
+                    public_url: service("REMOTEHUB_KRATOS_URL", public_url)?,
+                    admin_url: service("REMOTEHUB_KRATOS_ADMIN_URL", admin_url)?,
+                })
+            }
+        };
 
         let own_account_connections = parse_or(
             "REMOTEHUB_OWN_ACCOUNT_CONNECTIONS",
@@ -248,6 +288,8 @@ impl Config {
             browser,
             rdp_keyboard_layout,
             trusted_proxies,
+            kratos,
+            admin_accounts,
         })
     }
 }
@@ -326,6 +368,8 @@ impl fmt::Debug for Config {
             .field("browser", &self.browser)
             .field("rdp_keyboard_layout", &self.rdp_keyboard_layout)
             .field("trusted_proxies", &self.trusted_proxies)
+            .field("kratos", &self.kratos)
+            .field("admin_accounts", &self.admin_accounts)
             .finish()
     }
 }
@@ -387,6 +431,46 @@ mod tests {
                 ConfigError::Missing(name)
             );
         }
+    }
+
+    #[test]
+    fn reads_kratos_with_both_of_its_apis() {
+        assert!(Config::from_lookup(lookup(&[])).unwrap().kratos.is_none());
+        let config = Config::from_lookup(lookup(&[
+            ("REMOTEHUB_KRATOS_URL", "http://kratos:4433/"),
+            ("REMOTEHUB_KRATOS_ADMIN_URL", "http://kratos:4434"),
+            (
+                "REMOTEHUB_ADMIN_ACCOUNTS",
+                "Ada@Example.com; ops@example.com",
+            ),
+        ]))
+        .unwrap();
+        assert_eq!(
+            config.kratos,
+            Some(KratosConfig {
+                public_url: "http://kratos:4433".to_owned(),
+                admin_url: "http://kratos:4434".to_owned(),
+            })
+        );
+        assert_eq!(
+            config.admin_accounts,
+            ["ada@example.com", "ops@example.com"]
+        );
+        assert_eq!(
+            Config::from_lookup(lookup(&[("REMOTEHUB_KRATOS_URL", "http://kratos:4433")]))
+                .unwrap_err(),
+            ConfigError::Missing("REMOTEHUB_KRATOS_ADMIN_URL")
+        );
+        assert!(matches!(
+            Config::from_lookup(lookup(&[
+                ("REMOTEHUB_KRATOS_URL", "kratos:4433"),
+                ("REMOTEHUB_KRATOS_ADMIN_URL", "http://kratos:4434"),
+            ])),
+            Err(ConfigError::Invalid {
+                name: "REMOTEHUB_KRATOS_URL",
+                ..
+            })
+        ));
     }
 
     #[test]

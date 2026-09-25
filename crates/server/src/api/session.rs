@@ -160,6 +160,7 @@ pub async fn sign_in(
         sid: Some(identity.sid.to_string()),
         upn: identity.upn,
         groups,
+        identity_id: None,
     };
     let me = Me::of(&session, &state.settings);
     Ok((AppendHeaders(cookies), Json(me)))
@@ -235,7 +236,7 @@ pub async fn sign_in_break_glass(
             },
             action: Action::SignIn,
             object: None,
-            details: json!({ "kind": "local", "break_glass": true }),
+            details: json!({ "kind": "break_glass", "break_glass": true }),
             address: Some(&address),
         },
     )
@@ -247,10 +248,11 @@ pub async fn sign_in_break_glass(
         user_id: account.user_id,
         username: account.username,
         display_name: account.display_name,
-        kind: "local".to_owned(),
+        kind: "break_glass".to_owned(),
         sid: None,
         upn: None,
         groups: Vec::new(),
+        identity_id: None,
     };
     let me = Me::of(&session, &state.settings);
     // Break-glass accounts have no directory account to connect with.
@@ -269,6 +271,9 @@ pub async fn sign_out(
     if let Some(token) = session::token(&headers)
         && let Some(ended) = session::lookup(&state.db, &token, state.settings.session.idle).await?
     {
+        if ended.kind == "local" {
+            super::accounts::sign_out(&state, &headers).await;
+        }
         let mut tx = state.db.begin().await?;
         session::delete(&mut *tx, &token).await?;
         audit::record(
