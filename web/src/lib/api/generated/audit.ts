@@ -40,7 +40,12 @@ export const AUDIT_ACTIONS = [
 	'connector.deleted',
 	'purpose.required',
 	'purpose.waived',
-	'account.invited'
+	'account.invited',
+	'account.recovery_issued',
+	'account.deleted',
+	'user.blocked',
+	'user.unblocked',
+	'user.sessions_ended'
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

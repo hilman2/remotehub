@@ -68,6 +68,11 @@ audit_actions! {
     PurposeRequired = "purpose.required",
     PurposeWaived = "purpose.waived",
     AccountInvited = "account.invited",
+    AccountRecoveryIssued = "account.recovery_issued",
+    AccountDeleted = "account.deleted",
+    UserBlocked = "user.blocked",
+    UserUnblocked = "user.unblocked",
+    UserSessionsEnded = "user.sessions_ended",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).

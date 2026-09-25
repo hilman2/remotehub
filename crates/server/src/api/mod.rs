@@ -15,6 +15,7 @@ mod requests;
 mod search;
 pub mod session;
 mod terminal;
+mod users;
 
 use axum::Router;
 use axum::middleware;
@@ -36,6 +37,15 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/session/local", post(accounts::sign_in))
         .route("/session/methods", get(accounts::methods))
         .route("/auth/{*path}", any(accounts::forward))
+        .route("/users", get(users::list))
+        .route("/users/invite", post(users::invite))
+        .route("/users/{id}", delete(users::delete))
+        .route(
+            "/users/{id}/block",
+            post(users::block).delete(users::unblock),
+        )
+        .route("/users/{id}/sessions", delete(users::end))
+        .route("/users/{id}/recovery", post(users::recovery))
         .route("/tree", get(catalog::tree))
         .route("/folders", post(catalog::create_folder))
         .route(

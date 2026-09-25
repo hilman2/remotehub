@@ -120,6 +120,10 @@ pub async fn sign_in(
         .to_owned();
     let mut tx = state.db.begin().await?;
     let user_id = upsert_local_user(&mut tx, found.identity.id, &email, &name).await?;
+    if session::blocked(&mut *tx, user_id).await? {
+        drop(tx);
+        return Err(super::session::refuse_blocked(&state, user_id, &email, &address).await);
+    }
     let token = session::create(&mut *tx, user_id, &[], state.settings.session.max).await?;
     audit::record(
         &mut *tx,

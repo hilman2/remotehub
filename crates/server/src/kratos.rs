@@ -201,18 +201,91 @@ impl Kratos {
                 })),
             )
             .await?;
+        self.recovery_code(created.id, valid_for).await
+    }
+
+    /// A one-time code with which the account's owner sets a new password
+    /// (and second factor, if it has none) within `valid_for`.
+    pub async fn recovery_code(
+        &self,
+        identity: Uuid,
+        valid_for: Duration,
+    ) -> Result<Invitation, KratosError> {
         let mut invitation: Invitation = self
             .admin(
                 Method::POST,
                 "/admin/recovery/code",
                 Some(serde_json::json!({
-                    "identity_id": created.id,
+                    "identity_id": identity,
                     "expires_in": format!("{}s", valid_for.as_secs()),
                 })),
             )
             .await?;
-        invitation.identity_id = created.id;
+        invitation.identity_id = identity;
         Ok(invitation)
+    }
+
+    /// Disables or enables an account; Kratos refuses the sessions of a
+    /// disabled one at once.
+    pub async fn set_active(&self, identity: Uuid, active: bool) -> Result<(), KratosError> {
+        self.admin::<serde_json::Value>(
+            Method::PATCH,
+            &format!("/admin/identities/{identity}"),
+            Some(serde_json::json!([{
+                "op": "replace",
+                "path": "/state",
+                "value": if active { "active" } else { "inactive" },
+            }])),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// Ends every Kratos session of the account.
+    pub async fn revoke_all(&self, identity: Uuid) -> Result<(), KratosError> {
+        self.admin::<serde_json::Value>(
+            Method::DELETE,
+            &format!("/admin/identities/{identity}/sessions"),
+            None,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// Removes the account's second factors, so that a recovery code lets
+    /// its owner set up a new one. Kratos keeps a recovery going only
+    /// without them.
+    pub async fn remove_second_factors(&self, identity: Uuid) -> Result<(), KratosError> {
+        for kind in ["totp", "lookup_secret", "webauthn"] {
+            let removed = self
+                .admin::<serde_json::Value>(
+                    Method::DELETE,
+                    &format!("/admin/identities/{identity}/credentials/{kind}"),
+                    None,
+                )
+                .await;
+            match removed {
+                // One the account never had.
+                Ok(_)
+                | Err(KratosError::Unexpected {
+                    status: StatusCode::NOT_FOUND,
+                    ..
+                }) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    /// Deletes the account in Kratos.
+    pub async fn delete(&self, identity: Uuid) -> Result<(), KratosError> {
+        self.admin::<serde_json::Value>(
+            Method::DELETE,
+            &format!("/admin/identities/{identity}"),
+            None,
+        )
+        .await
+        .map(|_| ())
     }
 
     /// Ends one Kratos session, as signing out of remotehub does.

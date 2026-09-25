@@ -102,6 +102,15 @@ fn new_token() -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
+/// Whether administrators blocked the user in remotehub (#104): no sign-in
+/// then, whatever the directory or Kratos says.
+pub async fn blocked<'e>(db: impl PgExecutor<'e>, user_id: Uuid) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar("SELECT blocked_at IS NOT NULL FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(db)
+        .await
+}
+
 /// Starts a session and returns its token for the cookie.
 pub async fn create<'e>(
     db: impl PgExecutor<'e>,
@@ -135,6 +144,7 @@ pub async fn lookup(
                 u.identity_id
          FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = $1
+           AND u.blocked_at IS NULL
            AND s.expires_at > now()
            AND s.last_seen_at > now() - make_interval(secs => $2)",
     )

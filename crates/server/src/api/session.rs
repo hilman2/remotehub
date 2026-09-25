@@ -127,6 +127,10 @@ pub async fn sign_in(
     let groups: Vec<String> = identity.groups.iter().map(ToString::to_string).collect();
     let mut tx = state.db.begin().await?;
     let user_id = upsert_directory_user(&mut *tx, &identity).await?;
+    if session::blocked(&mut *tx, user_id).await? {
+        drop(tx);
+        return Err(refuse_blocked(&state, user_id, &identity.username, &address).await);
+    }
     let token = session::create(&mut *tx, user_id, &groups, state.settings.session.max).await?;
     let mut cookies = vec![session::set_cookie(&token)];
     if state.settings.own_account_connections {
@@ -220,6 +224,9 @@ pub async fn sign_in_break_glass(
         return Err(Problem::new(ErrorCode::InvalidCredentials));
     };
     state.limiter.succeeded(&username);
+    if session::blocked(&state.db, account.user_id).await? {
+        return Err(refuse_blocked(&state, account.user_id, &account.username, &address).await);
+    }
 
     let mut tx = state.db.begin().await?;
     sqlx::query("UPDATE users SET last_sign_in_at = now() WHERE id = $1")
@@ -296,6 +303,34 @@ pub async fn sign_out(
         StatusCode::NO_CONTENT,
         [session::clear_cookie(), session::clear_login_key_cookie()],
     ))
+}
+
+/// Refuses the sign-in of a blocked user (#104), audited like any failed one.
+pub(super) async fn refuse_blocked(
+    state: &AppState,
+    user_id: Uuid,
+    username: &str,
+    address: &str,
+) -> Problem {
+    tracing::warn!(username, address, "sign-in of a blocked user");
+    let recorded = audit::record(
+        &state.db,
+        Entry {
+            actor: Actor {
+                id: Some(user_id),
+                name: username,
+            },
+            action: Action::SignInFailed,
+            object: None,
+            details: json!({ "reason": ErrorCode::AccountDisabled, "blocked": true }),
+            address: Some(address),
+        },
+    )
+    .await;
+    match recorded {
+        Ok(()) => Problem::new(ErrorCode::AccountDisabled),
+        Err(error) => Problem::from(error),
+    }
 }
 
 /// A typed user name for the audit log, cut to a sane length.
