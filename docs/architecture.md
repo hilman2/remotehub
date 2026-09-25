@@ -88,6 +88,10 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   teams it does not know. Members are directory users, directory groups and local accounts; groups do not
   nest. The session lookup adds a user's groups at every request, so a change holds at once. Deleting a
   group removes its grants, purpose rules and roles.
+- **Permission reports (`/permissions`, `api/reports.rs`, #110):** for auditors and administrators, what a
+  person reaches and who reaches a folder. A person is read as their next session would be: directory
+  groups asked from the directory (those of the last sign-in if it does not answer), groups of remotehub's
+  own, roles. `authorize()` decides the roles shown; `Catalog::reasons` names the grants behind them.
 - **Roles for remotehub itself (`api/roles.rs`):** administrator, auditor (reads and checks the audit log)
   and security officer (approves vault recoveries), given to users and groups in `role_assignments`. The
   session lookup reads them with the groups. `REMOTEHUB_ADMIN_GROUPS` and `REMOTEHUB_ADMIN_ACCOUNTS` stay

@@ -15,6 +15,7 @@ mod origin;
 mod personal;
 pub mod problem;
 mod recovery;
+mod reports;
 mod requests;
 mod reveal;
 mod roles;
@@ -185,6 +186,10 @@ pub fn router(state: AppState) -> Router<AppState> {
             get(recovery::attachment),
         )
         .route("/vault-recoveries/{id}/complete", post(recovery::complete))
+        .route("/reports/people", get(reports::people))
+        .route("/reports/folders", get(reports::folders))
+        .route("/reports/users/{id}", get(reports::user))
+        .route("/reports/folders/{id}", get(reports::folder))
         .route("/audit", get(audit::list))
         .route("/audit/verify", post(audit::verify))
         // Unknown API paths are a problem response, never the SPA's index.html.

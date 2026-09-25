@@ -45,7 +45,12 @@
 					{ href: resolve('/connectors'), label: m.nav_connectors }
 				]
 			: []),
-		...(isAuditor(session.user) ? [{ href: resolve('/audit'), label: m.nav_audit }] : []),
+		...(isAuditor(session.user)
+			? [
+					{ href: resolve('/audit'), label: m.nav_audit },
+					{ href: resolve('/permissions'), label: m.nav_permissions }
+				]
+			: []),
 		...(session.user?.admin || isSecurityOfficer(session.user)
 			? [{ href: resolve('/recovery'), label: m.nav_recovery }]
 			: []),
