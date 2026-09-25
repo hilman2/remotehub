@@ -175,6 +175,31 @@ impl Catalog {
             .max()
     }
 
+    /// The grants on the object and the folders above it, nearest first:
+    /// where each lies, whom it names and which role it gives (#110). It
+    /// explains a role; `effective_role` is still what decides.
+    pub fn grants_along(&self, object: ObjectId) -> Vec<(ObjectId, &str, Role)> {
+        self.path(object)
+            .into_iter()
+            .flat_map(|on| {
+                self.grants
+                    .get(&on)
+                    .into_iter()
+                    .flatten()
+                    .map(move |(principal, role)| (on, principal.as_str(), *role))
+            })
+            .collect()
+    }
+
+    /// The grants that give the subject a role on the object, as
+    /// `grants_along` lists them: those naming one of its SIDs.
+    pub fn reasons(&self, subject: &Subject, object: ObjectId) -> Vec<(ObjectId, &str, Role)> {
+        self.grants_along(object)
+            .into_iter()
+            .filter(|(_, principal, _)| subject.sids.contains(*principal))
+            .collect()
+    }
+
     /// Whether the subject holds at least `needed` on the object.
     pub fn authorize(&self, subject: &Subject, needed: Role, object: ObjectId) -> bool {
         self.effective_role(subject, object)

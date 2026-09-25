@@ -265,3 +265,32 @@ fn requests_go_up_to_reveal_and_approvals_need_manage() {
     assert!(!catalog.may_approve(&subject(&["S-linux"]), Device(WEB01)));
     assert!(!catalog.may_approve(&subject(&["S-net"]), Device(DC01)));
 }
+
+#[test]
+fn the_grants_behind_a_role_are_named_nearest_first() {
+    use ObjectId::*;
+    let catalog = catalog();
+    assert_eq!(
+        catalog.grants_along(Credential(ROOT_PW)),
+        [
+            (Credential(ROOT_PW), "S-alice", Role::Reveal),
+            (Folder(LINUX), "S-linux", Role::Edit),
+            (Folder(SERVERS), "S-ops", Role::Connect),
+        ]
+    );
+    // alice in ops: her own grant and the inherited one, not linux's.
+    let alice = subject(&["S-alice", "S-ops"]);
+    assert_eq!(
+        catalog.reasons(&alice, Credential(ROOT_PW)),
+        [
+            (Credential(ROOT_PW), "S-alice", Role::Reveal),
+            (Folder(SERVERS), "S-ops", Role::Connect),
+        ]
+    );
+    // The highest reason is the effective role.
+    assert_eq!(
+        catalog.effective_role(&alice, Credential(ROOT_PW)),
+        Some(Role::Reveal)
+    );
+    assert_eq!(catalog.reasons(&alice, Device(SWITCH01)), []);
+}

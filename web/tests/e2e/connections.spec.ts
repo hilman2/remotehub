@@ -1147,3 +1147,38 @@ test('a vault is recovered with the organisation key once someone else approved'
 	await expect(page.getByRole('list', { name: 'Search results' })).toContainText(target);
 	await bobs.close();
 });
+
+test('the permission report names what bob reaches and who reaches a folder', async ({ page }) => {
+	await signIn(page);
+	const folder = `E2E report ${run}`;
+	await newFolder(page, folder);
+	await page.evaluate(async (folder) => {
+		const tree = await (await fetch('/api/tree')).json();
+		const id = tree.folders.find((f: { name: string }) => f.name === folder).id;
+		const found = (await (await fetch('/api/directory/principals?q=Bob')).json()) as {
+			sid: string;
+			name: string;
+		}[];
+		const bob = found.find((p) => p.name === 'Bob Helpdesk')!;
+		await fetch('/api/grants', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({
+				object: { kind: 'folder', id },
+				principal_kind: 'user',
+				principal_sid: bob.sid,
+				principal_name: bob.name,
+				role: 'list'
+			})
+		});
+	}, folder);
+
+	await page.getByRole('link', { name: 'Permissions' }).click();
+	await page.getByLabel('Person', { exact: true }).selectOption({ label: 'Bob Helpdesk (bob)' });
+	await expect(
+		page.getByTestId('person-report').getByRole('row').filter({ hasText: folder })
+	).toContainText('See for Bob Helpdesk');
+
+	await page.getByLabel('Folder', { exact: true }).selectOption({ label: folder });
+	await expect(page.getByTestId('folder-report')).toContainText('Bob Helpdesk');
+});

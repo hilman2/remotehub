@@ -20,6 +20,7 @@ mod journal;
 mod personal;
 mod recovery;
 mod refresh;
+mod reports;
 mod requests;
 mod roles;
 mod search;
