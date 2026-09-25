@@ -152,7 +152,7 @@
 	"protocol_https": "Weboberfläche (HTTPS)",
 	"auth_stored": "Hinterlegten Zugangsdaten",
 	"auth_device": "Eigenen Zugangsdaten des Geräts",
-	"auth_device_target_changed": "Ein anderes Ziel braucht das Passwort neu.",
+	"auth_device_target_changed": "Ein anderes Ziel oder eine andere Art braucht Passwort oder Schlüssel neu.",
 	"auth_ask": "Beim Verbinden abgefragten Zugangsdaten",
 	"auth_own": "Dem eigenen Verzeichniskonto",
 	"auth_certificate": "Einem Zertifikat von remotehub, als ich selbst",

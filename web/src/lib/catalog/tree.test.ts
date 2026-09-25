@@ -21,6 +21,10 @@ function device(id: string, name: string, host: string): Device {
 		connector_id: null,
 		username: '',
 		domain: '',
+		secret_kind: 'password',
+		key_algorithm: null,
+		key_fingerprint: null,
+		has_certificate: false,
 		role: 'edit'
 	};
 }

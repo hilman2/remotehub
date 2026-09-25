@@ -338,14 +338,14 @@ pub async fn ssh_ca_public_key(State(state): State<AppState>) -> Result<String, 
 }
 
 /// A sealed field of the owner's current version as text: a credential's,
-/// or a device's own password.
+/// or a device's own credentials'.
 async fn stored_text(
     state: &AppState,
-    credential: Uuid,
+    owner: Uuid,
     version: i32,
     field: &str,
 ) -> Result<Option<SecretString>, Problem> {
-    let secret = secrets::load(&state.db, &state.vault, credential, version, field)
+    let secret = secrets::load(&state.db, &state.vault, owner, version, field)
         .await
         .map_err(|error| {
             tracing::error!(%error, "cannot open a stored secret");
@@ -355,6 +355,37 @@ async fn stored_text(
         .map(|bytes| String::from_utf8(bytes.to_vec()).map(SecretString::from))
         .transpose()
         .map_err(|_| Problem::new(ErrorCode::Internal))
+}
+
+/// How to sign in with the sealed secrets of `owner`'s `version`: a
+/// password, or (`kind` `ssh_key`) a key with its passphrase and certificate.
+async fn sealed_login(
+    state: &AppState,
+    owner: Uuid,
+    version: i32,
+    kind: &str,
+) -> Result<Login, Problem> {
+    if kind != "ssh_key" {
+        let password = stored_text(state, owner, version, PASSWORD_FIELD)
+            .await?
+            .ok_or(Problem::new(ErrorCode::Internal))?;
+        return Ok(Login::Password(password));
+    }
+    let private_key = stored_text(state, owner, version, PRIVATE_KEY_FIELD)
+        .await?
+        .ok_or(Problem::new(ErrorCode::Internal))?;
+    let passphrase = stored_text(state, owner, version, PASSPHRASE_FIELD).await?;
+    let certificate = stored_text(state, owner, version, CERTIFICATE_FIELD).await?;
+    let key = SshKey::parse(
+        private_key.expose_secret(),
+        passphrase.as_ref().map(|p| p.expose_secret()),
+        certificate.as_ref().map(|c| c.expose_secret()),
+    )
+    .map_err(|error| {
+        tracing::error!(%error, "a stored SSH key does not open");
+        Problem::new(ErrorCode::Internal)
+    })?;
+    Ok(Login::Key(Box::new(key)))
 }
 
 /// Credentials for the device's sign-in mode `stored`, `device`, `laps` or `ask`.
@@ -375,33 +406,10 @@ pub async fn credentials(
             .bind(credential)
             .fetch_one(&state.db)
             .await?;
-            let login = if kind == "ssh_key" {
-                let private_key = stored_text(state, credential, version, PRIVATE_KEY_FIELD)
-                    .await?
-                    .ok_or(Problem::new(ErrorCode::Internal))?;
-                let passphrase = stored_text(state, credential, version, PASSPHRASE_FIELD).await?;
-                let certificate =
-                    stored_text(state, credential, version, CERTIFICATE_FIELD).await?;
-                let key = SshKey::parse(
-                    private_key.expose_secret(),
-                    passphrase.as_ref().map(|p| p.expose_secret()),
-                    certificate.as_ref().map(|c| c.expose_secret()),
-                )
-                .map_err(|error| {
-                    tracing::error!(%error, "a stored SSH key does not open");
-                    Problem::new(ErrorCode::Internal)
-                })?;
-                Login::Key(Box::new(key))
-            } else {
-                let password = stored_text(state, credential, version, PASSWORD_FIELD)
-                    .await?
-                    .ok_or(Problem::new(ErrorCode::Internal))?;
-                Login::Password(password)
-            };
             Ok(Credentials {
                 username,
                 domain,
-                login,
+                login: sealed_login(state, credential, version, &kind).await?,
             })
         }
         "laps" => {
@@ -429,19 +437,16 @@ pub async fn credentials(
             })
         }
         "device" => {
-            let (username, domain, version): (String, String, i32) = sqlx::query_as(
-                "SELECT username, domain, secret_version FROM devices WHERE id = $1",
+            let (username, domain, version, kind): (String, String, i32, String) = sqlx::query_as(
+                "SELECT username, domain, secret_version, secret_kind FROM devices WHERE id = $1",
             )
             .bind(target.id)
             .fetch_one(&state.db)
             .await?;
-            let password = stored_text(state, target.id, version, PASSWORD_FIELD)
-                .await?
-                .ok_or(Problem::new(ErrorCode::Internal))?;
             Ok(Credentials {
                 username,
                 domain,
-                login: Login::Password(password),
+                login: sealed_login(state, target.id, version, &kind).await?,
             })
         }
         "ask" => {

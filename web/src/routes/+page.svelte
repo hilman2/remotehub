@@ -627,6 +627,11 @@
 							{AUTH_MODE_LABELS[device.auth_mode]()}
 						{/if}
 					</p>
+					{#if device.auth_mode === 'device' && device.key_fingerprint}
+						<p class="font-mono text-xs leading-relaxed break-all text-ink-2">
+							{device.key_algorithm} · {device.key_fingerprint}
+						</p>
+					{/if}
 					{#if device.credential_id || device.auth_mode === 'device'}
 						<p class="mt-auto flex items-center gap-2 text-sm text-ink-2">
 							<Lock size={14} aria-hidden="true" />

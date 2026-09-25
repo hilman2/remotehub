@@ -219,6 +219,32 @@ test('a device signs in with credentials of its own', async ({ page }) => {
 	await page.keyboard.type('echo "own says $(whoami)"');
 	await page.keyboard.press('Enter');
 	await expect(page.locator('.xterm-rows')).toContainText('own says tester');
+
+	// An SSH key of its own, protected by a passphrase, loaded from its file.
+	await page.getByRole('button', { name: 'Show devices' }).click();
+	await page.getByRole('tree').getByRole('button', { name: folder, exact: true }).click();
+	const keyed = `lab ssh own key ${run}`;
+	await page.getByRole('button', { name: 'New device' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(keyed);
+	await dialog.getByLabel('Host name or IP address').fill(sshHost);
+	await dialog.getByLabel('Sign in with').selectOption({ label: 'Credentials of this device' });
+	await dialog.getByLabel('User name', { exact: true }).fill('tester');
+	await dialog.getByLabel('Type').selectOption({ label: 'SSH key' });
+	await dialog
+		.getByLabel('Load key from file')
+		.setInputFiles(join(labKeys, 'tester_ed25519_passphrase'));
+	await dialog.getByLabel('Passphrase').fill('Key-Passw0rd!');
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name: keyed })).toBeVisible();
+	await expect(page.getByText(/SHA256:/).first()).toBeVisible();
+	await expect(page.locator('body')).not.toContainText('PRIVATE KEY');
+
+	await page.getByRole('button', { name: 'Connect', exact: true }).click();
+	await expect(page.getByText(/host key/)).toBeVisible();
+	await page.locator('.xterm:visible').click();
+	await page.keyboard.type('echo "own key says $(whoami)"');
+	await page.keyboard.press('Enter');
+	await expect(page.locator('.xterm-rows:visible')).toContainText('own key says tester');
 });
 
 test('access asked for just in time is approved by someone else', async ({ page, browser }) => {

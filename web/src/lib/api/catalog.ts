@@ -69,9 +69,16 @@ export interface Device {
 	host_key_fingerprint: string | null;
 	/** The site connector the device is reached through; null: directly. */
 	connector_id: string | null;
-	/** Sign-in mode `device`: its own user name and domain; the password stays on the server. */
+	/**
+	 * Sign-in mode `device`: its own credentials as far as they are shown;
+	 * password and key stay on the server.
+	 */
 	username: string;
 	domain: string;
+	secret_kind: CredentialKind;
+	key_algorithm: string | null;
+	key_fingerprint: string | null;
+	has_certificate: boolean;
 	role: Role;
 }
 
@@ -117,8 +124,12 @@ export interface DeviceInput {
 	/** Sign-in mode `device` only. */
 	username?: string;
 	domain?: string;
-	/** Left out on a change: the stored one stays, unless the target changed. */
+	secret_kind?: CredentialKind;
+	/** Left out on a change: the stored secret stays, unless the target or its kind changed. */
 	password?: string;
+	private_key?: string;
+	passphrase?: string;
+	certificate?: string;
 }
 
 export interface CredentialInput {

@@ -834,3 +834,37 @@ async fn a_device_signs_in_with_credentials_of_its_own(pool: PgPool) {
         .unwrap();
     output_until(&mut socket, "own says tester").await;
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn a_device_signs_in_with_a_key_of_its_own(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let key = std::fs::read_to_string(
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("../../deploy/testlab/ssh/tester_ed25519_passphrase"),
+    )
+    .unwrap();
+    let device = create(
+        &app,
+        &token,
+        "/api/devices",
+        json!({
+            "folder_id": folder, "name": "own key", "protocol": "ssh", "host": ssh_host(),
+            "port": 22, "auth_mode": "device", "credential_id": null, "username": "tester",
+            "secret_kind": "ssh_key", "private_key": key, "passphrase": "Key-Passw0rd!",
+        }),
+    )
+    .await;
+    let address = serve(state).await;
+
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({})).await;
+    expect_connected(&mut socket).await;
+    socket
+        .send(Message::Binary(
+            b"echo \"key says $(whoami)\"\n".to_vec().into(),
+        ))
+        .await
+        .unwrap();
+    output_until(&mut socket, "key says tester").await;
+}
