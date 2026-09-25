@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use remotehub_directory::Sid;
 use remotehub_directory::ldap::LdapDirectory;
 use remotehub_gateway::ssh_ca::SshCa;
 use remotehub_i18n::{self as i18n, Locale, Message};
@@ -15,7 +14,9 @@ use remotehub_server::audit::{Action, Actor, Entry};
 use remotehub_server::auth::Authenticator;
 use remotehub_server::config::{self, Config};
 use remotehub_server::connector_agent::{self, AgentSettings};
-use remotehub_server::{AppState, Settings, VERSION, app, audit, break_glass, db, escrow, session};
+use remotehub_server::{
+    AppState, Settings, VERSION, app, audit, break_glass, db, escrow, session, setup,
+};
 use remotehub_vault::{DynVault, FileKeyring, KeyProvider, Vault, generate_key_line};
 use tracing_subscriber::EnvFilter;
 use zeroize::Zeroizing;
@@ -62,6 +63,9 @@ enum Command {
         #[command(subcommand)]
         action: BreakGlassAction,
     },
+    /// Print the link to the setup wizard, with a new one-time code that
+    /// replaces the previous one. Works until setup is complete.
+    SetupCode,
     /// Manage local accounts in Ory Kratos (REMOTEHUB_KRATOS_URL).
     Account {
         #[command(subcommand)]
@@ -72,7 +76,6 @@ enum Command {
 #[derive(Subcommand)]
 enum AccountAction {
     /// Create an account and print the one-time code its owner starts with.
-    /// Administrators are the accounts in REMOTEHUB_ADMIN_ACCOUNTS.
     Invite {
         email: String,
         /// The name remotehub shows; the e-mail address without one.
@@ -118,6 +121,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::BreakGlass { action } => manage_break_glass(action).await,
         Command::Account { action } => manage_accounts(action).await,
+        Command::SetupCode => setup_code().await,
         Command::Connector => {
             let settings = AgentSettings::from_env()?;
             init_tracing(std::env::var("REMOTEHUB_LOG_FORMAT").is_ok_and(|f| f == "json"));
@@ -166,13 +170,11 @@ async fn serve() -> anyhow::Result<()> {
             None
         }
     };
-    let admin_groups = resolve_admin_groups(&config.admin_groups, ldap.as_deref()).await?;
     let directory = ldap.map(|ldap| ldap as Arc<dyn Authenticator>);
 
     let settings = Settings {
         public_origin: config.public_origin,
         session: config.session,
-        admin_groups,
         own_account_connections: config.own_account_connections,
         guacd: config.guacd,
         browser: config.browser,
@@ -183,7 +185,6 @@ async fn serve() -> anyhow::Result<()> {
             .kratos
             .as_ref()
             .map(remotehub_server::kratos::Kratos::new),
-        admin_accounts: config.admin_accounts,
     };
     let state = AppState::new(pool.clone(), directory, settings, vault);
     tokio::spawn(purge_sessions(pool, config.session.idle));
@@ -201,41 +202,6 @@ async fn serve() -> anyhow::Result<()> {
     .await?;
     tracing::info!("stopped");
     Ok(())
-}
-
-/// Turns the configured admin groups into SIDs; names are looked up in the
-/// directory (exact name, case-insensitive).
-async fn resolve_admin_groups(
-    entries: &[String],
-    ldap: Option<&LdapDirectory>,
-) -> anyhow::Result<Vec<String>> {
-    let mut sids = Vec::new();
-    for entry in entries {
-        if entry.parse::<Sid>().is_ok() {
-            sids.push(entry.clone());
-            continue;
-        }
-        let ldap = ldap.with_context(|| {
-            format!(
-                "REMOTEHUB_ADMIN_GROUPS names the group {entry:?}, but no directory is configured"
-            )
-        })?;
-        let group = ldap
-            .search_groups(entry, 50)
-            .await
-            .with_context(|| format!("cannot look up the admin group {entry:?}"))?
-            .into_iter()
-            .find(|g| g.name.eq_ignore_ascii_case(entry))
-            .with_context(|| format!("the admin group {entry:?} does not exist"))?;
-        tracing::info!(group = %group.name, sid = %group.sid, "admin group");
-        sids.push(group.sid.to_string());
-    }
-    if sids.is_empty() {
-        tracing::warn!(
-            "REMOTEHUB_ADMIN_GROUPS is empty: only break-glass accounts can administer remotehub"
-        );
-    }
-    Ok(sids)
 }
 
 async fn manage_break_glass(action: BreakGlassAction) -> anyhow::Result<()> {
@@ -381,6 +347,32 @@ async fn manage_accounts(action: AccountAction) -> anyhow::Result<()> {
     );
     println!();
     Ok(())
+}
+
+async fn setup_code() -> anyhow::Result<()> {
+    let config = Config::from_env()?;
+    let pool = db::connect(&config.database_url, config.database_password.as_ref())
+        .await
+        .context("cannot connect to the database")?;
+    db::MIGRATOR
+        .run(&pool)
+        .await
+        .context("cannot apply database migrations")?;
+    match setup::new_code(&pool).await {
+        Ok(code) => {
+            say(Message::SetupReady {});
+            // The code goes straight to the terminal, like an invitation's.
+            println!();
+            println!("  {}", setup::link(&config.public_origin, &code));
+            println!();
+            Ok(())
+        }
+        Err(setup::SetupError::Complete) => {
+            say(Message::SetupComplete {});
+            std::process::exit(1);
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// The locale of the admin's terminal (`LC_ALL`, `LC_MESSAGES`, `LANG`).

@@ -39,6 +39,11 @@ export const ERROR_CODES = [
 	'second_factor_required',
 	'second_factor_setup_required',
 	'second_factor_invalid',
+	'setup_pending',
+	'setup_code_invalid',
+	'setup_done',
+	'break_glass_exists',
+	'last_administrator',
 	'directory_unavailable',
 	'database_unavailable',
 	'internal'

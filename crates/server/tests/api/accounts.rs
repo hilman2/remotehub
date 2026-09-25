@@ -67,6 +67,11 @@ async fn whoami(headers: HeaderMap) -> impl IntoResponse {
             StatusCode::OK,
             session(ADMIN, "admin@example.com", "aal2", "active"),
         ),
+        // Whoever accepted the invitation the stand-in last made.
+        "invited" => (
+            StatusCode::OK,
+            session(INVITED, "invited@example.com", "aal2", "active"),
+        ),
         "inactive" => (
             StatusCode::OK,
             session(ADA, "ada@example.com", "aal2", "inactive"),
@@ -182,13 +187,13 @@ pub async fn setup(pool: PgPool) -> (Router, Calls) {
         public_url: url.clone(),
         admin_url: url,
     }));
-    settings.admin_accounts = vec!["admin@example.com".to_owned()];
     let state = AppState::new(pool, Some(Arc::new(FakeDirectory)), settings, vault());
     (app(state, None), calls)
 }
 
 /// `POST /api/session/local` from a browser whose Kratos cookie is `case`:
-/// `aal2` signs Ada in, `admin` the local administrator.
+/// `aal2` signs Ada in, `admin` the local administrator, `invited` the
+/// account of the last invitation.
 pub fn sign_in(case: &str) -> Request<Body> {
     Request::post("/api/session/local")
         .header(header::ORIGIN, ORIGIN)
@@ -197,7 +202,7 @@ pub fn sign_in(case: &str) -> Request<Body> {
         .unwrap()
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_kratos_session_counts_only_with_its_second_factor(pool: PgPool) {
     let (app, _) = setup(pool.clone()).await;
     for (case, status, code) in [
@@ -268,7 +273,7 @@ async fn a_kratos_session_counts_only_with_its_second_factor(pool: PgPool) {
     assert_eq!(sign_ins, 3, "{log}");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn the_proxy_passes_only_the_self_service_flows(pool: PgPool) {
     let (app, _) = setup(pool.clone()).await;
     let request = Request::get("/api/auth/self-service/login/browser?aal=aal2")
@@ -324,7 +329,7 @@ async fn the_proxy_passes_only_the_self_service_flows(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn wrong_passwords_through_kratos_are_slowed_down(pool: PgPool) {
     let (app, _) = setup(pool).await;
     let attempt = || {
@@ -344,7 +349,7 @@ async fn wrong_passwords_through_kratos_are_slowed_down(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn signing_out_ends_the_kratos_session_too(pool: PgPool) {
     let (app, calls) = setup(pool).await;
     let token = send(&app, sign_in("aal2")).await.session_token().unwrap();

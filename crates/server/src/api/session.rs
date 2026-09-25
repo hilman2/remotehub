@@ -16,6 +16,7 @@ use sqlx::PgExecutor;
 use uuid::Uuid;
 
 use super::problem::{ErrorCode, Problem};
+use crate::AppState;
 use crate::audit::{self, Action, Actor, Entry};
 use crate::auth::{PER_ADDRESS, PER_USER};
 use crate::break_glass;
@@ -23,7 +24,6 @@ use crate::proxy;
 use crate::second_factor;
 use crate::session::{self, Session};
 use crate::webauthn::RelyingParty;
-use crate::{AppState, Settings};
 
 #[derive(Deserialize)]
 pub struct SignIn {
@@ -54,13 +54,13 @@ pub struct Me {
 }
 
 impl Me {
-    pub fn of(session: &Session, settings: &Settings) -> Self {
+    pub fn of(session: &Session) -> Self {
         Me {
             username: session.username.clone(),
             display_name: session.display_name.clone(),
             kind: session.kind.clone(),
-            admin: session.is_admin(settings),
-            roles: session.role_names(settings),
+            admin: session.is_admin(),
+            roles: session.role_names(),
         }
     }
 
@@ -70,7 +70,7 @@ impl Me {
         let session = session::lookup(&state.db, token, state.settings.session.idle)
             .await?
             .ok_or(Problem::new(ErrorCode::Internal))?;
-        Ok(Me::of(&session, &state.settings))
+        Ok(Me::of(&session))
     }
 }
 
@@ -344,8 +344,8 @@ pub async fn sign_in_break_glass(
     Ok((AppendHeaders(vec![session::set_cookie(&token)]), Json(me)))
 }
 
-pub async fn current(State(state): State<AppState>, session: Session) -> Json<Me> {
-    Json(Me::of(&session, &state.settings))
+pub async fn current(session: Session) -> Json<Me> {
+    Json(Me::of(&session))
 }
 
 pub async fn sign_out(

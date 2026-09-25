@@ -59,8 +59,8 @@ pub struct ConnectorInput {
     name: String,
 }
 
-fn require_admin(session: &Session, state: &AppState) -> Result<(), Problem> {
-    if session.is_admin(&state.settings) {
+fn require_admin(session: &Session) -> Result<(), Problem> {
+    if session.is_admin() {
         Ok(())
     } else {
         Err(Problem::new(ErrorCode::Forbidden))
@@ -99,7 +99,7 @@ pub async fn create(
     ClientAddress(address): ClientAddress,
     input: Result<Json<ConnectorInput>, JsonRejection>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), Problem> {
-    require_admin(&session, &state)?;
+    require_admin(&session)?;
     let name = name(&body(input)?.name, "name")?;
     let mut secret = [0u8; 32];
     getrandom::fill(&mut secret).expect("the OS has randomness");
@@ -140,7 +140,7 @@ pub async fn delete(
     ClientAddress(address): ClientAddress,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&session, &state)?;
+    require_admin(&session)?;
     let mut tx = state.db.begin().await?;
     let deleted: Option<String> =
         sqlx::query_scalar("DELETE FROM connectors WHERE id = $1 RETURNING name")

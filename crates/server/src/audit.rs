@@ -36,6 +36,7 @@ audit_actions! {
     BreakGlassCreated = "break_glass.created",
     BreakGlassReset = "break_glass.reset",
     BreakGlassDeleted = "break_glass.deleted",
+    SetupCompleted = "setup.completed",
     FolderCreated = "folder.created",
     FolderUpdated = "folder.updated",
     FolderDeleted = "folder.deleted",

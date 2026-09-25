@@ -138,7 +138,7 @@ impl Lab {
     }
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn accounts_that_may_no_longer_sign_in_lose_their_sessions(pool: PgPool) {
     let lab = lab(pool).await;
     let alice = lab.sign_in("alice").await;
@@ -181,7 +181,7 @@ async fn accounts_that_may_no_longer_sign_in_lose_their_sessions(pool: PgPool) {
     assert_eq!(lab.audited(&alice).await[0]["reason"], "account_expired");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn new_groups_reach_open_sessions(pool: PgPool) {
     let lab = lab(pool).await;
     let alice = lab.sign_in("alice").await;
@@ -220,7 +220,7 @@ async fn new_groups_reach_open_sessions(pool: PgPool) {
     assert!(lab.signed_in(&olaf).await);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn an_unreachable_directory_changes_nothing(pool: PgPool) {
     let lab = lab(pool.clone()).await;
     let olaf = lab.sign_in("olaf").await;
@@ -239,7 +239,7 @@ async fn an_unreachable_directory_changes_nothing(pool: PgPool) {
     assert_eq!(lab.directory.asked(), [OLAF_SID]);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn every_connection_asks_the_directory_first(pool: PgPool) {
     let lab = lab(pool).await;
     let olaf = lab.sign_in("olaf").await;

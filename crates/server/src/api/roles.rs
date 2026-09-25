@@ -4,9 +4,9 @@
 //! - `GET /api/roles`: every role with the users and groups that have it.
 //! - `PUT`/`DELETE /api/roles/{role}/members/{sid}`: give or take a role.
 //!
-//! The configured administrators (`REMOTEHUB_ADMIN_GROUPS`,
-//! `REMOTEHUB_ADMIN_ACCOUNTS`) are not listed here and cannot be removed
-//! here: they are how an installation starts. Every change is audited.
+//! The setup wizard gives the first administrator the role (#143). The last
+//! user or group with the role keeps it, so there is always someone besides
+//! the break-glass accounts. Every change is audited.
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -44,8 +44,8 @@ pub struct MemberInput {
     principal_name: String,
 }
 
-fn require_admin(state: &AppState, session: &Session) -> Result<(), Problem> {
-    if session.is_admin(&state.settings) {
+fn require_admin(session: &Session) -> Result<(), Problem> {
+    if session.is_admin() {
         Ok(())
     } else {
         Err(Problem::new(ErrorCode::Forbidden))
@@ -78,7 +78,7 @@ pub async fn list(
     State(state): State<AppState>,
     session: Session,
 ) -> Result<Json<Vec<Assignments>>, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let members: Vec<Member> = sqlx::query_as(
         "SELECT role, principal_sid AS sid, principal_kind AS kind, principal_name AS name
          FROM role_assignments ORDER BY principal_kind DESC, lower(principal_name)",
@@ -107,7 +107,7 @@ pub async fn assign(
     Path((role_name, sid)): Path<(String, String)>,
     input: Result<Json<MemberInput>, JsonRejection>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let role = role(&role_name)?;
     let input = body(input)?;
     let principal: PrincipalId = sid.parse().map_err(|_| invalid("principal_sid"))?;
@@ -149,9 +149,16 @@ pub async fn revoke(
     ClientAddress(address): ClientAddress,
     Path((role_name, sid)): Path<(String, String)>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let role = role(&role_name)?;
     let mut tx = state.db.begin().await?;
+    if role == Role::Administrator {
+        // Two administrators taking the role from each other at once must
+        // not both see the other one still there.
+        sqlx::query("SELECT 1 FROM instance FOR UPDATE")
+            .execute(&mut *tx)
+            .await?;
+    }
     let removed: Option<String> = sqlx::query_scalar(
         "DELETE FROM role_assignments WHERE role = $1 AND principal_sid = $2
          RETURNING principal_name",
@@ -163,6 +170,15 @@ pub async fn revoke(
     let Some(member_name) = removed else {
         return Err(Problem::new(ErrorCode::NotFound));
     };
+    if role == Role::Administrator {
+        let left: i64 = sqlx::query_scalar("SELECT count(*) FROM role_assignments WHERE role = $1")
+            .bind(role.as_str())
+            .fetch_one(&mut *tx)
+            .await?;
+        if left == 0 {
+            return Err(Problem::new(ErrorCode::LastAdministrator));
+        }
+    }
     let details =
         json!({ "role": role.as_str(), "principal_sid": sid, "principal_name": member_name });
     audit::record(

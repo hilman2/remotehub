@@ -18,11 +18,11 @@
 	import { m } from '$lib/paraglide/messages';
 	import { isSecurityOfficer, session } from '$lib/session.svelte';
 	import CarryOut from '$lib/vault/CarryOut.svelte';
+	import NewRecoveryKey from '$lib/vault/NewRecoveryKey.svelte';
 	import {
 		approveRecovery,
 		askRecovery,
 		cancelRecovery,
-		createKey,
 		deleteKey,
 		loadKeys,
 		loadRecoveries,
@@ -32,9 +32,6 @@
 		type RecoveryKind,
 		type RecoveryStatus
 	} from '$lib/vault/recovery';
-
-	/** As long as a vault's passphrase must be. */
-	const MIN_PASSPHRASE = 12;
 
 	const admin = $derived(!!session.user?.admin);
 	const officer = $derived(isSecurityOfficer(session.user));
@@ -85,47 +82,9 @@
 
 	// A new key: the passphrase for its file, then the private key once.
 	let keyOpen = $state(false);
-	let passphrase = $state('');
-	let passphraseAgain = $state('');
-	let keyError = $state<string | null>(null);
-	let privateText = $state<string | null>(null);
-	let busy = $state(false);
 
 	function newKey() {
-		passphrase = passphraseAgain = '';
-		keyError = privateText = null;
 		keyOpen = true;
-	}
-
-	async function makeKey(event: SubmitEvent) {
-		event.preventDefault();
-		if (passphrase.length < MIN_PASSPHRASE) {
-			keyError = m.vault_passphrase_short({ count: MIN_PASSPHRASE });
-			return;
-		}
-		if (passphrase !== passphraseAgain) {
-			keyError = m.vault_passphrase_mismatch();
-			return;
-		}
-		busy = true;
-		const made = await createKey(passphrase);
-		busy = false;
-		if (!made.ok) {
-			keyError = problemMessage(made);
-			return;
-		}
-		passphrase = passphraseAgain = '';
-		privateText = made.data.text;
-		const blob = new Blob([JSON.stringify(made.data.file, null, 2)], {
-			type: 'application/json'
-		});
-		const url = URL.createObjectURL(blob);
-		const link = document.createElement('a');
-		link.href = url;
-		link.download = `remotehub-recovery-key-${made.data.file.key_id.slice(0, 8)}.json`;
-		link.click();
-		setTimeout(() => URL.revokeObjectURL(url), 10_000);
-		await load();
 	}
 
 	// Asking for a recovery of one vault.
@@ -345,48 +304,7 @@
 
 <Dialog bind:open={keyOpen} title={current ? m.recovery_key_rotate() : m.recovery_key_create()}>
 	{#if keyOpen}
-		{#if privateText}
-			<p class="text-sm">{m.recovery_key_shown_once()}</p>
-			<p
-				class="mt-4 rounded-lg bg-surface-2 p-3 font-mono text-lg break-all"
-				data-testid="organisation-private-key"
-			>
-				{privateText}
-			</p>
-			<button type="button" class="{primary} mt-5" onclick={() => (keyOpen = false)}>
-				{m.vault_recovery_saved()}
-			</button>
-		{:else}
-			<form onsubmit={makeKey}>
-				<p class="text-sm text-ink-2">{m.recovery_key_create_hint()}</p>
-				<label class={label} for="recovery-new-passphrase">{m.recovery_key_passphrase()}</label>
-				<input
-					id="recovery-new-passphrase"
-					class={field}
-					type="password"
-					required
-					autocomplete="new-password"
-					bind:value={passphrase}
-				/>
-				<label class={label} for="recovery-new-passphrase-again">
-					{m.field_passphrase_again()}
-				</label>
-				<input
-					id="recovery-new-passphrase-again"
-					class={field}
-					type="password"
-					required
-					autocomplete="new-password"
-					bind:value={passphraseAgain}
-				/>
-				<button type="submit" class="{primary} mt-5" disabled={busy}>
-					{m.recovery_key_create()}
-				</button>
-				{#if keyError}
-					<p class="mt-3 text-sm text-critical" role="alert">{keyError}</p>
-				{/if}
-			</form>
-		{/if}
+		<NewRecoveryKey oncreated={load} ondone={() => (keyOpen = false)} />
 	{/if}
 </Dialog>
 

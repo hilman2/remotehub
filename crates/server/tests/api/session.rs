@@ -9,7 +9,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn sign_in_session_and_sign_out(pool: PgPool) {
     let app = app(state(pool.clone()), None);
 
@@ -78,7 +78,7 @@ async fn sign_in_session_and_sign_out(pool: PgPool) {
     assert_eq!(after.code(), "unauthenticated");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn stores_the_user_by_sid_and_only_a_hash_of_the_token(pool: PgPool) {
     let app = app(state(pool.clone()), None);
     let token = send(&app, sign_in_request("alice", "right"))
@@ -112,7 +112,7 @@ async fn stores_the_user_by_sid_and_only_a_hash_of_the_token(pool: PgPool) {
     assert_eq!(groups, [ADMINS_SID]);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn failed_sign_ins_explain_only_what_is_safe(pool: PgPool) {
     let app = app(state(pool), None);
     for (user, password, status, code) in [
@@ -146,7 +146,7 @@ async fn failed_sign_ins_explain_only_what_is_safe(pool: PgPool) {
     }
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn repeated_failures_block_the_user_for_a_while(pool: PgPool) {
     let app = app(state(pool), None);
     for _ in 0..5 {
@@ -167,7 +167,7 @@ async fn repeated_failures_block_the_user_for_a_while(pool: PgPool) {
     assert!(blocked.session_token().is_none());
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn foreign_origins_cannot_change_state(pool: PgPool) {
     let app = app(state(pool), None);
     let body = json!({ "username": "alice", "password": "right" });
@@ -190,7 +190,7 @@ async fn foreign_origins_cannot_change_state(pool: PgPool) {
     assert_eq!(without.status, StatusCode::OK);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn sessions_end_when_idle_or_expired(pool: PgPool) {
     let app = app(state(pool.clone()), None);
     let idle = send(&app, sign_in_request("alice", "right"))
@@ -232,7 +232,7 @@ async fn sessions_end_when_idle_or_expired(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn invalid_bodies_and_missing_directory_are_problems(pool: PgPool) {
     let app = app(state(pool.clone()), None);
     let broken = send(
@@ -270,7 +270,7 @@ fn login_key(response: &crate::common::Response) -> Option<String> {
         .map(str::to_owned)
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn the_sign_in_password_is_kept_sealed_with_a_key_only_the_browser_has(pool: PgPool) {
     let app = app(state(pool.clone()), None);
     let response = send(&app, sign_in_request("alice", "right")).await;
@@ -334,7 +334,7 @@ fn through_proxy(
     request
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn behind_a_trusted_proxy_every_client_counts_for_itself(pool: PgPool) {
     let mut settings = settings();
     settings.trusted_proxies = vec!["127.0.0.1".parse().unwrap()];
@@ -370,7 +370,7 @@ async fn behind_a_trusted_proxy_every_client_counts_for_itself(pool: PgPool) {
     assert_eq!(addresses, ["203.0.113.7", "203.0.113.8"]);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn keeping_the_password_can_be_switched_off(pool: PgPool) {
     let mut settings = settings();
     settings.own_account_connections = false;

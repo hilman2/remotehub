@@ -27,5 +27,6 @@ mod search;
 mod second_factor;
 mod secrets;
 mod session;
+mod setup;
 mod terminal;
 mod users;

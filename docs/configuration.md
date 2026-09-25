@@ -64,16 +64,6 @@ Kratos and sets both variables; its own settings are in `kratos/kratos.yml` and 
 | `REMOTEHUB_KRATOS_URL` | – | Kratos' public API, e.g. `http://kratos:4433`. Browsers reach it through remotehub under `/api/auth/`. |
 | `REMOTEHUB_KRATOS_ADMIN_URL` | required with a URL | Kratos' admin API, e.g. `http://kratos:4434`. |
 
-## Administration
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `REMOTEHUB_ADMIN_GROUPS` | – | Groups whose members administer remotehub, separated by commas or semicolons: SIDs, or group names that are looked up in the directory at startup. |
-| `REMOTEHUB_ADMIN_ACCOUNTS` | – | Local accounts that administer remotehub: their e-mail addresses, separated by commas or semicolons. |
-
-Both name the administrators an installation starts with. They give the role further under *Users*, where the
-auditor and security officer roles are given too; those are not settings.
-
 ## Connections
 
 | Variable | Default | Meaning |
@@ -127,6 +117,7 @@ verify-audit`.
 | `break-glass reset NAME` | Replaces both; the account's open sessions end. |
 | `break-glass delete NAME` | Deletes the account. |
 | `break-glass list` | Lists the accounts. |
+| `setup-code` | Prints the link to the setup wizard with a new one-time code, which replaces the previous one. Exits with 1 once setup is complete. |
 | `account invite EMAIL [--name NAME]` | Creates a local account and prints the link and one-time code, valid for 48 hours, with which its owner sets a password and an authenticator app. |
 | `verify-audit` | Checks the audit log's hash chain; exits with 1 if it is broken. |
 | `connector` | Runs as a site connector (see above) instead of the server. |

@@ -164,7 +164,7 @@ async fn stored_device(
     .await
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_foreign_origin_or_no_session_cannot_open_a_terminal(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
     let device = create(
@@ -190,7 +190,7 @@ async fn a_foreign_origin_or_no_session_cannot_open_a_terminal(pool: PgPool) {
     }
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn a_stored_credential_opens_a_shell_and_pins_the_host_key(pool: PgPool) {
     let (state, app, token, folder) = setup(pool.clone()).await;
@@ -254,7 +254,7 @@ async fn a_stored_credential_opens_a_shell_and_pins_the_host_key(pool: PgPool) {
     assert!(!log.to_string().contains("Tester-Passw0rd!"));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn a_device_behind_a_connector_opens_only_while_it_is_connected(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
@@ -297,7 +297,7 @@ async fn a_device_behind_a_connector_opens_only_while_it_is_connected(pool: PgPo
     assert_eq!(crate::connectors::carried(&app, &token, 1).await, 1);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn a_changed_host_key_stops_the_connection(pool: PgPool) {
     let (state, app, token, folder) = setup(pool.clone()).await;
@@ -339,7 +339,7 @@ async fn a_changed_host_key_stops_the_connection(pool: PgPool) {
     assert_eq!(event(&mut socket).await["pinned"], true);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn asked_credentials_work_once_and_wrong_ones_are_reported(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
@@ -373,7 +373,7 @@ async fn asked_credentials_work_once_and_wrong_ones_are_reported(pool: PgPool) {
     assert_eq!(event(&mut socket).await["code"], "target_auth_failed");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn the_own_account_connects_with_the_sign_in_password(pool: PgPool) {
     let state = state(pool);
@@ -454,7 +454,7 @@ async fn the_own_account_connects_with_the_sign_in_password(pool: PgPool) {
     output_until(&mut socket, "tester").await;
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn a_stored_key_with_certificate_opens_a_shell(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
@@ -533,7 +533,7 @@ fn lab_ca() -> SshCa {
     SshCa::from_openssh(&key).unwrap()
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn a_certificate_from_the_ca_signs_in_as_the_user(pool: PgPool) {
     let (address, _, token, device) = certificate_device(pool, Some(lab_ca())).await;
@@ -548,7 +548,7 @@ async fn a_certificate_from_the_ca_signs_in_as_the_user(pool: PgPool) {
     output_until(&mut socket, "ca: alice").await;
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn a_certificate_from_another_ca_is_refused(pool: PgPool) {
     let other = SshCa::from_openssh(&SshCa::generate()).unwrap();
@@ -558,7 +558,7 @@ async fn a_certificate_from_another_ca_is_refused(pool: PgPool) {
     assert_eq!(event(&mut socket).await["code"], "target_auth_failed");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn without_a_ca_there_is_no_certificate_and_no_public_key(pool: PgPool) {
     let (address, app, token, device) = certificate_device(pool, None).await;
     let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
@@ -568,7 +568,7 @@ async fn without_a_ca_there_is_no_certificate_and_no_public_key(pool: PgPool) {
     assert_eq!(missing.status, 404);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn the_public_key_is_there_for_the_targets_without_signing_in(pool: PgPool) {
     let ca = lab_ca();
     let expected = format!("{}\n", ca.public_key());
@@ -591,7 +591,7 @@ async fn the_public_key_is_there_for_the_targets_without_signing_in(pool: PgPool
     assert_eq!(key_of(&expected), key_of(&lab));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn only_ssh_devices_sign_in_with_a_certificate(pool: PgPool) {
     let (_, app, token, _) = certificate_device(pool, None).await;
     let tree = send(&app, crate::common::get("/api/tree", Some(&token)))
@@ -628,7 +628,7 @@ async fn laps_device(app: &Router, token: &str, folder: &str, host: &str) -> Str
     .await
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn the_laps_password_signs_in_as_the_local_account(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
@@ -660,7 +660,7 @@ async fn the_laps_password_signs_in_as_the_local_account(pool: PgPool) {
     assert!(!log.to_string().contains("Tester-Passw0rd!"));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn without_a_laps_password_there_is_no_connection(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
     let mut devices = Vec::new();
@@ -716,7 +716,7 @@ pub async fn require_purpose(app: &Router, token: &str) {
     assert_eq!(response.status, 204);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn without_a_purpose_nothing_reaches_the_device(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
     let device = create(
@@ -763,7 +763,7 @@ async fn without_a_purpose_nothing_reaches_the_device(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn a_session_goes_into_the_journal_with_its_purpose(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
@@ -806,7 +806,7 @@ async fn a_session_goes_into_the_journal_with_its_purpose(pool: PgPool) {
     assert_eq!(opened["details"]["purpose"], "Rotate the logs");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn a_device_signs_in_with_credentials_of_its_own(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
@@ -835,7 +835,7 @@ async fn a_device_signs_in_with_credentials_of_its_own(pool: PgPool) {
     output_until(&mut socket, "own says tester").await;
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn a_device_signs_in_with_a_key_of_its_own(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;

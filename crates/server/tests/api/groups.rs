@@ -49,7 +49,7 @@ async fn folders(app: &Router, token: &str) -> Vec<String> {
         .collect()
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn only_administrators_manage_groups(pool: PgPool) {
     let (app, _) = setup(pool).await;
     let alice = token(&app, sign_in_request("alice", "right")).await;
@@ -103,7 +103,7 @@ async fn only_administrators_manage_groups(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_grant_to_a_group_reaches_its_members_at_once(pool: PgPool) {
     let (app, _) = setup(pool).await;
     let alice = token(&app, sign_in_request("alice", "right")).await;
@@ -204,7 +204,7 @@ async fn a_grant_to_a_group_reaches_its_members_at_once(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn members_are_users_and_directory_groups_that_exist(pool: PgPool) {
     let (app, _) = setup(pool).await;
     let alice = token(&app, sign_in_request("alice", "right")).await;
@@ -262,7 +262,7 @@ async fn members_are_users_and_directory_groups_that_exist(pool: PgPool) {
     }
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_group_can_be_asked_for_a_purpose(pool: PgPool) {
     let (app, _) = setup(pool).await;
     let alice = token(&app, sign_in_request("alice", "right")).await;
@@ -294,7 +294,7 @@ async fn a_group_can_be_asked_for_a_purpose(pool: PgPool) {
     assert!(purpose(bob).await);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn the_search_finds_own_groups_and_local_accounts(pool: PgPool) {
     let (app, _) = setup(pool.clone()).await;
     let alice = token(&app, sign_in_request("alice", "right")).await;

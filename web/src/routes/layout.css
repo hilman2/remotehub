@@ -155,6 +155,24 @@
 			transition-duration: 0.01ms !important;
 		}
 	}
+
+	/* A page with a .print-sheet prints only that sheet, e.g. a
+	   break-glass account or a recovery key for the safe (#143). */
+	@media print {
+		body:has(.print-sheet) * {
+			visibility: hidden;
+		}
+		.print-sheet,
+		.print-sheet * {
+			visibility: visible;
+		}
+		.print-sheet {
+			position: absolute;
+			inset: 0 auto auto 0;
+			color: black;
+			background: white;
+		}
+	}
 }
 
 /* Small uppercase label above a group, e.g. "Pinned" or a card's title. */

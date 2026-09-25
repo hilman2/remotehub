@@ -94,8 +94,13 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   own, roles. `authorize()` decides the roles shown; `Catalog::reasons` names the grants behind them.
 - **Roles for remotehub itself (`api/roles.rs`):** administrator, auditor (reads and checks the audit log)
   and security officer (approves vault recoveries), given to users and groups in `role_assignments`. The
-  session lookup reads them with the groups. `REMOTEHUB_ADMIN_GROUPS` and `REMOTEHUB_ADMIN_ACCOUNTS` stay
-  the administrators an installation starts with, and break-glass accounts are administrators.
+  session lookup reads them with the groups. Break-glass accounts are administrators too. The last
+  user or group with the administrator role keeps it.
+- **Setup (`setup.rs`, `api/setup.rs`, #143):** a fresh installation has no administrator, and the API
+  answers `setup_pending` to everything but the setup wizard and signing in. `remotehub setup-code`
+  prints the wizard's link with a one-time code (only its hash is stored); with it, the wizard creates a
+  local account with the administrator role, who then goes through the other steps in their own session.
+  Once complete, setup never opens again.
 - **Second factor for directory accounts (`second_factor.rs`):** TOTP whose secret is sealed in the vault
   (owner = user). A user sets it up on the account page, or during sign-in when a rule in
   `second_factor_principals` names them or a group of theirs; the password is then sent again with the
@@ -211,7 +216,7 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   `remotehub verify-audit` and `POST /api/audit/verify` recompute the chain and name the first broken entry.
 - Actions have stable names (`session.sign_in` …), defined once in `crates/server/src/audit.rs`; the UI
   translates them (generated list, type-checked messages). Details never contain secrets.
-- Administrators (members of `REMOTEHUB_ADMIN_GROUPS`, break-glass accounts) read the log in the UI.
+- Administrators and auditors read the log in the UI.
 
 ## 5. Protocol engines
 
@@ -300,6 +305,7 @@ English is the base locale, German the second; more can follow (ADR 0002).
 | M3 Vault | Reveal with audit, history, personal vault, generator, TOTP fields, attachments, KDBX import and export |
 | M4 Identity | Entra ID via OIDC, second factor for directory sign-ins |
 | M5 Accountability | Session recording and playback, audit export, clipboard and file policies |
+| M6 Onboarding | Installer in one command, setup wizard, directory, mail and certificate in the settings |
 
 Later ideas are GitHub issues with the label `backlog`.
 

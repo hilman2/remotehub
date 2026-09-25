@@ -70,7 +70,7 @@ fn problem(response: &Response) -> (StatusCode, String) {
     (response.status, response.code())
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_user_with_an_app_signs_in_only_with_its_code(pool: PgPool) {
     let app = app(state(pool), None);
     let bob = token(&app, "bob", json!({})).await;
@@ -129,7 +129,7 @@ async fn a_user_with_an_app_signs_in_only_with_its_code(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn wrong_codes_count_as_failed_attempts(pool: PgPool) {
     let app = app(state(pool), None);
     let bob = token(&app, "bob", json!({})).await;
@@ -146,7 +146,7 @@ async fn wrong_codes_count_as_failed_attempts(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_rule_asks_for_an_app_before_the_next_session(pool: PgPool) {
     let app = app(state(pool), None);
     let alice = token(&app, "alice", json!({})).await;
@@ -259,7 +259,7 @@ async fn a_rule_asks_for_an_app_before_the_next_session(pool: PgPool) {
     token(&app, "olaf", json!({})).await;
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_rule_reaches_members_of_own_groups(pool: PgPool) {
     let app = app(state(pool), None);
     let alice = token(&app, "alice", json!({})).await;
@@ -300,7 +300,7 @@ async fn a_rule_reaches_members_of_own_groups(pool: PgPool) {
     assert_eq!(rules[0]["principal_sid"], format!("group:{group}"));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn removing_the_app_takes_one_of_its_codes(pool: PgPool) {
     let app = app(state(pool), None);
     let bob = token(&app, "bob", json!({})).await;
@@ -333,7 +333,7 @@ async fn removing_the_app_takes_one_of_its_codes(pool: PgPool) {
     assert_eq!(status.json()["enrolled"], false);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_wrong_secret_or_code_sets_up_nothing(pool: PgPool) {
     let app = app(state(pool), None);
     let bob = token(&app, "bob", json!({})).await;
@@ -444,7 +444,7 @@ async fn asked_for_key(app: &Router, user: &str) -> (Value, String) {
     (params, id)
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_security_key_signs_in_once_per_challenge(pool: PgPool) {
     let app = app(state(pool), None);
     let alice = token(&app, "alice", json!({})).await;

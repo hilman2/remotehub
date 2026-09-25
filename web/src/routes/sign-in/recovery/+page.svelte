@@ -34,7 +34,7 @@
 	const asksCode = $derived(flow !== null && offers(flow, 'code'));
 
 	$effect(() => {
-		const id = page.url.searchParams.get('flow');
+		const id = page.url.searchParams.get('flow') ?? page.state.recoveryFlow;
 		(id ? loadFlow('recovery', id) : startFlow('recovery')).then(follow);
 	});
 
@@ -69,8 +69,22 @@
 		}
 	}
 
-	async function submit(event: SubmitEvent) {
+	// The setup wizard (#143) hands over the code of the administrator it
+	// just invited: nobody types it.
+	let handed = page.state.recoveryCode;
+	$effect(() => {
+		if (!handed || !asksCode || busy) return;
+		code = handed;
+		handed = undefined;
+		send();
+	});
+
+	function submit(event: SubmitEvent) {
 		event.preventDefault();
+		send();
+	}
+
+	async function send() {
 		if (!flow) return;
 		busy = true;
 		error = null;

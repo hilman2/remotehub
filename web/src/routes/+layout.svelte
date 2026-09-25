@@ -12,16 +12,31 @@
 	import ThemeSwitch from '$lib/components/ThemeSwitch.svelte';
 	import { getLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
-	import { isAuditor, isSecurityOfficer, loadSession, session, signOut } from '$lib/session.svelte';
+	import {
+		isAuditor,
+		isSecurityOfficer,
+		loadSession,
+		loadSetup,
+		session,
+		setup,
+		signOut
+	} from '$lib/session.svelte';
 	import SessionStatus from '$lib/session/SessionStatus.svelte';
 	import SessionTabs from '$lib/session/SessionTabs.svelte';
 	import SessionView from '$lib/session/SessionView.svelte';
+	import SetupHints from '$lib/setup/SetupHints.svelte';
 	import { tabs } from '$lib/session/tabs.svelte';
 	import { unlocked } from '$lib/vault/unlocked.svelte';
 
 	let { children } = $props();
 
 	const signInPage = $derived(page.url.pathname.startsWith(resolve('/sign-in')));
+	// The setup wizard (#143) stands alone, like the sign-in pages.
+	const setupPage = $derived(page.url.pathname === resolve('/setup'));
+	/** Setup is open, and waits for whoever looks at this page. */
+	const setupWaits = $derived(
+		setup.phase === 'pending' || (setup.phase === 'administrator' && !!session.user?.admin)
+	);
 	// The devices page shows the active session in place of the device's
 	// details (#85).
 	const showing = $derived(
@@ -69,17 +84,26 @@
 	$effect(() => {
 		document.documentElement.lang = getLocale();
 		loadSession();
+		loadSetup();
 	});
 
-	// Everything but the sign-in page needs a session.
+	// While setup is open, the wizard comes first. The path, not only
+	// setupPage, triggers this: a page that navigates on its own right after
+	// signing in (e.g. to /) would otherwise overtake the redirect unseen.
 	$effect(() => {
-		if (!session.loaded || session.user) return;
+		const path = page.url.pathname;
+		if (session.loaded && setupWaits && path !== resolve('/setup')) goto(resolve('/setup'));
+	});
+
+	// Everything but the sign-in page and the wizard needs a session.
+	$effect(() => {
+		if (!session.loaded || setup.phase === null || setupWaits || session.user) return;
 		// Signed out elsewhere or expired: the sessions are gone with the page
 		// below, and must not start again on the next sign-in; the next user
 		// does not find the vault open either.
 		tabs.clear();
 		unlocked.key = null;
-		if (!signInPage) goto(resolve('/sign-in'));
+		if (!signInPage && !setupPage) goto(resolve('/sign-in'));
 	});
 
 	// A reload or a closed tab ends every session: the browser asks first.
@@ -102,8 +126,8 @@
 
 <svelte:window onbeforeunload={beforeUnload} />
 
-{#if signInPage}
-	<div class="fixed top-3 right-3 flex items-center gap-2">
+{#if signInPage || setupPage}
+	<div class="fixed top-3 right-3 flex items-center gap-2 print:hidden">
 		<LocaleSwitch />
 		<ThemeSwitch />
 	</div>
@@ -171,6 +195,10 @@
 				<Siren size={16} aria-hidden="true" />
 				{m.break_glass_banner()}
 			</div>
+		{/if}
+
+		{#if session.user.admin && setup.phase === 'complete'}
+			<SetupHints />
 		{/if}
 
 		{#if tabs.list.length > 0}

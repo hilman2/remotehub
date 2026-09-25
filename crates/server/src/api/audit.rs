@@ -19,8 +19,8 @@ pub struct Page {
 }
 
 /// Auditors (#106) and administrators read the log and check its chain.
-fn require_auditor(session: &Session, state: &AppState) -> Result<(), Problem> {
-    if session.is_auditor(&state.settings) {
+fn require_auditor(session: &Session) -> Result<(), Problem> {
+    if session.is_auditor() {
         Ok(())
     } else {
         Err(Problem::new(ErrorCode::Forbidden))
@@ -32,7 +32,7 @@ pub async fn list(
     session: Session,
     page: Result<Query<Page>, QueryRejection>,
 ) -> Result<Json<Vec<Record>>, Problem> {
-    require_auditor(&session, &state)?;
+    require_auditor(&session)?;
     let Query(page) = page.map_err(|_| Problem::new(ErrorCode::InvalidRequest))?;
     let records = audit::list(&state.db, page.before, page.limit.unwrap_or(100)).await?;
     Ok(Json(records))
@@ -44,7 +44,7 @@ pub async fn verify(
     session: Session,
     ClientAddress(address): ClientAddress,
 ) -> Result<Json<Verification>, Problem> {
-    require_auditor(&session, &state)?;
+    require_auditor(&session)?;
     let verification = audit::verify(&state.db).await?;
     audit::record(
         &state.db,

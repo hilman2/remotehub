@@ -51,7 +51,7 @@ async fn actions(app: &Router, admin: &str) -> Vec<String> {
         .collect()
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn only_administrators_see_and_manage_users(pool: PgPool) {
     let (app, calls) = setup(pool).await;
     let bob = token(&app, sign_in_request("bob", "right")).await;
@@ -97,7 +97,7 @@ async fn only_administrators_see_and_manage_users(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_blocked_user_loses_their_sessions_and_stays_out(pool: PgPool) {
     let (app, calls) = setup(pool).await;
     let bob = token(&app, sign_in_request("bob", "right")).await;
@@ -194,7 +194,7 @@ async fn a_blocked_user_loses_their_sessions_and_stays_out(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn sessions_end_on_request(pool: PgPool) {
     let (app, calls) = setup(pool).await;
     let bob = token(&app, sign_in_request("bob", "right")).await;
@@ -217,7 +217,7 @@ async fn sessions_end_on_request(pool: PgPool) {
     assert_eq!(actions(&app, &alice).await, ["user.sessions_ended"; 2]);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn only_local_accounts_get_a_recovery_code_or_are_deleted(pool: PgPool) {
     let (app, calls) = setup(pool).await;
     token(&app, sign_in_request("bob", "right")).await;
@@ -285,7 +285,7 @@ async fn only_local_accounts_get_a_recovery_code_or_are_deleted(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn an_invitation_hands_out_its_code_once(pool: PgPool) {
     let (app, calls) = setup(pool).await;
     let alice = token(&app, sign_in_request("alice", "right")).await;

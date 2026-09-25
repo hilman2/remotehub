@@ -28,7 +28,6 @@ services:
       REMOTEHUB_GUACD: guacd:4822
       REMOTEHUB_BROWSER: browser:4823
       REMOTEHUB_LOG_FORMAT: ${REMOTEHUB_LOG_FORMAT:-text}
-      REMOTEHUB_ADMIN_GROUPS: ${REMOTEHUB_ADMIN_GROUPS:-}
       REMOTEHUB_LDAP_URL: ${REMOTEHUB_LDAP_URL:-}
       REMOTEHUB_LDAP_STARTTLS: ${REMOTEHUB_LDAP_STARTTLS:-false}
       REMOTEHUB_LDAP_BIND_DN: ${REMOTEHUB_LDAP_BIND_DN:-}
@@ -39,11 +38,9 @@ services:
       # put it at certs/ldap-ca.crt and set this to /run/certs/ldap-ca.crt.
       REMOTEHUB_LDAP_CA_FILE: ${REMOTEHUB_LDAP_CA_FILE:-}
       REMOTEHUB_OWN_ACCOUNT_CONNECTIONS: ${REMOTEHUB_OWN_ACCOUNT_CONNECTIONS:-true}
-      # Local accounts (ADR 0010): Kratos below, and the accounts that
-      # administer remotehub, by e-mail address.
+      # Local accounts (ADR 0010): Kratos below.
       REMOTEHUB_KRATOS_URL: http://kratos:4433
       REMOTEHUB_KRATOS_ADMIN_URL: http://kratos:4434
-      REMOTEHUB_ADMIN_ACCOUNTS: ${REMOTEHUB_ADMIN_ACCOUNTS:-}
       REMOTEHUB_RDP_KEYBOARD_LAYOUT: ${REMOTEHUB_RDP_KEYBOARD_LAYOUT:-en-us-qwerty}
       REMOTEHUB_SESSION_IDLE_MINUTES: ${REMOTEHUB_SESSION_IDLE_MINUTES:-30}
       REMOTEHUB_SESSION_MAX_HOURS: ${REMOTEHUB_SESSION_MAX_HOURS:-12}

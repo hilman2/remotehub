@@ -1,6 +1,6 @@
-//! Roles for remotehub itself (#106): alice administers by the configured
-//! admin group, bob is a directory user without groups, olaf is in RH
-//! Operators, Ada is a local account.
+//! Roles for remotehub itself (#106): alice administers through RH Admins
+//! (fixture `set_up`), bob is a directory user without groups, olaf is in
+//! RH Operators, Ada is a local account.
 
 use axum::Router;
 use axum::http::StatusCode;
@@ -32,7 +32,7 @@ async fn me(app: &Router, token: &str) -> (Value, Value) {
     (me["admin"].clone(), me["roles"].clone())
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn an_auditor_reads_the_audit_log_and_nothing_else(pool: PgPool) {
     let (app, _) = setup(pool).await;
     let (alice, _) = token(&app, sign_in_request("alice", "right")).await;
@@ -87,7 +87,7 @@ async fn an_auditor_reads_the_audit_log_and_nothing_else(pool: PgPool) {
     assert_eq!(actions, ["role.revoked", "role.assigned"]);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn roles_reach_members_of_groups_and_local_accounts(pool: PgPool) {
     let (app, _) = setup(pool).await;
     let (alice, _) = token(&app, sign_in_request("alice", "right")).await;
@@ -164,7 +164,8 @@ async fn roles_reach_members_of_groups_and_local_accounts(pool: PgPool) {
     assert_eq!(
         members,
         [
-            ("administrator".to_owned(), 1),
+            // With the two of the fixture.
+            ("administrator".to_owned(), 3),
             ("auditor".to_owned(), 0),
             ("security_officer".to_owned(), 1)
         ]
@@ -181,10 +182,32 @@ async fn roles_reach_members_of_groups_and_local_accounts(pool: PgPool) {
     .await;
     assert_eq!(me(&app, &olaf).await, (json!(false), json!([])));
     let listed = call(&app, &alice, "GET", "/api/roles", None).await.json();
-    assert_eq!(listed[0]["members"], json!([]), "{listed}");
+    let administrators: Vec<&str> = listed[0]["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["sid"].as_str())
+        .collect();
+    assert_eq!(administrators.len(), 2, "{listed}");
+    assert!(!administrators.contains(&format!("group:{group}").as_str()));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn the_last_administrator_keeps_the_role(pool: PgPool) {
+    let (app, _) = setup(pool).await;
+    let (alice, _) = token(&app, sign_in_request("alice", "right")).await;
+    let revoke = |sid: &str| format!("/api/roles/administrator/members/{sid}");
+    let local = revoke("local:5b0c3cb1-7a0e-4a5e-9d0a-0000000000a2");
+    let local = call(&app, &alice, "DELETE", &local, None).await;
+    assert_eq!(local.status, StatusCode::NO_CONTENT, "{}", local.json());
+    let last = call(&app, &alice, "DELETE", &revoke("S-1-5-21-1-2-3-1201"), None).await;
+    assert_eq!(last.status, StatusCode::CONFLICT);
+    assert_eq!(last.code(), "last_administrator");
+    // Nothing changed: alice still administers.
+    assert_eq!(me(&app, &alice).await.0, json!(true));
+}
+
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn roles_go_only_to_principals_that_exist(pool: PgPool) {
     let (app, _) = setup(pool).await;
     let (alice, _) = token(&app, sign_in_request("alice", "right")).await;

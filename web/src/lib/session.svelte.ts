@@ -1,5 +1,6 @@
 /** The signed-in user, shared by all pages. */
 import { api, type ApiResult } from './api/client';
+import { loadSetupStatus, type SetupPhase } from './api/setup';
 import { endSession, type Provider } from './kratos/flow';
 
 export interface User {
@@ -32,6 +33,19 @@ export async function loadSession(): Promise<void> {
 	const result = await api<User>('GET', '/api/session');
 	session.user = result.ok ? result.data : null;
 	session.loaded = true;
+}
+
+/**
+ * Where the installation stands with its setup (#143); null until known.
+ * The layout sends everyone to the wizard while it is `pending`, and the
+ * administrator while it is `administrator`.
+ */
+export const setup = $state<{ phase: SetupPhase | null }>({ phase: null });
+
+export async function loadSetup(): Promise<void> {
+	const result = await loadSetupStatus();
+	// Without an answer, nothing is held back: the pages say what fails.
+	setup.phase = result.ok ? result.data.phase : 'complete';
 }
 
 /**

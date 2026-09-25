@@ -11,6 +11,9 @@ account-invited = Account { $email } is created. With the link and the code, its
 account-code-label = Code:
 account-link-label = Link:
 
+setup-ready = Open this link to set up remotehub. It works until the wizard has created the first administrator; running this command again replaces it.
+setup-complete = remotehub is set up already, so there is no setup code any more.
+
 audit-intact = audit log intact: { $entries ->
     [one] 1 entry
    *[other] { $entries } entries

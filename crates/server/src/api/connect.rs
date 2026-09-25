@@ -143,7 +143,7 @@ pub async fn target(
     protocols: &[&str],
 ) -> Result<Target, Problem> {
     let catalog = catalog::load(&state.db).await?;
-    let subject = session.subject(&state.settings);
+    let subject = session.subject();
     match catalog.effective_role(&subject, ObjectId::Device(id)) {
         Some(role) if role >= Role::Connect => {}
         Some(_) => return Err(Problem::new(ErrorCode::Forbidden)),

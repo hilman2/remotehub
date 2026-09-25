@@ -96,7 +96,7 @@ fn reached(report: &Value) -> Vec<Reached> {
         .collect()
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_report_names_what_someone_reaches_and_why(pool: PgPool) {
     let app = app(state(pool), None);
     let alice = token(&app, "alice").await;
@@ -259,7 +259,7 @@ async fn a_report_names_what_someone_reaches_and_why(pool: PgPool) {
     assert_eq!(holders, [("RH Operators", "connect", true)]);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_group_of_remotehubs_own_counts_and_shows_its_members(pool: PgPool) {
     let app = app(state(pool), None);
     let alice = token(&app, "alice").await;

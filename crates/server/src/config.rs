@@ -51,9 +51,6 @@ pub struct Config {
     /// Keep the sign-in password, encrypted with a key only in the user's
     /// cookie, so devices can be opened with the own directory account.
     pub own_account_connections: bool,
-    /// Groups whose members administer remotehub: SIDs or group names
-    /// (names are looked up in the directory at startup).
-    pub admin_groups: Vec<String>,
     /// guacd for RDP and VNC (`host:port`), only reachable on an internal
     /// network.
     pub guacd: String,
@@ -67,8 +64,6 @@ pub struct Config {
     /// Ory Kratos for local accounts (#103); without it, only AD and
     /// break-glass accounts sign in.
     pub kratos: Option<KratosConfig>,
-    /// Local accounts, by e-mail address, that administer remotehub.
-    pub admin_accounts: Vec<String>,
 }
 
 /// Where remotehub reaches Kratos, on an internal network like guacd.
@@ -197,23 +192,6 @@ impl Config {
             .filter(|p| !p.is_empty())
             .map(PathBuf::from);
 
-        let list = |value: Option<String>| -> Vec<String> {
-            value
-                .map(|list| {
-                    list.split([',', ';'])
-                        .map(str::trim)
-                        .filter(|g| !g.is_empty())
-                        .map(str::to_owned)
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
-        let admin_groups = list(setting("REMOTEHUB_ADMIN_GROUPS")?);
-        let admin_accounts = list(setting("REMOTEHUB_ADMIN_ACCOUNTS")?)
-            .into_iter()
-            .map(|email| email.to_lowercase())
-            .collect();
-
         let kratos = match setting("REMOTEHUB_KRATOS_URL")? {
             None => None,
             Some(public_url) => {
@@ -282,13 +260,11 @@ impl Config {
             master_key_file,
             ssh_ca_key_file,
             own_account_connections,
-            admin_groups,
             guacd,
             browser,
             rdp_keyboard_layout,
             trusted_proxies,
             kratos,
-            admin_accounts,
         })
     }
 }
@@ -373,13 +349,11 @@ impl fmt::Debug for Config {
             .field("ldap", &self.ldap.as_ref().map(|l| &l.url))
             .field("master_key_file", &self.master_key_file)
             .field("ssh_ca_key_file", &self.ssh_ca_key_file)
-            .field("admin_groups", &self.admin_groups)
             .field("guacd", &self.guacd)
             .field("browser", &self.browser)
             .field("rdp_keyboard_layout", &self.rdp_keyboard_layout)
             .field("trusted_proxies", &self.trusted_proxies)
             .field("kratos", &self.kratos)
-            .field("admin_accounts", &self.admin_accounts)
             .finish()
     }
 }
@@ -425,7 +399,6 @@ mod tests {
         assert_eq!(config.session.idle, Duration::from_secs(30 * 60));
         assert_eq!(config.session.max, Duration::from_secs(12 * 3600));
         assert!(config.ldap.is_none());
-        assert!(config.admin_groups.is_empty());
         assert_eq!(config.guacd, "guacd:4822");
         assert_eq!(config.browser, "browser:4823");
         assert_eq!(config.rdp_keyboard_layout, "en-us-qwerty");
@@ -449,10 +422,6 @@ mod tests {
         let config = Config::from_lookup(lookup(&[
             ("REMOTEHUB_KRATOS_URL", "http://kratos:4433/"),
             ("REMOTEHUB_KRATOS_ADMIN_URL", "http://kratos:4434"),
-            (
-                "REMOTEHUB_ADMIN_ACCOUNTS",
-                "Ada@Example.com; ops@example.com",
-            ),
         ]))
         .unwrap();
         assert_eq!(
@@ -461,10 +430,6 @@ mod tests {
                 public_url: "http://kratos:4433".to_owned(),
                 admin_url: "http://kratos:4434".to_owned(),
             })
-        );
-        assert_eq!(
-            config.admin_accounts,
-            ["ada@example.com", "ops@example.com"]
         );
         assert_eq!(
             Config::from_lookup(lookup(&[("REMOTEHUB_KRATOS_URL", "http://kratos:4433")]))
@@ -507,16 +472,6 @@ mod tests {
                 .unwrap_err(),
             invalid("REMOTEHUB_TRUSTED_PROXIES", "proxy")
         );
-    }
-
-    #[test]
-    fn lists_admin_groups() {
-        let config = Config::from_lookup(lookup(&[(
-            "REMOTEHUB_ADMIN_GROUPS",
-            " RH Admins , S-1-5-21-1-2-3-512;;",
-        )]))
-        .unwrap();
-        assert_eq!(config.admin_groups, ["RH Admins", "S-1-5-21-1-2-3-512"]);
     }
 
     #[test]

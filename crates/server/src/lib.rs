@@ -18,6 +18,7 @@ pub mod refresh;
 pub mod second_factor;
 pub mod secrets;
 pub mod session;
+pub mod setup;
 pub mod totp;
 pub mod webauthn;
 
@@ -48,6 +49,8 @@ pub struct AppState {
     pub vault: Arc<DynVault>,
     /// Site connectors that are online, and streams through them (ADR 0008).
     pub connectors: Arc<connectors::Connectors>,
+    /// Whether the setup wizard is done (#143).
+    pub setup: Arc<setup::Completion>,
 }
 
 /// Settings the request handlers need.
@@ -56,8 +59,6 @@ pub struct Settings {
     /// e.g. `https://remotehub.example.com`
     pub public_origin: String,
     pub session: SessionConfig,
-    /// SIDs of the groups whose members are administrators.
-    pub admin_groups: Vec<String>,
     /// Whether devices may be opened with the own directory account (ADR 0005).
     pub own_account_connections: bool,
     /// guacd for RDP and VNC (`host:port`).
@@ -73,9 +74,6 @@ pub struct Settings {
     pub ssh_ca: Option<Arc<remotehub_gateway::ssh_ca::SshCa>>,
     /// Ory Kratos for local accounts (#103); none: they are off.
     pub kratos: Option<kratos::Kratos>,
-    /// Local accounts, by lower-case e-mail address, that administer
-    /// remotehub.
-    pub admin_accounts: Vec<String>,
 }
 
 impl AppState {
@@ -92,6 +90,7 @@ impl AppState {
             limiter: Arc::new(SignInLimiter::new(Duration::from_secs(5 * 60))),
             vault: Arc::new(vault),
             connectors: Arc::default(),
+            setup: Arc::default(),
         }
     }
 }

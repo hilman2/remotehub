@@ -54,8 +54,8 @@ fn entry<'a>(
     }
 }
 
-fn require_admin(state: &AppState, session: &Session) -> Result<(), Problem> {
-    if session.is_admin(&state.settings) {
+fn require_admin(session: &Session) -> Result<(), Problem> {
+    if session.is_admin() {
         Ok(())
     } else {
         Err(Problem::new(ErrorCode::Forbidden))
@@ -94,7 +94,7 @@ pub struct Keys {
 }
 
 pub async fn keys(State(state): State<AppState>, session: Session) -> Result<Json<Keys>, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let (kek_id, kek_version) = state.vault.keys().current();
     let keys = sqlx::query_as(
         r#"SELECT k.id, k.public_key, k.created_by_name,
@@ -136,7 +136,7 @@ pub async fn create_key(
     ClientAddress(address): ClientAddress,
     input: Result<Json<NewKey>, JsonRejection>,
 ) -> Result<(StatusCode, Json<Value>), Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let input = body(input)?;
     if !remotehub_vault::escrow::is_public_key(&input.public_key) {
         return Err(invalid("public_key"));
@@ -178,7 +178,7 @@ pub async fn delete_key(
     ClientAddress(address): ClientAddress,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let mut tx = state.db.begin().await?;
     // Locked, so no key is created meanwhile and no vault is wrapped for
     // this one (`personal::add_unlock` takes a share lock).
@@ -270,7 +270,7 @@ pub async fn list(
     State(state): State<AppState>,
     session: Session,
 ) -> Result<Json<Vec<Recovery>>, Problem> {
-    if !session.is_admin(&state.settings) && !session.has_role(Role::SecurityOfficer) {
+    if !session.is_admin() && !session.has_role(Role::SecurityOfficer) {
         return Err(Problem::new(ErrorCode::Forbidden));
     }
     let mut recoveries: Vec<Recovery> =
@@ -296,7 +296,7 @@ pub async fn create(
     ClientAddress(address): ClientAddress,
     input: Result<Json<NewRecovery>, JsonRejection>,
 ) -> Result<(StatusCode, Json<Value>), Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let input = body(input)?;
     if !matches!(input.kind.as_str(), "passphrase" | "handover") {
         return Err(invalid("kind"));
@@ -397,7 +397,7 @@ pub async fn cancel(
     ClientAddress(address): ClientAddress,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let mut tx = state.db.begin().await?;
     let user: Uuid = sqlx::query_scalar(
         "DELETE FROM vault_recoveries WHERE id = $1 AND completed_at IS NULL RETURNING user_id",
@@ -424,7 +424,7 @@ pub async fn cancel(
 
 /// A recovery the caller may carry out now: theirs, approved, within its day.
 async fn ready(state: &AppState, session: &Session, id: Uuid) -> Result<Recovery, Problem> {
-    require_admin(state, session)?;
+    require_admin(session)?;
     let found = recovery(state, id).await?;
     if found.requester_id != session.user_id {
         return Err(Problem::new(ErrorCode::Forbidden));

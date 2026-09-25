@@ -13,7 +13,7 @@ use secrecy::SecretString;
 use serde_json::json;
 use sqlx::PgPool;
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn health_reports_version_and_database(pool: PgPool) {
     let response = send(&app(state(pool), None), get("/api/health", None)).await;
     assert_eq!(response.status, StatusCode::OK);
@@ -35,7 +35,7 @@ async fn health_is_unavailable_without_database() {
     assert_eq!(response.json()["version"], VERSION);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn the_health_probe_passes_only_a_healthy_server(pool: PgPool) {
     let healthy = serve(state(pool)).await;
     health::probe(healthy).await.unwrap();
@@ -78,7 +78,7 @@ async fn the_database_password_can_be_separate_from_the_url() {
     assert!(db::connect(&url, Some(&wrong)).await.is_err());
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn migrations_create_exactly_one_instance(pool: PgPool) {
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM instance")
         .fetch_one(&pool)

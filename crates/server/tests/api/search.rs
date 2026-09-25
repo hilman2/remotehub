@@ -30,7 +30,7 @@ async fn pick(app: &axum::Router, token: &str, key: &str, query: &str) -> u16 {
     .as_u16()
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn picks_are_counted_per_query_and_stay_with_their_user(pool: PgPool) {
     let app = app(state(pool), None);
     let alice = send(&app, sign_in_request("alice", "right"))
@@ -76,7 +76,7 @@ async fn picks_are_counted_per_query_and_stay_with_their_user(pool: PgPool) {
     assert_eq!(pick(&app, "no-session", DEVICE, "dc").await, 401);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn only_the_newest_picks_are_kept(pool: PgPool) {
     let app = app(state(pool.clone()), None);
     let alice = send(&app, sign_in_request("alice", "right"))
