@@ -183,11 +183,26 @@ part_rust() { # tools lab(0|1)
   '
   if [ -n "$lab_pid" ]; then
     wait "$lab_pid"
+    local rc=0
     cargo_run "$tools" '
       echo "── cargo nextest (test lab)"
       cargo nextest run --workspace --locked --no-tests=warn --run-ignored only
-    '
+    ' || rc=$?
+    [ "$rc" = 0 ] || keep_lab_logs lab
+    return "$rc"
   fi
+}
+
+# Keeps the lab's logs next to the CI logs, under `$1`: the containers go
+# with the run, and a failure that does not come back (#102) can only be
+# read there.
+keep_lab_logs() { # directory
+  local kept="${CI_PROTOKOLLE}/$1" name
+  mkdir -p "$kept"
+  for name in dc ssh-target desktop-target web-target guacd browser oidc kratos; do
+    docker logs "${CI_ID}-${name}" >"${kept}/${name}.log" 2>&1 || true
+  done
+  echo "Logs of the lab: ${kept}"
 }
 
 # The server binary for the end-to-end tests, with the lab, when no Rust
@@ -358,6 +373,7 @@ part_e2e() { # tools
     local kept="${CI_PROTOKOLLE}/e2e"
     mkdir -p "$kept"
     docker logs "${CI_ID}-e2e-server" >"${kept}/server.log" 2>&1 || true
+    keep_lab_logs e2e/lab
     docker run --rm -v "${CI_VOLUME}:${CI_SRC}:ro" "$1" \
       tar -C "${CI_SRC}/web" -cf - test-results | tar -C "$kept" -xf - || true
     echo "Traces and the server log: ${kept} (npx playwright show-trace <trace.zip>)"
