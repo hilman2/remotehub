@@ -371,6 +371,7 @@ pub async fn delete(
         "DELETE FROM grants WHERE principal_sid = $1",
         "DELETE FROM purpose_principals WHERE principal_sid = $1",
         "DELETE FROM group_members WHERE principal_sid = $1",
+        "DELETE FROM role_assignments WHERE principal_sid = $1",
     ] {
         sqlx::query(statement)
             .bind(&principal)

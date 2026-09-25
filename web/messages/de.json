@@ -429,5 +429,17 @@
 	"audit_group_updated": "Gruppe geändert",
 	"audit_group_deleted": "Gruppe gelöscht",
 	"audit_group_member_added": "Mitglied zu einer Gruppe hinzugefügt",
-	"audit_group_member_removed": "Mitglied aus einer Gruppe entfernt"
+	"audit_group_member_removed": "Mitglied aus einer Gruppe entfernt",
+	"roles_title": "Rollen",
+	"roles_hint": "Rollen für remotehub selbst, vergeben an Benutzer und Gruppen. Die bei der Installation festgelegten Administratoren behalten ihre Rolle und stehen nicht hier.",
+	"roles_add": "Rolle {role} vergeben",
+	"roles_none": "Bisher niemand.",
+	"role_administrator": "Administrator",
+	"role_administrator_hint": "Verwaltet alles: Geräte, Berechtigungen, Benutzer und Einstellungen.",
+	"role_auditor": "Prüfer",
+	"role_auditor_hint": "Liest und prüft das Audit-Log.",
+	"role_security_officer": "Sicherheitsbeauftragter",
+	"role_security_officer_hint": "Genehmigt die Wiederherstellung von Tresoren.",
+	"audit_role_assigned": "Rolle vergeben",
+	"audit_role_revoked": "Rolle entzogen"
 }

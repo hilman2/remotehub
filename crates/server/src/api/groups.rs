@@ -2,8 +2,8 @@
 //!
 //! - `GET /api/groups`: every group with its members.
 //! - `POST /api/groups`, `PATCH`/`DELETE /api/groups/{id}`: create, rename,
-//!   delete. Deleting a group also removes the grants and purpose rules that
-//!   name it.
+//!   delete. Deleting a group also removes the grants, purpose rules and
+//!   roles that name it.
 //! - `PUT`/`DELETE /api/groups/{id}/members/{sid}`: add or remove a member:
 //!   a directory user or group, or a local account.
 //!
@@ -241,6 +241,10 @@ pub async fn delete(
         .await?
         .rows_affected();
     sqlx::query("DELETE FROM purpose_principals WHERE principal_sid = $1")
+        .bind(&principal)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM role_assignments WHERE principal_sid = $1")
         .bind(&principal)
         .execute(&mut *tx)
         .await?;

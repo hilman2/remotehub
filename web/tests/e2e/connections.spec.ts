@@ -299,6 +299,33 @@ test('a group of remotehub’s own passes a permission on to its members', async
 	await bobs.close();
 });
 
+test('an auditor reads the audit log and manages nothing', async ({ page, browser }) => {
+	const bobs = await browser.newContext();
+	const bob = await bobs.newPage();
+	await signIn(bob, 'bob', 'Bob-Passw0rd!');
+	await expect(bob.getByRole('link', { name: 'Audit log' })).toHaveCount(0);
+
+	await signIn(page);
+	await page.getByRole('link', { name: 'Users' }).click();
+	const auditors = page.getByTestId('role-auditor');
+	await auditors.getByRole('button', { name: 'Give the role Auditor' }).click();
+	const dialog = page.getByRole('dialog');
+	await dialog.getByLabel('Search users and groups').fill('Bob');
+	await dialog.getByRole('button', { name: /Bob Helpdesk/ }).click();
+	await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+	await expect(auditors).toContainText('Bob Helpdesk');
+
+	// bob's open session has the role once the page loads again.
+	await bob.reload();
+	await bob.getByRole('link', { name: 'Audit log' }).click();
+	await expect(bob.getByText('Gave a role').first()).toBeVisible();
+	await expect(bob.getByRole('link', { name: 'Users' })).toHaveCount(0);
+
+	await auditors.getByRole('button', { name: 'Remove Bob Helpdesk' }).click();
+	await expect(auditors).not.toContainText('Bob Helpdesk');
+	await bobs.close();
+});
+
 test('access asked for just in time is approved by someone else', async ({ page, browser }) => {
 	// alice sets up a device that bob may only see.
 	await signIn(page);

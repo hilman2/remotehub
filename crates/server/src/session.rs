@@ -55,12 +55,17 @@ pub struct Session {
     #[serde(skip)]
     #[sqlx(default)]
     pub memberships: Vec<String>,
+    /// Roles given to the user or one of their groups (#106), read at every
+    /// request like the memberships.
+    #[serde(skip)]
+    #[sqlx(default)]
+    pub roles: Vec<String>,
 }
 
 impl Session {
     /// Administrators manage remotehub itself: break-glass accounts, members
-    /// of the configured admin groups, and the configured local accounts
-    /// (their user name is their e-mail address).
+    /// of the configured admin groups, the configured local accounts (their
+    /// user name is their e-mail address), and whoever has the role.
     pub fn is_admin(&self, settings: &Settings) -> bool {
         self.kind == "break_glass"
             || (self.kind == "local"
@@ -71,6 +76,29 @@ impl Session {
                 .groups
                 .iter()
                 .any(|g| settings.admin_groups.contains(g))
+            || self.has_role(Role::Administrator)
+    }
+
+    pub fn has_role(&self, role: Role) -> bool {
+        self.roles.iter().any(|r| r == role.as_str())
+    }
+
+    /// Auditors read the audit log; administrators may too.
+    pub fn is_auditor(&self, settings: &Settings) -> bool {
+        self.has_role(Role::Auditor) || self.is_admin(settings)
+    }
+
+    /// The roles as the UI sees them: the configured administrators count
+    /// as administrators.
+    pub fn role_names(&self, settings: &Settings) -> Vec<&'static str> {
+        Role::ALL
+            .iter()
+            .filter(|role| match role {
+                Role::Administrator => self.is_admin(settings),
+                other => self.has_role(**other),
+            })
+            .map(|role| role.as_str())
+            .collect()
     }
 
     /// The principal grants name this user by: the SID of a directory user,
@@ -99,6 +127,32 @@ impl Session {
             sids: self.sids().into_iter().collect(),
             admin: self.is_admin(settings),
         }
+    }
+}
+
+/// Roles for remotehub itself (#106), given in `role_assignments`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Administrator,
+    /// Reads the audit log.
+    Auditor,
+    /// Approves the recovery of vaults (#95).
+    SecurityOfficer,
+}
+
+impl Role {
+    pub const ALL: [Role; 3] = [Role::Administrator, Role::Auditor, Role::SecurityOfficer];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Role::Administrator => "administrator",
+            Role::Auditor => "auditor",
+            Role::SecurityOfficer => "security_officer",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Role> {
+        Role::ALL.into_iter().find(|role| role.as_str() == name)
     }
 }
 
@@ -153,12 +207,18 @@ pub async fn lookup(
     let token_hash = hash(token);
     let session: Option<Session> = sqlx::query_as(
         "SELECT s.user_id, s.groups, u.username, u.display_name, u.kind, u.sid, u.upn,
-                u.identity_id,
-                ARRAY(SELECT DISTINCT 'group:' || m.group_id FROM group_members m
-                      WHERE m.principal_sid = ANY (s.groups)
-                         OR m.principal_sid = u.sid
-                         OR m.principal_sid = 'local:' || u.identity_id) AS memberships
+                u.identity_id, own.memberships,
+                ARRAY(SELECT DISTINCT r.role FROM role_assignments r
+                      WHERE r.principal_sid = ANY (s.groups || own.memberships)
+                         OR r.principal_sid = u.sid
+                         OR r.principal_sid = 'local:' || u.identity_id) AS roles
          FROM sessions s JOIN users u ON u.id = s.user_id
+         CROSS JOIN LATERAL (
+             SELECT ARRAY(SELECT DISTINCT 'group:' || m.group_id FROM group_members m
+                          WHERE m.principal_sid = ANY (s.groups)
+                             OR m.principal_sid = u.sid
+                             OR m.principal_sid = 'local:' || u.identity_id) AS memberships
+         ) own
          WHERE s.token_hash = $1
            AND u.blocked_at IS NULL
            AND s.expires_at > now()

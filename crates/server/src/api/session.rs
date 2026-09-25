@@ -37,6 +37,9 @@ pub struct Me {
     kind: String,
     /// May manage remotehub: folders at the top, grants, the audit log.
     admin: bool,
+    /// Roles for remotehub itself (#106): `administrator`, `auditor`,
+    /// `security_officer`.
+    roles: Vec<&'static str>,
 }
 
 impl Me {
@@ -46,7 +49,17 @@ impl Me {
             display_name: session.display_name.clone(),
             kind: session.kind.clone(),
             admin: session.is_admin(settings),
+            roles: session.role_names(settings),
         }
+    }
+
+    /// The user of a session just started, read as every later request
+    /// reads it: with their groups and roles.
+    pub async fn started(state: &AppState, token: &str) -> Result<Self, Problem> {
+        let session = session::lookup(&state.db, token, state.settings.session.idle)
+            .await?
+            .ok_or(Problem::new(ErrorCode::Internal))?;
+        Ok(Me::of(&session, &state.settings))
     }
 }
 
@@ -156,18 +169,7 @@ pub async fn sign_in(
     tx.commit().await?;
     tracing::info!(username = %identity.username, sid = %identity.sid, %address, "signed in");
 
-    let session = Session {
-        user_id,
-        username: identity.username,
-        display_name: identity.display_name,
-        kind: "directory".to_owned(),
-        sid: Some(identity.sid.to_string()),
-        upn: identity.upn,
-        groups,
-        identity_id: None,
-        memberships: Vec::new(),
-    };
-    let me = Me::of(&session, &state.settings);
+    let me = Me::started(&state, &token).await?;
     Ok((AppendHeaders(cookies), Json(me)))
 }
 
@@ -252,18 +254,7 @@ pub async fn sign_in_break_glass(
     tx.commit().await?;
     tracing::warn!(username = %account.username, %address, "BREAK-GLASS sign-in");
 
-    let session = Session {
-        user_id: account.user_id,
-        username: account.username,
-        display_name: account.display_name,
-        kind: "break_glass".to_owned(),
-        sid: None,
-        upn: None,
-        groups: Vec::new(),
-        identity_id: None,
-        memberships: Vec::new(),
-    };
-    let me = Me::of(&session, &state.settings);
+    let me = Me::started(&state, &token).await?;
     // Break-glass accounts have no directory account to connect with.
     Ok((AppendHeaders(vec![session::set_cookie(&token)]), Json(me)))
 }

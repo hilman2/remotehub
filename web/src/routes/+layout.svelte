@@ -12,7 +12,7 @@
 	import ThemeSwitch from '$lib/components/ThemeSwitch.svelte';
 	import { getLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
-	import { loadSession, session, signOut } from '$lib/session.svelte';
+	import { isAuditor, loadSession, session, signOut } from '$lib/session.svelte';
 	import SessionStatus from '$lib/session/SessionStatus.svelte';
 	import SessionTabs from '$lib/session/SessionTabs.svelte';
 	import SessionView from '$lib/session/SessionView.svelte';
@@ -42,11 +42,11 @@
 		...(session.user?.admin
 			? [
 					{ href: resolve('/users'), label: m.nav_users },
-					{ href: resolve('/connectors'), label: m.nav_connectors },
-					{ href: resolve('/audit'), label: m.nav_audit },
-					{ href: resolve('/settings'), label: m.nav_settings }
+					{ href: resolve('/connectors'), label: m.nav_connectors }
 				]
-			: [])
+			: []),
+		...(isAuditor(session.user) ? [{ href: resolve('/audit'), label: m.nav_audit }] : []),
+		...(session.user?.admin ? [{ href: resolve('/settings'), label: m.nav_settings }] : [])
 	]);
 
 	/** Up to two letters for the avatar: "Alice Admin" → "AA". */

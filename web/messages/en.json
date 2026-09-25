@@ -429,5 +429,17 @@
 	"audit_group_updated": "Changed a group",
 	"audit_group_deleted": "Deleted a group",
 	"audit_group_member_added": "Added a member to a group",
-	"audit_group_member_removed": "Removed a member from a group"
+	"audit_group_member_removed": "Removed a member from a group",
+	"roles_title": "Roles",
+	"roles_hint": "Roles for remotehub itself, given to users and groups. The administrators set at installation keep their role and are not listed here.",
+	"roles_add": "Give the role {role}",
+	"roles_none": "Nobody so far.",
+	"role_administrator": "Administrator",
+	"role_administrator_hint": "Manages everything: devices, permissions, users and settings.",
+	"role_auditor": "Auditor",
+	"role_auditor_hint": "Reads and checks the audit log.",
+	"role_security_officer": "Security officer",
+	"role_security_officer_hint": "Approves the recovery of vaults.",
+	"audit_role_assigned": "Gave a role",
+	"audit_role_revoked": "Took back a role"
 }

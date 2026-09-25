@@ -171,7 +171,10 @@ async fn the_endpoint_signs_in_an_administrator_and_audits_it(pool: PgPool) {
     assert_eq!(response.status, StatusCode::OK);
     assert_eq!(
         response.json(),
-        json!({ "username": "emergency", "display_name": "emergency", "kind": "break_glass", "admin": true })
+        json!({
+            "username": "emergency", "display_name": "emergency", "kind": "break_glass", "admin": true,
+            "roles": ["administrator"],
+        })
     );
     let token = response.session_token().unwrap();
 
