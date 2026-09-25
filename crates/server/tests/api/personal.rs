@@ -41,7 +41,7 @@ async fn set_up(app: &Router, token: &str) {
 
 /// Files of personal entries (#100): sealed in the browser, for their owner
 /// only, gone with the vault.
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn personal_files_are_kept_for_their_owner_only(pool: PgPool) {
     let app = app(state(pool), None);
     let alice = token(&app, "alice").await;
@@ -91,7 +91,7 @@ async fn personal_files_are_kept_for_their_owner_only(pool: PgPool) {
 
 /// What the owner picked after searching (#81): sealed like an entry, kept
 /// per owner, gone with the vault, and no entry in the audit log per pick.
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn search_picks_are_sealed_per_owner_and_not_audited(pool: PgPool) {
     let app = app(state(pool.clone()), None);
     let alice = token(&app, "alice").await;
@@ -138,7 +138,7 @@ async fn search_picks_are_sealed_per_owner_and_not_audited(pool: PgPool) {
     assert_eq!(vault(bob).await["search"], Value::Null);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn only_the_owner_gets_their_entries_back_as_stored(pool: PgPool) {
     let app = app(state(pool.clone()), None);
     let alice = token(&app, "alice").await;
@@ -214,7 +214,7 @@ async fn only_the_owner_gets_their_entries_back_as_stored(pool: PgPool) {
     }
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn the_last_way_to_unlock_stays(pool: PgPool) {
     let app = app(state(pool), None);
     let bob = token(&app, "bob").await;
@@ -257,7 +257,7 @@ async fn the_last_way_to_unlock_stays(pool: PgPool) {
     assert_eq!(vault["unlocks"], json!([]));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn only_well_formed_blobs_are_stored(pool: PgPool) {
     let app = app(state(pool), None);
     let bob = token(&app, "bob").await;

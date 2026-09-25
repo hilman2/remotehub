@@ -19,7 +19,7 @@ fn code(secret: &str, at: u64) -> String {
     break_glass::code_at(secret, at).unwrap()
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn password_and_totp_sign_in_once_per_code(pool: PgPool) {
     let vault = vault();
     let issued = break_glass::create(&pool, &vault, "emergency")
@@ -69,7 +69,7 @@ async fn password_and_totp_sign_in_once_per_code(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn names_are_unique_and_reset_replaces_everything(pool: PgPool) {
     let vault = vault();
     let first = break_glass::create(&pool, &vault, "emergency")
@@ -134,7 +134,7 @@ async fn names_are_unique_and_reset_replaces_everything(pool: PgPool) {
         .unwrap();
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn the_endpoint_signs_in_an_administrator_and_audits_it(pool: PgPool) {
     let state: AppState = state(pool.clone());
     let issued = break_glass::create(&pool, &state.vault, "emergency")
@@ -189,7 +189,7 @@ async fn the_endpoint_signs_in_an_administrator_and_audits_it(pool: PgPool) {
     assert!(!log.to_string().contains(issued.password.as_str()));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_reset_ends_open_sessions(pool: PgPool) {
     let state: AppState = state(pool.clone());
     let issued = break_glass::create(&pool, &state.vault, "emergency")
@@ -224,7 +224,7 @@ async fn a_reset_ends_open_sessions(pool: PgPool) {
 
 /// A block (#104) holds for break-glass accounts too, and for a session that
 /// was open when it was set.
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_blocked_account_cannot_sign_in(pool: PgPool) {
     let state: AppState = state(pool.clone());
     let issued = break_glass::create(&pool, &state.vault, "emergency")

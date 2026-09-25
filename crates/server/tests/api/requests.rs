@@ -112,7 +112,7 @@ impl Lab {
     }
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn an_approved_request_grants_access_until_it_runs_out(pool: PgPool) {
     let lab = lab(pool).await;
     assert_eq!(lab.bobs_role().await, "list");
@@ -213,7 +213,7 @@ async fn an_approved_request_grants_access_until_it_runs_out(pool: PgPool) {
     assert!(log.contains("Restart the database after the patch"));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn denied_and_cancelled_requests_grant_nothing(pool: PgPool) {
     let lab = lab(pool).await;
     let id = lab.ask("reveal", 30, "Need the root password").await.json()["id"]
@@ -270,7 +270,7 @@ async fn denied_and_cancelled_requests_grant_nothing(pool: PgPool) {
     }
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn nobody_approves_their_own_request(pool: PgPool) {
     let lab = lab(pool).await;
     let id = lab.ask("connect", 60, "Maintenance").await.json()["id"]
@@ -305,7 +305,7 @@ async fn nobody_approves_their_own_request(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn requests_ask_for_little_for_a_while_on_what_one_sees(pool: PgPool) {
     let lab = lab(pool).await;
     assert_eq!(

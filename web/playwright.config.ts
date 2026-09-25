@@ -18,5 +18,11 @@ export default defineConfig({
 		baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:5180',
 		locale: 'en-GB',
 		trace: 'retain-on-failure'
-	}
+	},
+	// A fresh database goes through the setup wizard first (#143): it makes
+	// the administrators the other tests sign in as.
+	projects: [
+		{ name: 'setup', testMatch: /setup\.spec\.ts/ },
+		{ name: 'e2e', testIgnore: /setup\.spec\.ts/, dependencies: ['setup'] }
+	]
 });

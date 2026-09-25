@@ -356,16 +356,20 @@ part_e2e() { # tools
     -e REMOTEHUB_LDAP_BIND_DN=svc-remotehub@remotehub.test \
     -e 'REMOTEHUB_LDAP_BIND_PASSWORD=Svc-Passw0rd!' \
     -e REMOTEHUB_LDAP_BASE_DN=DC=remotehub,DC=test \
-    -e 'REMOTEHUB_ADMIN_GROUPS=RH Admins' \
     -e REMOTEHUB_KRATOS_URL=http://kratos:4433 \
     -e REMOTEHUB_KRATOS_ADMIN_URL=http://kratos:4434 \
     "$1" /ci-target/debug/remotehub
   ci_warten e2e-server 60 bash -c '</dev/tcp/127.0.0.1/8080'
+  # The fresh database waits for the setup wizard (#143): the tests go
+  # through it first, with the link the CLI prints.
+  local setup_link
+  setup_link="$(docker exec "${CI_ID}-e2e-server" /ci-target/debug/remotehub setup-code |
+    grep -o 'http[^ ]*/setup#code=[A-Za-z0-9_-]*')"
   local rc=0
   docker run --rm --label "ci-lokal=${CI_ID}" --network "container:${CI_ID}-e2e-server" \
     -v "${CI_VOLUME}:${CI_SRC}" -w "${CI_SRC}/web" \
     -e E2E_BASE_URL=http://localhost:8080 -e E2E_SSH_HOST=ssh-target -e CI=1 \
-    -e E2E_KRATOS_ADMIN_URL=http://kratos:4434 \
+    -e E2E_KRATOS_ADMIN_URL=http://kratos:4434 -e "E2E_SETUP_LINK=${setup_link}" \
     "$E2E_IMAGE" node node_modules/@playwright/test/cli.js test || rc=$?
   if [ "$rc" != 0 ]; then
     # The run's volume is removed afterwards: keep traces, page snapshots and

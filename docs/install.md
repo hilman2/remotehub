@@ -24,7 +24,6 @@ sudo sh init.sh
 
 - `REMOTEHUB_PUBLIC_URL`: the address people will open, with `https://`.
 - `REMOTEHUB_LDAP_URL`, `REMOTEHUB_LDAP_BIND_DN`, `REMOTEHUB_LDAP_BASE_DN`: your directory.
-- `REMOTEHUB_ADMIN_GROUPS`: the group whose members administer remotehub.
 
 Put the service account's password into `secrets/ldap_bind_password`. If the directory's certificate comes
 from your own CA, save that CA as `certs/ldap-ca.crt` and add `REMOTEHUB_LDAP_CA_FILE=/run/certs/ldap-ca.crt`
@@ -121,26 +120,23 @@ A proxy elsewhere than on this host goes into `REMOTEHUB_TRUSTED_PROXIES` in `co
 
 ## First sign-in
 
-Members of `REMOTEHUB_ADMIN_GROUPS` sign in with their directory account and administer everything.
-
-Without a directory, invite the first administrator as a local account. Put the address into
-`REMOTEHUB_ADMIN_ACCOUNTS` in `.env`, run `docker compose up -d`, then:
+A fresh installation waits for its setup. Print the link to the setup wizard:
 
 ```bash
-sudo docker compose exec remotehub remotehub account invite you@example.com --name "Your Name"
+sudo docker compose exec remotehub remotehub setup-code
 ```
 
-It prints a link and a one-time code, valid for 48 hours. Open the link, enter the code, choose a password
-and set up an authenticator app: remotehub asks for its code at every sign-in.
+Open the link. The wizard creates the first administrator, a local account with a password and an
+authenticator app: remotehub asks for its code at every sign-in. Then it creates a break-glass account for
+the day the directory or Kratos is unreachable, and the organisation recovery key (see
+[Recover personal vaults](#recover-personal-vaults)). Each comes on a page of its own to print; keep them
+offline, in different places. The break-glass account signs in at `/sign-in/break-glass`.
 
-For the day the directory or Kratos is unreachable, create a break-glass account:
+The link works until the wizard has created the administrator. Running `setup-code` again makes a new link,
+and the old one stops working.
 
-```bash
-sudo docker compose exec remotehub remotehub break-glass create emergency
-```
-
-Its password and TOTP secret are shown only this once. Keep them offline, e.g. in a safe. It signs in at
-`/sign-in/break-glass`.
+To let members of a directory group administer remotehub, give the group the administrator role under
+*Users*. More break-glass accounts come from `remotehub break-glass create NAME`.
 
 ## Local accounts
 

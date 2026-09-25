@@ -63,8 +63,8 @@ pub struct MemberInput {
     principal_name: String,
 }
 
-fn require_admin(state: &AppState, session: &Session) -> Result<(), Problem> {
-    if session.is_admin(&state.settings) {
+fn require_admin(session: &Session) -> Result<(), Problem> {
+    if session.is_admin() {
         Ok(())
     } else {
         Err(Problem::new(ErrorCode::Forbidden))
@@ -128,7 +128,7 @@ pub async fn list(
     State(state): State<AppState>,
     session: Session,
 ) -> Result<Json<Vec<Group>>, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let groups: Vec<(Uuid, String, String)> =
         sqlx::query_as("SELECT id, name, description FROM groups ORDER BY lower(name)")
             .fetch_all(&state.db)
@@ -161,7 +161,7 @@ pub async fn create(
     ClientAddress(address): ClientAddress,
     input: Result<Json<GroupInput>, JsonRejection>,
 ) -> Result<(StatusCode, Json<Created>), Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let input = body(input)?;
     let name = name(&input.name, "name")?;
     let description = description(&input.description)?;
@@ -196,7 +196,7 @@ pub async fn update(
     Path(id): Path<Uuid>,
     input: Result<Json<GroupInput>, JsonRejection>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let input = body(input)?;
     let name = name(&input.name, "name")?;
     let description = description(&input.description)?;
@@ -229,7 +229,7 @@ pub async fn delete(
     ClientAddress(address): ClientAddress,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let mut tx = state.db.begin().await?;
     let name = group_name(&mut tx, id).await?;
     // A later group could never get the same ID, but a grant to nobody only
@@ -275,7 +275,7 @@ pub async fn add_member(
     Path((id, sid)): Path<(Uuid, String)>,
     input: Result<Json<MemberInput>, JsonRejection>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let input = body(input)?;
     let principal: PrincipalId = sid.parse().map_err(|_| invalid("principal_sid"))?;
     // Groups of remotehub's own do not nest: a member is a user or a
@@ -325,7 +325,7 @@ pub async fn remove_member(
     ClientAddress(address): ClientAddress,
     Path((id, sid)): Path<(Uuid, String)>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let mut tx = state.db.begin().await?;
     let group = group_name(&mut tx, id).await?;
     let removed: Option<String> = sqlx::query_scalar(

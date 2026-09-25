@@ -33,10 +33,7 @@ pub(super) async fn context(
     state: &AppState,
     session: &Session,
 ) -> Result<(Subject, Catalog), Problem> {
-    Ok((
-        session.subject(&state.settings),
-        catalog::load(&state.db).await?,
-    ))
+    Ok((session.subject(), catalog::load(&state.db).await?))
 }
 
 /// `not_found` for objects the subject cannot see at all, `forbidden` for

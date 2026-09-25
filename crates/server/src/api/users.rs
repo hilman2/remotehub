@@ -33,7 +33,7 @@ use crate::principal::PrincipalId;
 use crate::session::Session;
 
 /// How long an invitation's or a recovery's code lasts.
-const CODE_LIFETIME: Duration = Duration::from_secs(48 * 3600);
+pub(super) const CODE_LIFETIME: Duration = Duration::from_secs(48 * 3600);
 
 #[derive(Serialize, sqlx::FromRow)]
 pub struct UserRow {
@@ -70,15 +70,15 @@ impl From<Invitation> for Code {
     }
 }
 
-fn require_admin(state: &AppState, session: &Session) -> Result<(), Problem> {
-    if session.is_admin(&state.settings) {
+fn require_admin(session: &Session) -> Result<(), Problem> {
+    if session.is_admin() {
         Ok(())
     } else {
         Err(Problem::new(ErrorCode::Forbidden))
     }
 }
 
-fn kratos(state: &AppState) -> Result<&Kratos, Problem> {
+pub(super) fn kratos(state: &AppState) -> Result<&Kratos, Problem> {
     state
         .settings
         .kratos
@@ -86,9 +86,35 @@ fn kratos(state: &AppState) -> Result<&Kratos, Problem> {
         .ok_or(Problem::new(ErrorCode::AccountsUnavailable))
 }
 
-fn unavailable(error: KratosError) -> Problem {
+pub(super) fn unavailable(error: KratosError) -> Problem {
     tracing::warn!(%error, "Kratos failed");
     Problem::new(ErrorCode::AccountsUnavailable)
+}
+
+/// The address and the name of a new local account, checked: the address
+/// in lower case, the name trimmed.
+pub(super) fn new_account(input: &NewAccount) -> Result<(String, &str), Problem> {
+    let email = input.email.trim().to_lowercase();
+    if email.len() > 320 || !email.contains('@') || email.chars().any(char::is_whitespace) {
+        return Err(invalid("email"));
+    }
+    let name = input.name.trim();
+    if name.chars().count() > 200 || name.chars().any(char::is_control) {
+        return Err(invalid("name"));
+    }
+    Ok((email, name))
+}
+
+/// Kratos' answer to an invitation, as a problem: an address it knows
+/// already is taken.
+pub(super) fn invite_failed(error: KratosError) -> Problem {
+    match error {
+        KratosError::Unexpected {
+            status: StatusCode::CONFLICT,
+            ..
+        } => Problem::new(ErrorCode::NameTaken),
+        other => unavailable(other),
+    }
 }
 
 /// A user the request names, as far as the changes here need it.
@@ -153,7 +179,7 @@ pub async fn list(
     State(state): State<AppState>,
     session: Session,
 ) -> Result<Json<Vec<UserRow>>, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let users = sqlx::query_as(
         "SELECT u.id, u.kind, u.username, u.display_name, u.email,
                 to_char(u.last_sign_in_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
@@ -175,9 +201,9 @@ pub async fn list(
 
 #[derive(Deserialize)]
 pub struct NewAccount {
-    email: String,
+    pub(super) email: String,
     #[serde(default)]
-    name: String,
+    pub(super) name: String,
 }
 
 pub async fn invite(
@@ -186,26 +212,13 @@ pub async fn invite(
     ClientAddress(address): ClientAddress,
     input: Result<Json<NewAccount>, JsonRejection>,
 ) -> Result<(StatusCode, Json<Code>), Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let input = body(input)?;
-    let email = input.email.trim().to_lowercase();
-    if email.len() > 320 || !email.contains('@') || email.chars().any(char::is_whitespace) {
-        return Err(invalid("email"));
-    }
-    let name = input.name.trim();
-    if name.chars().count() > 200 || name.chars().any(char::is_control) {
-        return Err(invalid("name"));
-    }
+    let (email, name) = new_account(&input)?;
     let invitation = kratos(&state)?
         .invite(&email, name, CODE_LIFETIME)
         .await
-        .map_err(|error| match error {
-            KratosError::Unexpected {
-                status: StatusCode::CONFLICT,
-                ..
-            } => Problem::new(ErrorCode::NameTaken),
-            other => unavailable(other),
-        })?;
+        .map_err(invite_failed)?;
     let mut tx = state.db.begin().await?;
     let user = kratos::add_invited(&mut *tx, &invitation, &email, name).await?;
     audit::record(
@@ -232,7 +245,7 @@ pub async fn block(
     ClientAddress(address): ClientAddress,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let user = target(&state, id).await?;
     // Nobody locks themselves out by a slip.
     if user.id == session.user_id {
@@ -269,7 +282,7 @@ pub async fn unblock(
     ClientAddress(address): ClientAddress,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let user = target(&state, id).await?;
     if let Ok(identity) = user.identity() {
         kratos(&state)?
@@ -299,7 +312,7 @@ pub async fn end(
     ClientAddress(address): ClientAddress,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let user = target(&state, id).await?;
     if let Ok(identity) = user.identity() {
         kratos(&state)?
@@ -326,7 +339,7 @@ pub async fn recovery(
     ClientAddress(address): ClientAddress,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Code>, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let user = target(&state, id).await?;
     let identity = user.identity()?;
     let kratos = kratos(&state)?;
@@ -360,7 +373,7 @@ pub async fn delete(
     ClientAddress(address): ClientAddress,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let user = target(&state, id).await?;
     let identity = user.identity()?;
     if user.id == session.user_id {

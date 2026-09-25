@@ -32,7 +32,7 @@ async fn entries(app: &axum::Router, token: &str) -> Vec<Value> {
     response.json().as_array().unwrap().clone()
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn sign_in_failure_and_sign_out_are_recorded(pool: PgPool) {
     let app = app(state(pool), None);
     send(&app, sign_in_request("alice", "wrong")).await;
@@ -75,7 +75,7 @@ async fn sign_in_failure_and_sign_out_are_recorded(pool: PgPool) {
     assert!(log[0]["at"].as_str().unwrap().ends_with('Z'));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn only_administrators_read_and_verify_the_log(pool: PgPool) {
     let app = app(state(pool), None);
     let bob = sign_in(&app, "bob").await;
@@ -106,7 +106,7 @@ async fn only_administrators_read_and_verify_the_log(pool: PgPool) {
     assert_eq!(entries(&app, &alice).await[0]["action"], "audit.verified");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn the_log_refuses_changes(pool: PgPool) {
     record(&pool, "alice").await;
     for statement in [
@@ -122,7 +122,7 @@ async fn the_log_refuses_changes(pool: PgPool) {
     }
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn tampering_breaks_the_chain_from_that_entry_on(pool: PgPool) {
     for name in ["a", "b", "c", "d"] {
         record(&pool, name).await;
@@ -157,7 +157,7 @@ async fn tampering_breaks_the_chain_from_that_entry_on(pool: PgPool) {
     assert_eq!(audit::verify(&pool).await.unwrap().first_broken, Some(4));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn concurrent_writers_keep_one_gapless_chain(pool: PgPool) {
     let writers: Vec<_> = (0..20)
         .map(|i| {

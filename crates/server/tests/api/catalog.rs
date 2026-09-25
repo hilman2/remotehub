@@ -150,7 +150,7 @@ async fn fixture(pool: PgPool) -> Fixture {
     }
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn administrators_see_everything_others_only_what_is_granted(pool: PgPool) {
     let f = fixture(pool).await;
     let all = tree(&f.app, &f.alice).await;
@@ -185,7 +185,7 @@ async fn administrators_see_everything_others_only_what_is_granted(pool: PgPool)
 
 /// Every folder starts closed; what a user opens stays open for that user
 /// only, and only folders they see (#83).
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn each_user_keeps_their_own_open_folders(pool: PgPool) {
     let f = fixture(pool).await;
     let open = |token: String| {
@@ -256,7 +256,7 @@ async fn each_user_keeps_their_own_open_folders(pool: PgPool) {
     assert_eq!(open(bob).await, std::slice::from_ref(&f.linux));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn group_grants_hold_for_everything_below(pool: PgPool) {
     let f = fixture(pool).await;
     grant(
@@ -296,7 +296,7 @@ async fn group_grants_hold_for_everything_below(pool: PgPool) {
     assert_eq!(new.code(), "forbidden");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn invisible_objects_do_not_exist_for_the_caller(pool: PgPool) {
     let f = fixture(pool).await;
     let bob = sign_in(&f.app, "bob").await;
@@ -324,7 +324,7 @@ async fn invisible_objects_do_not_exist_for_the_caller(pool: PgPool) {
     assert_eq!(top.code(), "forbidden");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_credential_only_goes_where_its_users_may_send_it(pool: PgPool) {
     let f = fixture(pool).await;
     let bob = sign_in(&f.app, "bob").await;
@@ -423,7 +423,7 @@ async fn a_credential_only_goes_where_its_users_may_send_it(pool: PgPool) {
     assert_eq!(renamed.status, StatusCode::NO_CONTENT);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn passwords_are_sealed_versioned_and_never_returned(pool: PgPool) {
     let f = fixture(pool.clone()).await;
     let everything = tree(&f.app, &f.alice).await.to_string();
@@ -499,7 +499,7 @@ async fn passwords_are_sealed_versioned_and_never_returned(pool: PgPool) {
     assert_eq!(left, 0);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn folders_keep_their_tree_intact(pool: PgPool) {
     let f = fixture(pool).await;
     let taken = call(
@@ -566,7 +566,7 @@ async fn folders_keep_their_tree_intact(pool: PgPool) {
     assert!(moved["parent_id"].is_null());
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn grants_are_listed_with_what_they_inherit_and_can_be_removed(pool: PgPool) {
     let f = fixture(pool).await;
     grant(
@@ -630,7 +630,7 @@ async fn grants_are_listed_with_what_they_inherit_and_can_be_removed(pool: PgPoo
     assert_eq!(invalid.code(), "invalid_request");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn only_people_who_manage_something_search_the_directory(pool: PgPool) {
     let f = fixture(pool).await;
     let bob = sign_in(&f.app, "bob").await;
@@ -659,7 +659,7 @@ async fn only_people_who_manage_something_search_the_directory(pool: PgPool) {
     assert_eq!(kinds, [("group", "RH Admins"), ("group", "RH Operators")]);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn devices_are_validated(pool: PgPool) {
     let f = fixture(pool).await;
     let base = json!({
@@ -681,7 +681,7 @@ async fn devices_are_validated(pool: PgPool) {
     }
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn rdp_devices_keep_a_keyboard_layout_of_guacd(pool: PgPool) {
     let f = fixture(pool).await;
     let device = |protocol: &str, layout: Value| {
@@ -741,7 +741,7 @@ fn lab_key(file: &str) -> String {
     std::fs::read_to_string(dir.join("../../deploy/testlab/ssh").join(file)).unwrap()
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn ssh_keys_are_checked_sealed_and_shown_only_by_fingerprint(pool: PgPool) {
     let f = fixture(pool.clone()).await;
     let key = lab_key("tester_ed25519_cert");
@@ -871,7 +871,7 @@ async fn device_secrets(pool: &PgPool, device: &str) -> Vec<i32> {
     .unwrap()
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn stored_secrets_are_shown_only_with_reveal_and_audited(pool: PgPool) {
     let f = fixture(pool).await;
     let db01 = create(
@@ -995,7 +995,7 @@ async fn stored_secrets_are_shown_only_with_reveal_and_audited(pool: PgPool) {
     assert!(!log.to_string().contains("T0p-Secret!"));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn credentials_keep_keepass_fields_and_seal_the_protected_ones(pool: PgPool) {
     let f = fixture(pool).await;
     let body = |fields: Value, icon: i64| {
@@ -1117,7 +1117,7 @@ fn upload(
         .unwrap()
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn files_are_sealed_with_a_credential_and_downloaded_with_reveal(pool: PgPool) {
     let f = fixture(pool.clone()).await;
     let id = f.root_pw.clone();
@@ -1232,7 +1232,7 @@ async fn files_are_sealed_with_a_credential_and_downloaded_with_reveal(pool: PgP
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn older_versions_are_revealed_on_request(pool: PgPool) {
     let f = fixture(pool).await;
     let id = f.root_pw.clone();
@@ -1318,7 +1318,7 @@ async fn older_versions_are_revealed_on_request(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_device_keeps_credentials_of_its_own(pool: PgPool) {
     let f = fixture(pool.clone()).await;
     let device = |host: &str, password: Option<&str>| {
@@ -1417,7 +1417,7 @@ async fn a_device_keeps_credentials_of_its_own(pool: PgPool) {
     assert!(device_secrets(&pool, &db01).await.is_empty());
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_device_keeps_an_ssh_key_of_its_own(pool: PgPool) {
     let f = fixture(pool.clone()).await;
     let device = |protocol: &str, secret: Value| {

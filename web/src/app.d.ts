@@ -13,6 +13,12 @@ declare global {
 			newPassword?: boolean;
 			/** /sign-in starts with the second factor. */
 			secondFactor?: boolean;
+			/**
+			 * The flow and code of the setup wizard's invitation (#143):
+			 * /sign-in/recovery sends the code itself.
+			 */
+			recoveryFlow?: string;
+			recoveryCode?: string;
 		}
 		// interface Platform {}
 	}

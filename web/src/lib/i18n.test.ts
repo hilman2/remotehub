@@ -16,6 +16,7 @@ const CATALOGS: Record<string, Catalog> = { en, de };
  */
 const IDENTICAL_IN_GERMAN = new Set<string>([
 	'footer_version',
+	'wizard_command',
 	'field_name',
 	'field_port',
 	'protocol_ssh',

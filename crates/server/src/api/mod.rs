@@ -22,6 +22,7 @@ mod roles;
 mod search;
 mod second_factor;
 pub mod session;
+mod setup;
 mod terminal;
 mod users;
 
@@ -36,6 +37,12 @@ use problem::{ErrorCode, Problem};
 pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/health", get(health::health))
+        .route("/setup", get(setup::status))
+        .route("/setup/code", post(setup::code))
+        .route("/setup/administrator", post(setup::administrator))
+        .route("/setup/step", put(setup::step))
+        .route("/setup/break-glass", post(setup::create_break_glass))
+        .route("/setup/complete", post(setup::complete))
         .route(
             "/session",
             get(session::current)
@@ -193,6 +200,11 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/audit", get(audit::list))
         .route("/audit/verify", post(audit::verify))
         // Unknown API paths are a problem response, never the SPA's index.html.
+        // Only routes that exist wait for setup: an unknown path stays a 404.
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::setup::gate,
+        ))
         .fallback(|| async { Problem::new(ErrorCode::NotFound) })
         .layer(middleware::from_fn_with_state(state, origin::same_origin))
 }

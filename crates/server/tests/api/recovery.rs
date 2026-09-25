@@ -85,7 +85,7 @@ async fn assign(app: &Router, admin: &str, role: &str, sid: &str) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_vault_is_wrapped_for_the_newest_key_and_keeps_that_wrap(pool: PgPool) {
     let app = app(state(pool), None);
     let alice = token(&app, "alice").await;
@@ -194,7 +194,7 @@ async fn a_vault_is_wrapped_for_the_newest_key_and_keeps_that_wrap(pool: PgPool)
     assert_eq!(deleted.status, StatusCode::NO_CONTENT);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_recovery_needs_a_security_officer_who_did_not_ask(pool: PgPool) {
     let app = app(state(pool.clone()), None);
     let alice = token(&app, "alice").await;
@@ -358,7 +358,7 @@ async fn a_recovery_needs_a_security_officer_who_did_not_ask(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn an_approval_holds_for_a_day(pool: PgPool) {
     let app = app(state(pool.clone()), None);
     let alice = token(&app, "alice").await;
@@ -428,7 +428,7 @@ fn keyring(versions: i32) -> String {
 
 /// #96: the master keys are kept for the newest recovery key, and its
 /// private key alone brings back the key file.
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn the_master_key_file_comes_back_with_the_recovery_key(pool: PgPool) {
     let file = keyring(2);
     let vault = Vault::new(Box::new(FileKeyring::parse(&file).unwrap()) as Box<dyn KeyProvider>);

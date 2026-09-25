@@ -132,7 +132,7 @@ async fn device(app: &Router, token: &str, folder: &str, device: Value) -> Strin
     create(app, token, "/api/devices", body).await
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn each_protocol_has_its_endpoint_and_only_the_own_origin_opens_it(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
     let ask = json!({ "auth_mode": "ask", "credential_id": null });
@@ -171,7 +171,7 @@ async fn each_protocol_has_its_endpoint_and_only_the_own_origin_opens_it(pool: P
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn an_ssh_key_does_not_sign_in_to_rdp(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
     let key = std::fs::read_to_string(
@@ -204,7 +204,7 @@ async fn an_ssh_key_does_not_sign_in_to_rdp(pool: PgPool) {
     assert_eq!(error["params"]["field"], "credential_id");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn a_stored_credential_opens_an_rdp_desktop(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
@@ -264,7 +264,7 @@ async fn a_stored_credential_opens_an_rdp_desktop(pool: PgPool) {
     assert!(!log.to_string().contains("Tester-Passw0rd!"));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn vnc_asks_for_the_password_and_reports_a_wrong_one(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
@@ -296,7 +296,7 @@ async fn vnc_asks_for_the_password_and_reports_a_wrong_one(pool: PgPool) {
     leave(socket).await;
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn a_changed_rdp_certificate_stops_the_connection_until_the_pin_is_forgotten(pool: PgPool) {
     let (state, app, token, folder) = setup(pool.clone()).await;
@@ -453,7 +453,7 @@ async fn clipboard_round_trip(socket: &mut Socket, text: &str) {
     }
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn text_crosses_the_rdp_clipboard_both_ways(pool: PgPool) {
     let mut socket = open_desktop(pool, "rdp").await;
@@ -464,7 +464,7 @@ async fn text_crosses_the_rdp_clipboard_both_ways(pool: PgPool) {
     leave(socket).await;
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn text_crosses_the_vnc_clipboard_both_ways(pool: PgPool) {
     let mut socket = open_desktop(pool, "vnc").await;
@@ -477,7 +477,7 @@ async fn text_crosses_the_vnc_clipboard_both_ways(pool: PgPool) {
     leave(socket).await;
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn an_rdp_desktop_follows_the_browser_window(pool: PgPool) {
     let mut socket = open_desktop(pool, "rdp").await;
@@ -490,7 +490,7 @@ async fn an_rdp_desktop_follows_the_browser_window(pool: PgPool) {
     leave(socket).await;
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn an_rdp_desktop_opens_with_its_laps_password(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
@@ -560,7 +560,7 @@ async fn web_device(app: &Router, token: &str, folder: &str, device: Value) -> S
     create(app, token, "/api/devices", body).await
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn an_https_device_opens_signed_in_with_its_stored_credential(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
@@ -617,7 +617,7 @@ async fn an_https_device_opens_signed_in_with_its_stored_credential(pool: PgPool
     assert!(!log.to_string().contains("Tester-Passw0rd!"));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn asked_credentials_reach_the_web_interface_as_typed(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
@@ -646,7 +646,7 @@ async fn asked_credentials_reach_the_web_interface_as_typed(pool: PgPool) {
     leave(socket).await;
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn a_changed_https_certificate_stops_the_connection(pool: PgPool) {
     let (state, app, token, folder) = setup(pool.clone()).await;
@@ -691,7 +691,7 @@ async fn a_changed_https_certificate_stops_the_connection(pool: PgPool) {
 
 /// Chromium itself holds to the pinned key: with another one it shows its
 /// error page, and the agent types nothing.
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn the_browser_signs_in_only_where_the_pinned_key_is(_pool: PgPool) {
     use remotehub_browser::client::{self, Request};
@@ -747,7 +747,7 @@ async fn the_browser_signs_in_only_where_the_pinned_key_is(_pool: PgPool) {
 
 // ── Behind a site connector: guacd and the browser service use a forward ─────
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn an_rdp_desktop_behind_a_connector_opens_through_it(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
@@ -790,7 +790,7 @@ async fn an_rdp_desktop_behind_a_connector_opens_through_it(pool: PgPool) {
     leave(socket).await;
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn an_https_device_behind_a_connector_signs_in_through_it(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
@@ -826,7 +826,7 @@ async fn an_https_device_behind_a_connector_signs_in_through_it(pool: PgPool) {
     leave(socket).await;
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_desktop_asks_for_the_purpose_first(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
     let rdp = create(

@@ -131,6 +131,11 @@ messages! {
     AccountInvited = "account-invited" { email: String, expires: String }
     AccountCodeLabel = "account-code-label" {}
     AccountLinkLabel = "account-link-label" {}
+    /// `remotehub setup-code` made a code. The link with the code follows
+    /// on its own line, so it never passes through a message.
+    SetupReady = "setup-ready" {}
+    /// `remotehub setup-code` on an installation that is set up already.
+    SetupComplete = "setup-complete" {}
     /// `remotehub verify-audit`: the hash chain holds.
     AuditIntact = "audit-intact" { entries: i64 }
     /// `remotehub verify-audit`: the chain breaks at entry `first`.

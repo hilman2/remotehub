@@ -110,8 +110,8 @@ fn directory_user(session: &Session) -> Result<(), Problem> {
     }
 }
 
-fn require_admin(state: &AppState, session: &Session) -> Result<(), Problem> {
-    if session.is_admin(&state.settings) {
+fn require_admin(session: &Session) -> Result<(), Problem> {
+    if session.is_admin() {
         Ok(())
     } else {
         Err(Problem::new(ErrorCode::Forbidden))
@@ -362,7 +362,7 @@ pub async fn reset(
     ClientAddress(address): ClientAddress,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let mut tx = state.db.begin().await?;
     let username: Option<String> =
         sqlx::query_scalar("SELECT username FROM users WHERE id = $1 AND kind = 'directory'")
@@ -390,7 +390,7 @@ pub async fn rules(
     State(state): State<AppState>,
     session: Session,
 ) -> Result<Json<Vec<Rule>>, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let rules = sqlx::query_as(
         "SELECT principal_sid, principal_kind, principal_name FROM second_factor_principals
          ORDER BY lower(principal_name)",
@@ -407,7 +407,7 @@ pub async fn require(
     Path(sid): Path<String>,
     input: Result<Json<NewRule>, JsonRejection>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let input = body(input)?;
     let sid: PrincipalId = sid.parse().map_err(|_| invalid("principal_sid"))?;
     if !sid.check(&state.db, &input.principal_kind).await? {
@@ -450,7 +450,7 @@ pub async fn waive(
     ClientAddress(address): ClientAddress,
     Path(sid): Path<String>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let mut tx = state.db.begin().await?;
     let removed: Option<Rule> = sqlx::query_as(
         "DELETE FROM second_factor_principals WHERE principal_sid = $1

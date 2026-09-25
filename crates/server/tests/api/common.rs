@@ -29,7 +29,6 @@ pub fn settings() -> Settings {
             idle: Duration::from_secs(30 * 60),
             max: Duration::from_secs(12 * 3600),
         },
-        admin_groups: vec![ADMINS_SID.to_owned()],
         own_account_connections: true,
         guacd: std::env::var("REMOTEHUB_TEST_GUACD").unwrap_or_else(|_| "guacd:4822".to_owned()),
         browser: std::env::var("REMOTEHUB_TEST_BROWSER")
@@ -38,7 +37,6 @@ pub fn settings() -> Settings {
         trusted_proxies: Vec::new(),
         ssh_ca: None,
         kratos: None,
-        admin_accounts: Vec::new(),
     }
 }
 

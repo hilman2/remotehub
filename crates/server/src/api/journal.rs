@@ -103,8 +103,8 @@ pub struct PurposePrincipal {
     principal_name: String,
 }
 
-fn require_admin(state: &AppState, session: &Session) -> Result<(), Problem> {
-    if session.is_admin(&state.settings) {
+fn require_admin(session: &Session) -> Result<(), Problem> {
+    if session.is_admin() {
         Ok(())
     } else {
         Err(Problem::new(ErrorCode::Forbidden))
@@ -115,7 +115,7 @@ pub async fn purpose_principals(
     State(state): State<AppState>,
     session: Session,
 ) -> Result<Json<Vec<PurposePrincipal>>, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let principals = sqlx::query_as(
         "SELECT principal_sid, principal_kind, principal_name FROM purpose_principals
          ORDER BY lower(principal_name)",
@@ -158,7 +158,7 @@ pub async fn require_purpose(
     Path(sid): Path<String>,
     input: Result<Json<NewPurposePrincipal>, JsonRejection>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let input = body(input)?;
     let sid: PrincipalId = sid.parse().map_err(|_| invalid("principal_sid"))?;
     if !matches!(input.principal_kind.as_str(), "user" | "group") {
@@ -201,7 +201,7 @@ pub async fn waive_purpose(
     ClientAddress(address): ClientAddress,
     Path(sid): Path<String>,
 ) -> Result<StatusCode, Problem> {
-    require_admin(&state, &session)?;
+    require_admin(&session)?;
     let mut tx = state.db.begin().await?;
     let removed: Option<PurposePrincipal> = sqlx::query_as(
         "DELETE FROM purpose_principals WHERE principal_sid = $1

@@ -22,7 +22,7 @@ use uuid::Uuid;
 use crate::api::problem::{ErrorCode, Problem};
 use remotehub_model::Subject;
 
-use crate::{AppState, Settings};
+use crate::AppState;
 
 pub const COOKIE_NAME: &str = "__Host-remotehub-session";
 /// Holds the key to the sealed sign-in password (ADR 0005); never stored on the server.
@@ -66,20 +66,10 @@ pub struct Session {
 }
 
 impl Session {
-    /// Administrators manage remotehub itself: break-glass accounts, members
-    /// of the configured admin groups, the configured local accounts (their
-    /// user name is their e-mail address), and whoever has the role.
-    pub fn is_admin(&self, settings: &Settings) -> bool {
-        self.kind == "break_glass"
-            || (self.kind == "local"
-                && settings
-                    .admin_accounts
-                    .contains(&self.username.to_lowercase()))
-            || self
-                .groups
-                .iter()
-                .any(|g| settings.admin_groups.contains(g))
-            || self.has_role(Role::Administrator)
+    /// Administrators manage remotehub itself: break-glass accounts, and
+    /// whoever has the role, given by the setup wizard (#143) or on *Users*.
+    pub fn is_admin(&self) -> bool {
+        self.kind == "break_glass" || self.has_role(Role::Administrator)
     }
 
     pub fn has_role(&self, role: Role) -> bool {
@@ -87,17 +77,17 @@ impl Session {
     }
 
     /// Auditors read the audit log; administrators may too.
-    pub fn is_auditor(&self, settings: &Settings) -> bool {
-        self.has_role(Role::Auditor) || self.is_admin(settings)
+    pub fn is_auditor(&self) -> bool {
+        self.has_role(Role::Auditor) || self.is_admin()
     }
 
-    /// The roles as the UI sees them: the configured administrators count
-    /// as administrators.
-    pub fn role_names(&self, settings: &Settings) -> Vec<&'static str> {
+    /// The roles as the UI sees them: break-glass accounts count as
+    /// administrators.
+    pub fn role_names(&self) -> Vec<&'static str> {
         Role::ALL
             .iter()
             .filter(|role| match role {
-                Role::Administrator => self.is_admin(settings),
+                Role::Administrator => self.is_admin(),
                 other => self.has_role(**other),
             })
             .map(|role| role.as_str())
@@ -125,10 +115,10 @@ impl Session {
 
     /// Who asks, for `authorize()`: [`Session::sids`], and whether they are
     /// an administrator.
-    pub fn subject(&self, settings: &Settings) -> Subject {
+    pub fn subject(&self) -> Subject {
         Subject {
             sids: self.sids().into_iter().collect(),
-            admin: self.is_admin(settings),
+            admin: self.is_admin(),
         }
     }
 }

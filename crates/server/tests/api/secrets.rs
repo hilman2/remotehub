@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 const OWNER: Uuid = Uuid::from_u128(7);
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn stores_only_ciphertext_and_opens_it_again(pool: PgPool) {
     let vault = crate::common::vault();
     secrets::store(&pool, &vault, OWNER, 1, "password", b"Sup3r-Secret!")
@@ -39,7 +39,7 @@ async fn stores_only_ciphertext_and_opens_it_again(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_row_moved_to_another_owner_or_field_cannot_be_opened(pool: PgPool) {
     let vault = crate::common::vault();
     secrets::store(&pool, &vault, OWNER, 1, "password", b"secret")
@@ -72,7 +72,7 @@ async fn a_row_moved_to_another_owner_or_field_cannot_be_opened(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn another_master_key_cannot_open_the_database(pool: PgPool) {
     secrets::store(
         &pool,
@@ -93,7 +93,7 @@ async fn another_master_key_cannot_open_the_database(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_field_is_stored_once_per_version(pool: PgPool) {
     let vault = crate::common::vault();
     secrets::store(&pool, &vault, OWNER, 1, "password", b"one")

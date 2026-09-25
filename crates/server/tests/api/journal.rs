@@ -38,7 +38,7 @@ async fn actions(app: &Router, token: &str) -> Vec<String> {
         .collect()
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn administrators_choose_who_states_a_purpose(pool: PgPool) {
     let (_, app, alice, _) = setup(pool).await;
     let bob = sign_in(&app, "bob").await;
@@ -146,7 +146,7 @@ fn note(device: &str, text: &str, token: &str) -> axum::http::Request<axum::body
     )
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn who_may_connect_reads_the_journal_and_leaves_notes(pool: PgPool) {
     let (_, app, alice, folder) = setup(pool).await;
     let device = create(

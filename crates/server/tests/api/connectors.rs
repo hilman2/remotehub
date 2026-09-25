@@ -133,7 +133,7 @@ async fn round_trip(forward: &Forward, message: &[u8]) -> Vec<u8> {
     received
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn administrators_manage_connectors_and_devices_name_them(pool: PgPool) {
     let (_state, app, token, folder) = setup(pool).await;
     let (id, secret) = new_connector(&app, &token, "Hamburg office").await;
@@ -219,7 +219,7 @@ async fn administrators_manage_connectors_and_devices_name_them(pool: PgPool) {
 
 /// Another connector is another target: the pins go, and a linked
 /// credential needs `connect` like for a new host.
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn moving_a_device_to_a_connector_forgets_its_pins(pool: PgPool) {
     let (_state, app, token, folder) = setup(pool.clone()).await;
     let (id, _) = new_connector(&app, &token, "Hamburg office").await;
@@ -250,7 +250,7 @@ async fn moving_a_device_to_a_connector_forgets_its_pins(pool: PgPool) {
     assert_eq!(pinned, None);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_forward_reaches_the_device_through_the_connector(pool: PgPool) {
     let (state, app, token, _folder) = setup(pool).await;
     let (id, secret) = new_connector(&app, &token, "lab").await;
@@ -295,7 +295,7 @@ async fn a_forward_reaches_the_device_through_the_connector(pool: PgPool) {
     assert_eq!(round_trip(&other, b"hello").await, b"");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_connector_reaches_only_what_it_allows(pool: PgPool) {
     let (state, app, token, _folder) = setup(pool).await;
     let (id, secret) = new_connector(&app, &token, "lab").await;
@@ -314,7 +314,7 @@ async fn a_connector_reaches_only_what_it_allows(pool: PgPool) {
     );
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_wrong_token_opens_nothing(pool: PgPool) {
     let (state, app, token, _folder) = setup(pool).await;
     let (id, secret) = new_connector(&app, &token, "lab").await;

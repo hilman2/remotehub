@@ -23,8 +23,8 @@ use super::problem::{ErrorCode, Problem};
 use crate::session::Session;
 use crate::{AppState, catalog};
 
-fn require_auditor(state: &AppState, session: &Session) -> Result<(), Problem> {
-    if session.is_auditor(&state.settings) {
+fn require_auditor(session: &Session) -> Result<(), Problem> {
+    if session.is_auditor() {
         Ok(())
     } else {
         Err(Problem::new(ErrorCode::Forbidden))
@@ -43,7 +43,7 @@ pub async fn people(
     State(state): State<AppState>,
     session: Session,
 ) -> Result<Json<Vec<Person>>, Problem> {
-    require_auditor(&state, &session)?;
+    require_auditor(&session)?;
     let people = sqlx::query_as(
         "SELECT id, username, display_name, kind FROM users ORDER BY lower(display_name), id",
     )
@@ -122,7 +122,7 @@ pub async fn folders(
     State(state): State<AppState>,
     session: Session,
 ) -> Result<Json<Vec<FolderChoice>>, Problem> {
-    require_auditor(&state, &session)?;
+    require_auditor(&session)?;
     let names = Names::load(&state).await?;
     let mut folders: Vec<FolderChoice> = names
         .folders
@@ -231,7 +231,7 @@ pub async fn user(
     session: Session,
     Path(id): Path<Uuid>,
 ) -> Result<Json<UserReport>, Problem> {
-    require_auditor(&state, &session)?;
+    require_auditor(&session)?;
     type Row = (Uuid, String, String, String, Option<String>, Option<Uuid>);
     let (user_id, username, display_name, kind, sid, identity): Row = sqlx::query_as(
         "SELECT id, username, display_name, kind, sid, identity_id FROM users WHERE id = $1",
@@ -274,7 +274,7 @@ pub async fn user(
     .bind(them.sids())
     .fetch_all(&state.db)
     .await?;
-    let subject = them.subject(&state.settings);
+    let subject = them.subject();
     let administrator = subject.admin;
 
     let catalog: Catalog = catalog::load(&state.db).await?;
@@ -361,7 +361,7 @@ pub async fn folder(
     session: Session,
     Path(id): Path<Uuid>,
 ) -> Result<Json<FolderReport>, Problem> {
-    require_auditor(&state, &session)?;
+    require_auditor(&session)?;
     let catalog: Catalog = catalog::load(&state.db).await?;
     let object = ObjectId::Folder(id);
     if !catalog.contains(object) {

@@ -11,6 +11,9 @@ account-invited = Konto { $email } ist angelegt. Mit Link und Code setzt der Bes
 account-code-label = Code:
 account-link-label = Link:
 
+setup-ready = Mit diesem Link wird remotehub eingerichtet. Er gilt, bis der Assistent den ersten Administrator angelegt hat; ein erneuter Aufruf dieses Befehls ersetzt ihn.
+setup-complete = remotehub ist schon eingerichtet, einen Einrichtungscode gibt es nicht mehr.
+
 audit-intact = Audit-Log intakt: { $entries ->
     [one] 1 Eintrag
    *[other] { $entries } Einträge

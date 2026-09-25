@@ -9,6 +9,7 @@ export const AUDIT_ACTIONS = [
 	'break_glass.created',
 	'break_glass.reset',
 	'break_glass.deleted',
+	'setup.completed',
 	'folder.created',
 	'folder.updated',
 	'folder.deleted',

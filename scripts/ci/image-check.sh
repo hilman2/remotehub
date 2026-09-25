@@ -33,7 +33,7 @@ export REMOTEHUB_PUBLIC_URL=http://localhost:8080 REMOTEHUB_HOST=localhost
 # The checks go through the stack's network; any free port on the host.
 export REMOTEHUB_PORT=0
 # No directory: remotehub starts without one; break-glass accounts work.
-export REMOTEHUB_LDAP_URL='' REMOTEHUB_ADMIN_GROUPS=''
+export REMOTEHUB_LDAP_URL=''
 project="${COMPOSE_PROJECT_NAME:-remotehub-check}"
 cd "$dir"
 
@@ -88,6 +88,16 @@ curl -fsS "http://${remotehub}:8080/api/ssh-ca.pub" | grep -q '^ssh-ed25519 ' ||
   fail "the SSH CA's public key is not served"
 curl -fsS "http://${remotehub}:8080/devices/any" | grep -q '<html' ||
   fail "routes of the SPA do not fall back to index.html"
+
+echo "── Setup"
+# A fresh installation serves only the setup wizard (#143), whose link the
+# CLI prints.
+curl -fsS "http://${remotehub}:8080/api/setup" | grep -q '"phase":"pending"' ||
+  fail "a fresh installation is not waiting for setup"
+curl -sS "http://${remotehub}:8080/api/tree" | grep -q '"code":"setup_pending"' ||
+  fail "the API is open before setup"
+docker compose -p "$project" exec -T remotehub remotehub setup-code |
+  grep -q 'http://localhost:8080/setup#code=' || fail "setup-code prints no link"
 
 echo "── Local accounts through Kratos"
 curl -fsS "http://${remotehub}:8080/api/session/methods" | grep -q '"local":true' ||
