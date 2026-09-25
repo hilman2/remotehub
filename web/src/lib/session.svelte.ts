@@ -1,6 +1,6 @@
 /** The signed-in user, shared by all pages. */
 import { api, type ApiResult } from './api/client';
-import { endSession } from './kratos/flow';
+import { endSession, type Provider } from './kratos/flow';
 
 export interface User {
 	username: string;
@@ -63,6 +63,8 @@ export interface Methods {
 	directory: boolean;
 	/** Local accounts in Kratos (#103). */
 	local: boolean;
+	/** OpenID Connect providers for local accounts (#109). */
+	providers: Provider[];
 }
 
 export const loadMethods = () => api<Methods>('GET', '/api/session/methods');

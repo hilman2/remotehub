@@ -160,6 +160,53 @@ through remotehub. Its settings are in `kratos/kratos.yml`; database and secrets
   removes the second factor, and the person sets up a new one with the code.
 - **Backups:** Kratos' database sits next to remotehub's; see [Back up and restore](#back-up-and-restore).
 
+## Sign in with Entra ID, Google or GitHub
+
+Local accounts can sign in through an OpenID Connect provider instead of with their password. remotehub still
+asks for the code of the authenticator app.
+
+1. Register remotehub as an application with the provider. Its redirect URI is
+   `https://remotehub.example.com/api/auth/self-service/methods/oidc/callback/<id>`, with the `id` you give
+   the provider in the next step.
+2. Add the provider to `secrets/kratos.yml`:
+
+   ```yaml
+   selfservice:
+     methods:
+       oidc:
+         enabled: true
+         config:
+           providers:
+             - id: entra
+               label: Microsoft
+               provider: microsoft
+               microsoft_tenant: 00000000-0000-0000-0000-000000000000
+               client_id: 00000000-0000-0000-0000-000000000000
+               client_secret: the-client-secret
+               mapper_url: file:///etc/config/kratos/oidc.jsonnet
+               scope: [openid, email, profile]
+   ```
+
+   For Google, use `provider: google`; for GitHub, `provider: github` and `scope: [user:email]`. Other
+   providers are in [Kratos' documentation](https://www.ory.com/docs/kratos/social-signin/overview).
+3. `sudo docker compose up -d kratos`. The sign-in page now offers "Sign in with Microsoft".
+
+Each person links their account once: they sign in with the password, then use *My account → Link
+Microsoft*. Someone whose account at the provider is linked to nobody is turned away.
+
+To let the provider's people in without an invitation, add this to `secrets/kratos.yml`:
+
+```yaml
+selfservice:
+  flows:
+    registration:
+      enabled: true
+```
+
+Anyone the provider signs in then gets an account and sets up the authenticator app. Do this only with a
+provider that knows nobody but your organisation's people, such as Entra ID with your own tenant: with Google or
+GitHub, anyone with an account there could join. Nobody can register with a password, with or without this.
+
 ## Second factor for directory accounts
 
 Directory accounts sign in with their password only, unless they set up an authenticator app under

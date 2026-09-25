@@ -24,13 +24,15 @@ POSTGRES_IMAGE="postgres:18.6-trixie"
 E2E_IMAGE="mcr.microsoft.com/playwright:v1.63.0-noble"
 # Keep equal to deploy/compose.dev.yml and deploy/ops/compose.yml.
 KRATOS_IMAGE="oryd/kratos:v26.2.0"
+# The lab's OpenID Connect provider (#109); keep equal to deploy/compose.dev.yml.
+DEX_IMAGE="ghcr.io/dexidp/dex:v2.43.1"
 
 # What each part depends on (path prefixes). scripts/ci/ counts for all.
 RUST_INPUTS=(crates/ migrations/ Cargo.toml Cargo.lock rust-toolchain.toml deploy/dev/rust.Dockerfile)
 WEB_INPUTS=(web/ deploy/dev/web.Dockerfile)
 LAB_INPUTS=("${RUST_INPUTS[@]}" deploy/testlab/ deploy/guacd/ deploy/browser/)
 # The end-to-end tests check the UI most; CI_E2E=1 forces them.
-E2E_INPUTS=(web/src/ web/tests/e2e/ web/playwright.config.ts)
+E2E_INPUTS=(web/src/ web/tests/e2e/ web/playwright.config.ts deploy/ops/kratos/ deploy/testlab/oidc/)
 # The production images build a release binary; they are tried when they or
 # the ops package change, and in full runs (every commit on main, releases).
 IMAGE_INPUTS=(deploy/Dockerfile .dockerignore deploy/ops/ deploy/guacd/ deploy/browser/)
@@ -279,6 +281,9 @@ part_web() { # tools
 # addresses of this run. The source volume cannot be mounted where the
 # configuration expects its identity schema, so the schema's path is set too.
 start_kratos() {
+  # The OpenID Connect provider Kratos signs in with (deploy/testlab/oidc).
+  ci_dienst oidc -v "${CI_VOLUME}:${CI_SRC}:ro" "$DEX_IMAGE" \
+    dex serve "${CI_SRC}/deploy/testlab/oidc/config.yaml"
   docker exec "${CI_ID}-db-e2e" createdb -U ci kratos
   local base=http://localhost:8080
   local config="${CI_SRC}/deploy/ops/kratos/kratos.yml"
@@ -290,6 +295,7 @@ start_kratos() {
     -e "SELFSERVICE_ALLOWED_RETURN_URLS=[\"${base}/\"]"
     -e "SELFSERVICE_FLOWS_ERROR_UI_URL=${base}/sign-in"
     -e "SELFSERVICE_FLOWS_LOGIN_UI_URL=${base}/sign-in"
+    -e "SELFSERVICE_FLOWS_REGISTRATION_UI_URL=${base}/sign-in"
     -e "SELFSERVICE_FLOWS_SETTINGS_UI_URL=${base}/account"
     -e "SELFSERVICE_FLOWS_RECOVERY_UI_URL=${base}/sign-in/recovery"
     -e "SELFSERVICE_FLOWS_LOGOUT_AFTER_DEFAULT_BROWSER_RETURN_URL=${base}/sign-in"
@@ -297,6 +303,8 @@ start_kratos() {
     -e 'SECRETS_COOKIE=["ci-cookie-secret-not-for-production"]'
     -e 'SECRETS_CIPHER=["ci-cipher-secret-32-characters!!"]'
     -e 'SECRETS_DEFAULT=["ci-default-secret-not-for-production"]'
+    -e SELFSERVICE_METHODS_OIDC_ENABLED=true
+    -e "SELFSERVICE_METHODS_OIDC_CONFIG_PROVIDERS=[{\"id\":\"lab\",\"label\":\"Lab\",\"provider\":\"generic\",\"issuer_url\":\"http://oidc:5556/dex\",\"client_id\":\"remotehub\",\"client_secret\":\"lab-oidc-secret\",\"scope\":[\"openid\",\"email\",\"profile\"],\"mapper_url\":\"file://${CI_SRC}/deploy/ops/kratos/oidc.jsonnet\"}]"
     -e SQA_OPT_OUT=true
     -e LOG_FORMAT=text
   )

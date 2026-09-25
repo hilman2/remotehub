@@ -21,7 +21,7 @@ async function signIn(page: Page, user = 'alice', password = 'Alice-Passw0rd!') 
 	await expect(page).toHaveURL(/\/sign-in$/);
 	await page.getByLabel('User name').fill(user);
 	await page.getByLabel('Password').fill(password);
-	await page.getByRole('button', { name: 'Sign in' }).click();
+	await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
 }
 

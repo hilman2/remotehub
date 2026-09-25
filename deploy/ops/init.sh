@@ -55,6 +55,7 @@ kratos_config() {
 #     smtp:
 #       connection_uri: smtps://user:password@mail.example.com:465/
 #       from_address: remotehub@example.com
+# Sign-in providers such as Entra ID go here too (docs/install.md#sign-in-with-entra-id-google-or-github).
 dsn: postgres://remotehub:$(cat secrets/db_password)@db:5432/kratos?sslmode=disable
 secrets:
   cookie: ["$(random_password)"]

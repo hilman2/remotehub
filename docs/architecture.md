@@ -73,7 +73,12 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   nested groups through a service account from `tokenGroups` (fallback `LDAP_MATCHING_RULE_IN_CHAIN`).
 - **Local accounts (ADR 0010):** Ory Kratos keeps accounts without a directory: password, authenticator
   app (required), recovery codes, invitations. Browsers reach it through remotehub under `/api/auth/`;
-  `POST /api/session/local` turns its session into remotehub's (`api/accounts.rs`).
+  `POST /api/session/local` turns its session into remotehub's (`api/accounts.rs`). A local account can
+  also sign in through an OpenID Connect provider (Entra ID, Google, GitHub) that its owner linked under
+  *My account* (#109); the provider replaces the password, not the app. Browsers never reach Kratos'
+  registration, so a password account comes only from an invitation; an operator may let Kratos create
+  accounts for a provider's users. This is sign-in only: groups from Entra ID come with its directory
+  connector (M4).
 - **Identifiers:** users and groups are stored by `objectSid`/`objectGUID` (Entra object IDs later), never
   by name, so renames do not change permissions. Local accounts are `local:<Kratos identity>`, groups of
   remotehub's own `group:<id>` (`crate::principal`).

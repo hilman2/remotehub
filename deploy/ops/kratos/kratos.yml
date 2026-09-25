@@ -65,6 +65,11 @@ selfservice:
     # The e-mail address is the account's identifier: administrators change it.
     profile:
       enabled: false
+    # Sign-in with Entra ID, Google, GitHub or another OpenID Connect
+    # provider (#109). The providers and their client secrets go into
+    # secrets/kratos.yml; see docs/install.md.
+    oidc:
+      enabled: false
 
   flows:
     error:
@@ -72,9 +77,16 @@ selfservice:
     login:
       ui_url: https://remotehub.example.com/sign-in
       lifespan: 10m
-    # Accounts come from invitations only.
+    # Accounts come from invitations. Enabled, a provider's users get an
+    # account at their first sign-in; remotehub never lets a browser register
+    # with a password.
     registration:
       enabled: false
+      ui_url: https://remotehub.example.com/sign-in
+      after:
+        oidc:
+          hooks:
+            - hook: session
     settings:
       ui_url: https://remotehub.example.com/account
       privileged_session_max_age: 15m

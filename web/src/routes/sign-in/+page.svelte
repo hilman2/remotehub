@@ -1,5 +1,6 @@
 <script lang="ts">
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import KeyRound from '@lucide/svelte/icons/key-round';
 	import LogIn from '@lucide/svelte/icons/log-in';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -11,6 +12,7 @@
 	import Logo from '$lib/components/Logo.svelte';
 	import {
 		endSession,
+		loadFlow,
 		messages,
 		startFlow,
 		submitFlow,
@@ -25,7 +27,7 @@
 	/** Kratos' message for a wrong identifier or password. */
 	const KRATOS_INVALID_CREDENTIALS = 4000006;
 
-	let methods = $state<Methods>({ directory: true, local: false });
+	let methods = $state<Methods>({ directory: true, local: false, providers: [] });
 	let username = $state('');
 	let password = $state('');
 	let busy = $state(false);
@@ -41,13 +43,53 @@
 	let directoryFactor = $state<'code' | { secret: string; uri: string } | null>(null);
 
 	$effect(() => {
-		loadMethods().then((result) => {
+		// Read once: navigating on from here must not run this again.
+		const query = new URLSearchParams(location.search);
+		loadMethods().then(async (result) => {
 			if (!result.ok) return;
 			methods = result.data;
 			// Recovery of an account with a second factor ends here.
 			if (methods.local && page.state.secondFactor) askSecond();
+			// Back from a provider (#109): signed in to Kratos; or Kratos asks
+			// for the second factor in a flow of its own; or it refused, with
+			// the flow's messages.
+			if (query.get('from') === 'provider') {
+				busy = true;
+				await establish();
+				busy = false;
+			} else if (query.get('flow')) {
+				const back = await loadFlow('login', query.get('flow')!);
+				if (back.kind !== 'flow') return;
+				if (back.flow.requested_aal === 'aal2') second = back.flow;
+				else texts = messages(back.flow);
+			}
 		});
 	});
+
+	/**
+	 * Signs in through an OpenID Connect provider (#109). The browser leaves
+	 * for the provider and comes back through Kratos to this page, with
+	 * `from=provider` once Kratos signed the account in.
+	 */
+	async function signInWith(provider: string) {
+		busy = true;
+		error = null;
+		texts = [];
+		await endSession();
+		const back = new URL(resolve('/sign-in'), location.href);
+		back.searchParams.set('from', 'provider');
+		const started = await startFlow('login', `?return_to=${encodeURIComponent(back.href)}`);
+		if (started.kind !== 'flow') {
+			await follow(started);
+			return;
+		}
+		const result = await submitFlow(started.flow, { method: 'oidc', provider });
+		if (result.kind === 'redirect') {
+			location.assign(result.to.href);
+			return;
+		}
+		await follow(result);
+	}
 
 	/**
 	 * One form for both kinds of account (#121). A name without `@` is a
@@ -349,6 +391,26 @@
 						</a>
 					{/if}
 				</form>
+				{#if methods.local && methods.providers.length > 0}
+					<div class="flex items-center gap-3 text-sm text-ink-3">
+						<span class="h-px flex-1 bg-line"></span>
+						{m.sign_in_or()}
+						<span class="h-px flex-1 bg-line"></span>
+					</div>
+					<div class="flex flex-col gap-2">
+						{#each methods.providers as provider (provider.id)}
+							<button
+								type="button"
+								disabled={busy}
+								class="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-line-strong bg-surface font-medium hover:bg-surface-2 disabled:opacity-60"
+								onclick={() => signInWith(provider.id)}
+							>
+								<KeyRound size={18} aria-hidden="true" />
+								{m.sign_in_with({ provider: provider.label })}
+							</button>
+						{/each}
+					</div>
+				{/if}
 			{/if}
 
 			<a
