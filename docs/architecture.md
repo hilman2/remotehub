@@ -108,6 +108,10 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - **Permissions:** a folder tree holds devices and credentials. A grant gives a group or a user a role
   on a folder or an entry: `list < connect < reveal < edit < manage`. Grants are inherited downwards and
   only allow. `authorize()` is the single decision point and is tested table-driven.
+- **Reveal (`api/reveal.rs`):** with `reveal`, a stored credential or a device's own credentials are shown
+  or copied on their page. Each time is audited (`credential.revealed`, with `show` or `copy`) before the
+  value leaves the server, and the answer is `no-store`. The UI hides a shown value and clears a copied
+  one from the clipboard after 30 seconds.
 - **Just-in-time access:** someone who sees an object asks for `connect` or `reveal` on it for up to a day,
   with a reason (`/api/access-requests`). Someone else who manages the object approves or denies; nobody
   decides their own request. An approval becomes a user grant with `expires_at`, and the catalog, built

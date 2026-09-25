@@ -127,6 +127,40 @@ test('an AD user adds an SSH device and works in its terminal', async ({ page })
 	await expect(page.locator('.xterm')).toHaveCount(0);
 });
 
+test('a stored password is shown and copied, and the audit log knows', async ({
+	page,
+	context
+}) => {
+	await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+	await signIn(page);
+	const dialog = page.getByRole('dialog');
+	await newFolder(page, `E2E reveal ${run}`);
+	const credential = `reveal ${run}`;
+	await page.getByRole('button', { name: 'New credential' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(credential);
+	await dialog.getByLabel('User name', { exact: true }).fill('tester');
+	await dialog.getByLabel('Password', { exact: true }).fill('Shown-Passw0rd!');
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name: credential })).toBeVisible();
+	await expect(page.locator('body')).not.toContainText('Shown-Passw0rd!');
+
+	await page.getByRole('button', { name: 'Show', exact: true }).click();
+	await expect(page.getByTestId('revealed')).toHaveText('Shown-Passw0rd!');
+	await page.getByRole('button', { name: 'Hide', exact: true }).click();
+	await expect(page.getByTestId('revealed')).toHaveCount(0);
+
+	await page.getByRole('button', { name: 'Copy', exact: true }).click();
+	await expect(page.getByRole('status').filter({ hasText: 'Copied' })).toBeVisible();
+	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Shown-Passw0rd!');
+
+	// The newest two entries, whatever an earlier run left.
+	await page.getByRole('link', { name: 'Audit log' }).click();
+	const rows = page.getByRole('row');
+	for (const row of [rows.nth(1), rows.nth(2)]) {
+		await expect(row).toContainText('Showed or copied a stored credential');
+	}
+});
+
 test('an SSH key protected by a passphrase signs in', async ({ page }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');

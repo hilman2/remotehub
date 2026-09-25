@@ -53,6 +53,7 @@
 	import FolderNodeView from '$lib/catalog/FolderNodeView.svelte';
 	import Grants from '$lib/catalog/Grants.svelte';
 	import Journal from '$lib/catalog/Journal.svelte';
+	import RevealSecret from '$lib/catalog/RevealSecret.svelte';
 	import {
 		AUTH_MODE_LABELS,
 		CREDENTIAL_KIND_LABELS,
@@ -638,6 +639,11 @@
 							{AUTH_MODE_LABELS[device.auth_mode]()}
 						</p>
 					{/if}
+					{#if device.auth_mode === 'device' && allows(device.role, 'reveal')}
+						{#key device.id}
+							<RevealSecret owner="devices" id={device.id} />
+						{/key}
+					{/if}
 				</section>
 				{#if device.protocol === 'ssh'}
 					<section class={card}>
@@ -715,6 +721,11 @@
 						<p class="font-mono text-xs leading-relaxed break-all text-ink-2">
 							{credential.key_fingerprint}
 						</p>
+					{/if}
+					{#if allows(credential.role, 'reveal')}
+						{#key credential.id}
+							<RevealSecret owner="credentials" id={credential.id} />
+						{/key}
 					{/if}
 				</section>
 				{#if credential.kind === 'ssh_key'}

@@ -931,10 +931,11 @@ async fn stored_secrets_are_shown_only_with_reveal_and_audited(pool: PgPool) {
     // web01 uses the shared credential and keeps nothing of its own.
     let none = call(&f.app, &bob, "POST", &web01, show()).await;
     assert_eq!(none.status, StatusCode::NOT_FOUND);
-    // A device that asks now keeps nothing to show either.
+    // A device that asks now shows nothing either, even with a password
+    // sent along.
     let asking = json!({
         "folder_id": f.linux, "name": "db01", "protocol": "ssh", "host": "db01", "port": 22,
-        "auth_mode": "ask", "credential_id": null,
+        "auth_mode": "ask", "credential_id": null, "password": "Left-Over!",
     });
     let changed = call(
         &f.app,

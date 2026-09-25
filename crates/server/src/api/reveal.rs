@@ -148,16 +148,15 @@ pub async fn device(
     let purpose = purpose(&input)?;
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Reveal, ObjectId::Device(id))?;
-    let (mode, username, domain, version, kind): (String, String, String, i32, String) =
-        sqlx::query_as(
-            "SELECT auth_mode, username, domain, secret_version, secret_kind
-             FROM devices WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_one(&state.db)
-        .await?;
-    // Other sign-in modes use nothing of the device's own; version 0 is none.
-    if mode != "device" || version == 0 {
+    let (username, domain, version, kind): (String, String, i32, String) = sqlx::query_as(
+        "SELECT username, domain, secret_version, secret_kind FROM devices WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await?;
+    // Version 0: the device keeps nothing of its own, as in every sign-in
+    // mode but `device`.
+    if version == 0 {
         return Err(Problem::new(ErrorCode::NotFound));
     }
     let revealed = open(&state, id, version, &kind, username, domain).await?;
