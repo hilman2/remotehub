@@ -160,7 +160,14 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   data) is stored wrapped (AES-KW) once per way to unlock: a passkey's WebAuthn PRF output or the recovery
   key through HKDF, the passphrase through PBKDF2-SHA-256 (600 000 iterations). The server keeps
   ciphertext and wrapped keys for their owner only (`api/personal.rs`); nobody, the operator included, can
-  reset the passphrase. The server cannot inject such entries into connections; the browser can: while
+  reset the passphrase.
+- **Organisation recovery key** (ADR 0009, `api/recovery.rs`, `/recovery`): the browser also wraps each
+  vault key for the organisation's public key (ECDH P-256, HKDF, AES-KW), as an unlock of kind
+  `organisation` the owner cannot remove. An administrator asks for a recovery, a security officer who
+  is someone else approves it, and for a day the requester's browser may fetch the wrap and open the
+  vault with the private key: it gives the owner a one-time recovery key, or moves the entries into a
+  shared folder. The private key exists only as a passphrase-sealed file and as printed text.
+- The server cannot inject personal entries into connections; the browser can: while
   the vault is unlocked (the key stays in memory until it is locked, the user signs out or the page
   reloads), a device that asks for credentials offers its entries, and the chosen one is sent as if
   typed.

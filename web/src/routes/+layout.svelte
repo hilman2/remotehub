@@ -12,7 +12,7 @@
 	import ThemeSwitch from '$lib/components/ThemeSwitch.svelte';
 	import { getLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
-	import { isAuditor, loadSession, session, signOut } from '$lib/session.svelte';
+	import { isAuditor, isSecurityOfficer, loadSession, session, signOut } from '$lib/session.svelte';
 	import SessionStatus from '$lib/session/SessionStatus.svelte';
 	import SessionTabs from '$lib/session/SessionTabs.svelte';
 	import SessionView from '$lib/session/SessionView.svelte';
@@ -46,6 +46,9 @@
 				]
 			: []),
 		...(isAuditor(session.user) ? [{ href: resolve('/audit'), label: m.nav_audit }] : []),
+		...(session.user?.admin || isSecurityOfficer(session.user)
+			? [{ href: resolve('/recovery'), label: m.nav_recovery }]
+			: []),
 		...(session.user?.admin ? [{ href: resolve('/settings'), label: m.nav_settings }] : [])
 	]);
 

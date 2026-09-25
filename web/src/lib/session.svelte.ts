@@ -19,6 +19,10 @@ export type Role = 'administrator' | 'auditor' | 'security_officer';
 export const isAuditor = (user: User | null) =>
 	!!user && (user.admin || user.roles.includes('auditor'));
 
+/** Approves the recovery of personal vaults (#95). */
+export const isSecurityOfficer = (user: User | null) =>
+	!!user && user.roles.includes('security_officer');
+
 export const session = $state<{ user: User | null; loaded: boolean }>({
 	user: null,
 	loaded: false

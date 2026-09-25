@@ -167,6 +167,28 @@ Directory accounts sign in with their password only, unless they set up an authe
 accounts*: they set up the app at their next sign-in. After a lost phone, an administrator removes the
 app under *Users*, and the person sets up a new one.
 
+## Recover personal vaults
+
+A personal vault is encrypted in its owner's browser. Without the organisation recovery key, it is lost
+when its owner forgets the passphrase and the recovery key, or leaves.
+
+1. Under *Vault recovery*, an administrator creates the recovery key. The browser downloads it as a file,
+   sealed with a passphrase, and shows it once as text. Print the text and keep it in a safe; keep the file
+   and its passphrase apart.
+2. Give someone the role *Security officer* under *Users*. A recovery needs their approval, and they cannot
+   approve one they asked for themselves.
+3. Every vault is wrapped for the key at its owner's next unlock. *Vault recovery* shows which are.
+
+To recover a vault, an administrator asks for it there, with a reason. Once a security officer approved,
+the same administrator carries it out within a day, with the key file or the printed text:
+
+- **Forgotten passphrase:** remotehub shows a one-time recovery key for the owner. With it, the owner
+  unlocks the vault and chooses a new passphrase.
+- **Hand-over:** the entries become credentials in a shared folder.
+
+The private key never reaches the server. Every step is in the audit log. To replace the key, create a new
+one; vaults move to it at their next unlock, and the old one can be deleted once no vault needs it.
+
 ## Sign in to SSH devices without stored passwords
 
 A device set to sign in with "A certificate from remotehub" needs no credential. At every connection

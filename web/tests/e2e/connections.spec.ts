@@ -998,3 +998,138 @@ test('a shared folder takes in a KeePass file and exports it, audited', async ({
 	await page.getByRole('link', { name: 'Audit log' }).click();
 	await expect(page.getByRole('row').nth(1)).toContainText('Showed or copied a stored credential');
 });
+
+test('a vault is recovered with the organisation key once someone else approved', async ({
+	page,
+	browser
+}) => {
+	test.setTimeout(120_000);
+	await signIn(page);
+	const dialog = page.getByRole('dialog');
+	// Recoveries an earlier run left open would block a new one.
+	await page.evaluate(async () => {
+		const open = (await fetch('/api/vault-recoveries').then((r) => r.json())) as {
+			id: string;
+			user_name: string;
+			status: string;
+		}[];
+		for (const recovery of open) {
+			if (recovery.user_name === 'Bob Helpdesk' && recovery.status !== 'completed') {
+				await fetch(`/api/vault-recoveries/${recovery.id}`, { method: 'DELETE' });
+			}
+		}
+	});
+	const target = `E2E handover ${run}`;
+	await newFolder(page, target);
+
+	// bob approves recoveries. The lab has no third user without a second
+	// factor, so he approves those of his own vault: only the one who asked
+	// may not.
+	await page.getByRole('link', { name: 'Users' }).click();
+	const officers = page.getByTestId('role-security_officer');
+	await expect(officers).toBeVisible();
+	if (!(await officers.textContent())?.includes('Bob Helpdesk')) {
+		await officers.getByRole('button', { name: 'Give the role Security officer' }).click();
+		await dialog.getByLabel('Search users and groups').fill('Bob');
+		await dialog.getByRole('button', { name: /Bob Helpdesk/ }).click();
+		await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+		await expect(officers).toContainText('Bob Helpdesk');
+		await page.keyboard.press('Escape');
+	}
+
+	// A new organisation key; the private key comes as a file and as text.
+	await page.getByRole('link', { name: 'Vault recovery' }).click();
+	await page.getByRole('button', { name: /^(Create a|Replace the) recovery key$/ }).click();
+	await dialog.getByLabel('Passphrase of the key file').fill('key file passphrase');
+	await dialog.getByLabel('Passphrase again').fill('key file passphrase');
+	const downloading = page.waitForEvent('download');
+	await dialog.getByRole('button', { name: 'Create a recovery key' }).click();
+	const keyFile = await (await downloading).path();
+	const printed = (await dialog.getByTestId('organisation-private-key').innerText()).trim();
+	await dialog.getByRole('button', { name: 'I have kept it safe' }).click();
+
+	// bob's vault is wrapped for it as soon as it is open.
+	const bobs = await browser.newContext();
+	const bob = await bobs.newPage();
+	await signIn(bob, 'bob', 'Bob-Passw0rd!');
+	await freshVault(bob, 'bobs long passphrase');
+	await bob.getByRole('button', { name: 'New entry' }).click();
+	await bob.getByRole('dialog').getByLabel('Title').fill('Bob mail');
+	await bob.getByRole('dialog').getByLabel('Password').fill('Bob-Mail-Pass!');
+	await bob.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
+	await expect(bob.getByText('Bob mail')).toBeVisible();
+	await expect(bob.getByText('Organisation recovery key')).toBeVisible();
+
+	await page.reload();
+	const vault = page.getByTestId('vault-row').filter({ hasText: 'Bob Helpdesk' });
+	await expect(vault.getByText('Covered', { exact: true })).toBeVisible();
+
+	/** Asks for a recovery of bob's vault, has bob approve it, and opens the dialog to carry it out. */
+	async function approved(kind: RegExp) {
+		await vault.getByRole('button', { name: 'Ask for a recovery' }).click();
+		await dialog.getByRole('radio', { name: kind }).check();
+		await dialog.getByLabel('Reason').fill(`E2E ${run}`);
+		await dialog.getByRole('button', { name: 'Ask for a recovery' }).click();
+		const recovery = page
+			.getByTestId('recovery')
+			.filter({ hasText: `E2E ${run}` })
+			.first();
+		await expect(recovery).toContainText('Waiting for a security officer');
+		// Nobody approves their own request.
+		await expect(recovery.getByRole('button', { name: 'Approve' })).toHaveCount(0);
+
+		await bob.getByRole('link', { name: 'Vault recovery' }).click();
+		const asked = bob
+			.getByTestId('recovery')
+			.filter({ hasText: `E2E ${run}` })
+			.first();
+		await asked.getByRole('button', { name: 'Approve' }).click();
+		await expect(asked).toContainText('Approved for a day');
+		await bob.getByRole('link', { name: 'My vault' }).click();
+
+		await page.reload();
+		await recovery.getByRole('button', { name: 'Carry out' }).click();
+	}
+
+	// A forgotten passphrase, with the printed key: bob gets a one-time key.
+	await approved(/Forgotten passphrase/);
+	await dialog.getByRole('button', { name: 'Type the printed key instead' }).click();
+	await dialog.getByLabel('Private key as printed').fill(printed);
+	await dialog.getByRole('button', { name: 'Carry out' }).click();
+	const oneTime = (await dialog.getByTestId('one-time-key').innerText()).trim();
+	await page.keyboard.press('Escape');
+
+	await bob.reload();
+	await bob.getByRole('button', { name: 'Use the recovery key' }).click();
+	await bob.getByLabel('Recovery key').fill(oneTime);
+	await bob.getByRole('button', { name: 'Unlock' }).click();
+	await expect(bob.getByText('An administrator recovered this vault')).toBeVisible();
+	await bob.getByRole('button', { name: 'I have kept it safe' }).click();
+	await bob
+		.getByRole('dialog')
+		.getByLabel('Passphrase', { exact: true })
+		.fill('bobs new passphrase');
+	await bob.getByRole('dialog').getByLabel('Passphrase again').fill('bobs new passphrase');
+	await bob.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
+	await expect(bob.getByText('Bob mail')).toBeVisible();
+
+	// A hand-over, with the key file: the entries become shared credentials.
+	await approved(/Hand-over/);
+	await dialog.getByLabel('Key file', { exact: true }).setInputFiles(keyFile);
+	await dialog.getByLabel('Passphrase of the key file').fill('key file passphrase');
+	await dialog.getByLabel('Shared folder for the entries').selectOption({ label: target });
+	await dialog.getByRole('button', { name: 'Carry out' }).click();
+	await expect(dialog.getByRole('status')).toHaveText('Entries imported: 1.');
+	await page.keyboard.press('Escape');
+	await expect(
+		page
+			.getByTestId('recovery')
+			.filter({ hasText: `E2E ${run}` })
+			.first()
+	).toContainText('Carried out');
+
+	await page.getByRole('link', { name: 'Devices' }).click();
+	await page.getByRole('searchbox').fill('Bob mail');
+	await expect(page.getByRole('list', { name: 'Search results' })).toContainText(target);
+	await bobs.close();
+});

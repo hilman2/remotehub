@@ -14,6 +14,7 @@ mod journal;
 mod origin;
 mod personal;
 pub mod problem;
+mod recovery;
 mod requests;
 mod reveal;
 mod roles;
@@ -158,6 +159,23 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/connectors/streams/{id}", get(connectors::stream))
         .route("/search/picks", get(search::picks).post(search::pick))
         .route("/personal/search", put(personal::save_search))
+        .route(
+            "/recovery-keys",
+            get(recovery::keys).post(recovery::create_key),
+        )
+        .route("/recovery-keys/{id}", delete(recovery::delete_key))
+        .route(
+            "/vault-recoveries",
+            get(recovery::list).post(recovery::create),
+        )
+        .route("/vault-recoveries/{id}", delete(recovery::cancel))
+        .route("/vault-recoveries/{id}/approve", post(recovery::approve))
+        .route("/vault-recoveries/{id}/vault", get(recovery::vault))
+        .route(
+            "/vault-recoveries/{id}/attachments/{file}",
+            get(recovery::attachment),
+        )
+        .route("/vault-recoveries/{id}/complete", post(recovery::complete))
         .route("/audit", get(audit::list))
         .route("/audit/verify", post(audit::verify))
         // Unknown API paths are a problem response, never the SPA's index.html.

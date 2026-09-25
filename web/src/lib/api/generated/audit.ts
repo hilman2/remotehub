@@ -63,7 +63,14 @@ export const AUDIT_ACTIONS = [
 	'credential.attachment_added',
 	'credential.attachment_deleted',
 	'personal.attachment_saved',
-	'personal.attachment_deleted'
+	'personal.attachment_deleted',
+	'recovery_key.created',
+	'recovery_key.deleted',
+	'vault_recovery.requested',
+	'vault_recovery.approved',
+	'vault_recovery.cancelled',
+	'vault_recovery.opened',
+	'vault_recovery.completed'
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

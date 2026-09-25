@@ -40,7 +40,10 @@
 		deleteFile,
 		readFile,
 		saveFile,
-		withHistory
+		withHistory,
+		asKdbx,
+		coverForOrganisation,
+		oneTimeRecovery
 	} from '$lib/vault/vault';
 	import PasswordInput from '$lib/vault/PasswordInput.svelte';
 	import KdbxForm from '$lib/vault/KdbxForm.svelte';
@@ -62,7 +65,8 @@
 	const KIND_LABELS: Record<UnlockKind, () => string> = {
 		passkey: m.vault_kind_passkey,
 		passphrase: m.vault_kind_passphrase,
-		recovery: m.vault_kind_recovery
+		recovery: m.vault_kind_recovery,
+		organisation: m.vault_kind_organisation
 	};
 	const EMPTY: EntryContent = { title: '', username: '', password: '', url: '', notes: '' };
 
@@ -201,6 +205,10 @@
 			return;
 		}
 		vault = result.data;
+		if (key && (await coverForOrganisation(key, vault))) {
+			const again = await loadVault();
+			if (again.ok) vault = again.data;
+		}
 		if (key) {
 			[entries, picks] = await Promise.all([readEntries(key, vault), readPicks(key, vault)]);
 			if (stage === 'loading') stage = 'open';
@@ -243,9 +251,21 @@
 		key = unlocked.key = opening;
 		error = null;
 		passphrase = recoveryText = '';
-		[entries, picks] = await Promise.all([readEntries(key, vault), readPicks(key, vault)]);
+		// A one-time key from a recovery (#95) is replaced at once, and the
+		// forgotten passphrase with it.
+		if (useRecovery && oneTimeRecovery(vault)) {
+			mustRenew = true;
+			useRecovery = false;
+			await newRecovery();
+			return;
+		}
+		// Reads the entries, and wraps the key for the organisation if needed.
+		await load();
 		stage = 'open';
 	}
+
+	/** After a one-time recovery key: the new passphrase comes next. */
+	let mustRenew = $state(false);
 
 	/** Remembers that `entry` was used after searching for the current query. */
 	function used(entry: Entry) {
@@ -288,6 +308,10 @@
 		await load();
 		if (key && vault) entries = await readEntries(key, vault);
 		stage = 'open';
+		if (mustRenew) {
+			mustRenew = false;
+			passphraseOpen = true;
+		}
 	}
 
 	function edit(entry: Entry | null) {
@@ -378,38 +402,10 @@
 
 	/** Writes the whole vault into a new KeePass file (#99). */
 	async function exportPersonal(password: string) {
-		if (!key) return;
+		const opened = key;
+		if (!opened) return;
 		busy = true;
-		const pathOf = (parent: string | null | undefined): string[] => {
-			const names: string[] = [];
-			let at = folders.find((f) => f.id === parent);
-			while (at && names.length < 20) {
-				names.unshift(at.content?.title ?? '');
-				at = folders.find((f) => f.id === at?.content?.parent);
-			}
-			return names;
-		};
-		const out: KdbxEntry[] = [];
-		for (const entry of entries) {
-			const content = entry.content;
-			if (!content || content.kind === 'folder') continue;
-			const files: KdbxEntry['files'] = [];
-			for (const ref of content.attachments ?? []) {
-				const blob = await readFile(key, ref);
-				if (blob) files.push({ name: ref.name, data: new Uint8Array(await blob.arrayBuffer()) });
-			}
-			out.push({
-				path: pathOf(content.parent),
-				title: content.title,
-				username: content.username,
-				password: content.password,
-				url: content.url,
-				notes: content.notes,
-				icon: content.icon ?? 0,
-				fields: content.fields ?? [],
-				files
-			});
-		}
+		const out = await asKdbx(entries, (ref) => readFile(opened, ref));
 		const file = await writeKdbx(out, password, m.vault_title());
 		busy = false;
 		const url = URL.createObjectURL(new Blob([file], { type: 'application/octet-stream' }));
@@ -624,6 +620,9 @@
 {:else if stage === 'recovery'}
 	<section class="mt-6 max-w-md rounded-card border border-line bg-surface p-6">
 		<h2 class="text-lg font-semibold">{m.vault_recovery_title()}</h2>
+		{#if mustRenew}
+			<p class="mt-1 text-sm" role="status">{m.vault_recovered_hint()}</p>
+		{/if}
 		<p class="mt-1 text-sm text-ink-2">{m.vault_recovery_hint()}</p>
 		<p
 			class="mt-4 rounded-lg bg-surface-2 p-3 font-mono text-lg break-all"

@@ -1,8 +1,9 @@
 //! The personal vault (#22): entries that only their owner can read. The
 //! browser encrypts them with a vault key (scheme `e2e_user_v1`, ADR 0004)
 //! and keeps that key wrapped once per way to unlock it: a passkey (WebAuthn
-//! PRF), a passphrase, the recovery key. This server stores ciphertext and
-//! wrapped keys only, for their owner only, and can decrypt neither.
+//! PRF), a passphrase, the recovery key, and the organisation recovery key
+//! (#95, `recovery.rs`). This server stores ciphertext and wrapped keys only,
+//! for their owner only, and can decrypt neither.
 //!
 //! - `GET /api/personal/vault`: unlocks and entries
 //! - `POST /api/personal/unlocks`, `DELETE /api/personal/unlocks/{id}`
@@ -31,7 +32,7 @@ use crate::session::Session;
 const SCHEME: &str = "e2e_user_v1";
 
 /// Bytes as base64 in JSON.
-mod bytes {
+pub(super) mod bytes {
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD;
     use serde::{Deserialize, Deserializer, Serializer};
@@ -49,7 +50,7 @@ mod bytes {
 #[derive(Serialize, sqlx::FromRow)]
 pub struct Unlock {
     id: Uuid,
-    /// `passkey`, `passphrase` or `recovery`.
+    /// `passkey`, `passphrase`, `recovery` or `organisation` (#95).
     kind: String,
     params: Value,
     #[serde(with = "bytes")]
@@ -81,6 +82,26 @@ pub struct Vault {
     entries: Vec<StoredEntry>,
     /// What the owner picked after searching, sealed; none before the first.
     search: Option<StoredSearch>,
+    /// The organisation recovery key the vault key is to be wrapped for
+    /// (#95); none before an administrator created one.
+    organisation_key: Option<OrganisationKey>,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+pub struct OrganisationKey {
+    pub(super) id: Uuid,
+    /// An uncompressed P-256 point.
+    #[serde(with = "bytes")]
+    public_key: Vec<u8>,
+}
+
+/// The newest recovery key, the one vaults are wrapped for.
+pub(super) async fn organisation_key(
+    db: impl sqlx::PgExecutor<'_>,
+) -> Result<Option<OrganisationKey>, sqlx::Error> {
+    sqlx::query_as("SELECT id, public_key FROM recovery_keys ORDER BY created_at DESC, id LIMIT 1")
+        .fetch_optional(db)
+        .await
 }
 
 fn entry<'a>(session: &'a Session, action: Action, details: Value, address: &'a str) -> Entry<'a> {
@@ -122,6 +143,7 @@ pub async fn vault(
         unlocks,
         entries,
         search,
+        organisation_key: organisation_key(&state.db).await?,
     }))
 }
 
@@ -135,8 +157,8 @@ pub struct NewUnlock {
     label: String,
 }
 
-/// Adds a way to unlock the vault. A new passphrase or recovery key replaces
-/// the old one.
+/// Adds a way to unlock the vault. A new passphrase, recovery key or wrap
+/// for the organisation replaces the old one.
 pub async fn add_unlock(
     State(state): State<AppState>,
     session: Session,
@@ -144,7 +166,10 @@ pub async fn add_unlock(
     input: Result<Json<NewUnlock>, JsonRejection>,
 ) -> Result<(StatusCode, Json<Value>), Problem> {
     let input = body(input)?;
-    if !matches!(input.kind.as_str(), "passkey" | "passphrase" | "recovery") {
+    if !matches!(
+        input.kind.as_str(),
+        "passkey" | "passphrase" | "recovery" | "organisation"
+    ) {
         return Err(invalid("kind"));
     }
     if !input.params.is_object() || input.params.to_string().len() > 2048 {
@@ -158,6 +183,28 @@ pub async fn add_unlock(
         return Err(invalid("label"));
     }
     let mut tx = state.db.begin().await?;
+    if input.kind == "organisation" {
+        // Only for the newest key: the administrators count a vault as
+        // covered by the key its wrap names, and recover with that key. The
+        // lock keeps that key from being deleted before this commits.
+        sqlx::query("LOCK TABLE recovery_keys IN SHARE MODE")
+            .execute(&mut *tx)
+            .await?;
+        let newest = organisation_key(&mut *tx).await?.map(|key| key.id);
+        let named = input.params["key_id"]
+            .as_str()
+            .and_then(|id| id.parse().ok());
+        if newest.is_none() || named != newest {
+            return Err(invalid("params"));
+        }
+        let ephemeral = input.params["ephemeral"].as_str().map(|text| {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD.decode(text)
+        });
+        if !matches!(ephemeral, Some(Ok(point)) if point.len() == 65) {
+            return Err(invalid("params"));
+        }
+    }
     if input.kind != "passkey" {
         sqlx::query("DELETE FROM personal_vault_unlocks WHERE user_id = $1 AND kind = $2")
             .bind(session.user_id)
@@ -190,8 +237,9 @@ pub async fn add_unlock(
     Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
 }
 
-/// Removes a way to unlock the vault, but never the last one: that would
-/// lock the owner out of their own entries for good.
+/// Removes a way to unlock the vault, but never the last one of the owner's:
+/// that would lock them out of their own entries for good. The wrap for the
+/// organisation stays; it is the company's, not the owner's (#95).
 pub async fn remove_unlock(
     State(state): State<AppState>,
     session: Session,
@@ -209,7 +257,11 @@ pub async fn remove_unlock(
         .find(|(unlock, _)| *unlock == id)
         .map(|(_, kind)| kind.clone())
         .ok_or(Problem::new(ErrorCode::NotFound))?;
-    if kinds.len() == 1 {
+    if kind == "organisation" {
+        return Err(Problem::new(ErrorCode::Forbidden));
+    }
+    let own = kinds.iter().filter(|(_, k)| k != "organisation").count();
+    if own == 1 {
         return Err(Problem::new(ErrorCode::LastUnlock));
     }
     sqlx::query("DELETE FROM personal_vault_unlocks WHERE id = $1")
