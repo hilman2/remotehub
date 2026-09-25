@@ -300,5 +300,8 @@
 	"error_connector_in_use": "Devices are still reached through this connector.",
 	"error_connector_offline": "The device's connector is not connected.",
 	"audit_connector_created": "Created a site connector",
-	"audit_connector_deleted": "Deleted a site connector"
+	"audit_connector_deleted": "Deleted a site connector",
+	"search_results": "Search results",
+	"search_frequent": "Frequently used",
+	"vault_search": "Search entries"
 }

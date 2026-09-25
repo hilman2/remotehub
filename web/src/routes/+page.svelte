@@ -2,6 +2,7 @@
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import Clock from '@lucide/svelte/icons/clock';
+	import FolderClosed from '@lucide/svelte/icons/folder-closed';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import Lock from '@lucide/svelte/icons/lock';
@@ -35,6 +36,10 @@
 	import type { ApiResult } from '$lib/api/client';
 	import { loadConnectors, type Connector } from '$lib/api/connectors';
 	import { createRequest, requestableRoles } from '$lib/api/requests';
+	import { loadPicks, savePick } from '$lib/api/search';
+	import ProtocolChip from '$lib/catalog/ProtocolChip.svelte';
+	import { catalogItems, pickKey, type Hit } from '$lib/search/catalog';
+	import { frequent, queryKey, rank, remember, type Pick } from '$lib/search/rank';
 	import RequestForm from '$lib/catalog/RequestForm.svelte';
 	import { errorMessage, problemMessage } from '$lib/api/errors';
 	import CredentialForm from '$lib/catalog/CredentialForm.svelte';
@@ -48,7 +53,7 @@
 		ROLE_LABELS,
 		keyboardLayoutLabel
 	} from '$lib/catalog/labels';
-	import { filter, nest, pathTo } from '$lib/catalog/tree';
+	import { nest, pathTo } from '$lib/catalog/tree';
 	import Dialog from '$lib/components/Dialog.svelte';
 	import { getLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
@@ -75,8 +80,51 @@
 	/** The object whose access request was just sent, for the notice. */
 	let requested = $state<string | null>(null);
 
-	const roots = $derived(tree ? filter(nest(tree, getLocale()), query) : []);
-	const searching = $derived(query.trim().length > 0);
+	/** What this user picked before, for ranking (#81). */
+	let picks = $state<Pick[]>([]);
+	/** The result Enter picks. */
+	let active = $state(0);
+
+	const roots = $derived(tree ? nest(tree, getLocale()) : []);
+	const searching = $derived(queryKey(query).length > 0);
+	const items = $derived(tree ? catalogItems(tree) : []);
+	const results = $derived(
+		searching ? rank(items, query, picks, Date.now(), getLocale()).slice(0, 50) : []
+	);
+	const favourites = $derived.by(() => {
+		const byKey = new Map(items.map((entry) => [entry.key, entry.item]));
+		return frequent(picks, Date.now(), 12)
+			.flatMap((key) => byKey.get(key) ?? [])
+			.filter((hit) => hit.kind === 'device')
+			.slice(0, 5);
+	});
+
+	$effect(() => {
+		// A new query starts at its best result.
+		void query;
+		active = 0;
+	});
+
+	/** Selects `hit` and remembers it was picked for the current query. */
+	function choose(kind: ObjectKind, id: string) {
+		selected = { kind, id };
+		const key = pickKey(kind, id);
+		picks = remember(picks, key, query, Date.now());
+		savePick(key, queryKey(query));
+	}
+
+	function onSearchKey(event: KeyboardEvent) {
+		if (!searching || results.length === 0) return;
+		if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+			event.preventDefault();
+			const step = event.key === 'ArrowDown' ? 1 : -1;
+			active = (active + step + results.length) % results.length;
+		} else if (event.key === 'Enter') {
+			event.preventDefault();
+			const hit = results[active];
+			choose(hit.kind, hit.id);
+		}
+	}
 	const folder = $derived(
 		selected?.kind === 'folder' ? tree?.folders.find((f) => f.id === selected?.id) : undefined
 	);
@@ -90,10 +138,11 @@
 	);
 
 	async function load() {
-		const [result, sites] = await Promise.all([loadTree(), loadConnectors()]);
+		const [result, sites, picked] = await Promise.all([loadTree(), loadConnectors(), loadPicks()]);
 		if (result.ok) tree = result.data;
 		else error = errorMessage(result.code);
 		if (sites.ok) connectors = sites.data;
+		if (picked.ok) picks = picked.data;
 	}
 
 	const connectorOf = (device: Device) => connectors.find((c) => c.id === device.connector_id);
@@ -239,6 +288,34 @@
 	{/if}
 {/snippet}
 
+{#snippet result(hit: Hit, highlighted: boolean)}
+	{@const isSelected = selected?.kind === hit.kind && selected.id === hit.id}
+	<li>
+		<button
+			type="button"
+			class="flex w-full min-w-0 flex-col gap-0.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2 data-[active=true]:bg-surface-2 data-[active=true]:ring-1 data-[active=true]:ring-line-strong"
+			data-active={highlighted || isSelected}
+			aria-current={isSelected ? 'true' : undefined}
+			onclick={() => choose(hit.kind, hit.id)}
+		>
+			<span class="flex w-full min-w-0 items-center gap-2.5">
+				{#if hit.protocol}
+					<ProtocolChip protocol={hit.protocol} />
+				{:else if hit.kind === 'credential'}
+					<KeyRound size={15} class="shrink-0 text-warning" aria-hidden="true" />
+				{:else}
+					<FolderClosed size={15} class="shrink-0 text-ink-3" aria-hidden="true" />
+				{/if}
+				<span class="truncate text-ink">{hit.name}</span>
+				<span class="ml-auto truncate font-mono text-xs text-ink-3">{hit.detail}</span>
+			</span>
+			{#if hit.where}
+				<span class="truncate pl-0.5 text-xs text-ink-3">{hit.where}</span>
+			{/if}
+		</button>
+	</li>
+{/snippet}
+
 {#snippet heading(where: string, name: string)}
 	<div class="flex flex-col gap-3">
 		<p class="text-sm text-ink-3">{where}</p>
@@ -293,25 +370,42 @@
 				class="h-10 w-full rounded-xl border border-line-strong bg-page pr-3 pl-9 text-sm"
 				placeholder={m.catalog_search()}
 				bind:value={query}
+				onkeydown={onSearchKey}
 			/>
 		</label>
-		{#if tree && tree.folders.length > 0}
-			<nav aria-label={m.devices_title()}>
-				{#if roots.length === 0}
-					<p class="px-2 text-sm text-ink-2">{m.catalog_no_match()}</p>
-				{:else}
-					<ul role="tree" aria-label={m.devices_title()} class="flex flex-col gap-0.5">
-						{#each roots as node (node.folder.id)}
-							<FolderNodeView
-								{node}
-								{selected}
-								expanded={(id) => searching || !collapsed.has(id)}
-								onselect={(kind, id) => (selected = { kind, id })}
-								ontoggle={toggle}
-							/>
+		{#if searching}
+			{#if results.length === 0}
+				<p class="px-2 text-sm text-ink-2">{m.catalog_no_match()}</p>
+			{:else}
+				<ul aria-label={m.search_results()} class="flex flex-col gap-0.5">
+					{#each results as hit, index (pickKey(hit.kind, hit.id))}
+						{@render result(hit, index === active)}
+					{/each}
+				</ul>
+			{/if}
+		{:else if tree && tree.folders.length > 0}
+			{#if favourites.length > 0}
+				<div class="flex flex-col gap-1">
+					<h2 class="px-2 eyebrow">{m.search_frequent()}</h2>
+					<ul class="flex flex-col gap-0.5">
+						{#each favourites as hit (hit.id)}
+							{@render result(hit, false)}
 						{/each}
 					</ul>
-				{/if}
+				</div>
+			{/if}
+			<nav aria-label={m.devices_title()}>
+				<ul role="tree" aria-label={m.devices_title()} class="flex flex-col gap-0.5">
+					{#each roots as node (node.folder.id)}
+						<FolderNodeView
+							{node}
+							{selected}
+							expanded={(id) => !collapsed.has(id)}
+							onselect={choose}
+							ontoggle={toggle}
+						/>
+					{/each}
+				</ul>
 			</nav>
 		{/if}
 	</aside>

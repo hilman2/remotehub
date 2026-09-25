@@ -185,8 +185,10 @@ test('access asked for just in time is approved by someone else', async ({ page,
 	const bobs = await browser.newContext();
 	const bob = await bobs.newPage();
 	await signIn(bob, 'bob', 'Bob-Passw0rd!');
-	// A device's entry in the tree shows its host, too.
-	const entry = bob.getByRole('tree').getByRole('button', { name: `${name} ${sshHost}` });
+	// Searching shows the matches as a list, each with its host.
+	const entry = bob
+		.getByRole('list', { name: 'Search results' })
+		.getByRole('button', { name: `${name} ${sshHost}` });
 	await bob.getByRole('searchbox').fill(name);
 	await entry.click();
 	await expect(bob.getByRole('link', { name: 'Connect', exact: true })).toHaveCount(0);
@@ -394,6 +396,26 @@ test('an RDP desktop opens in the browser', async ({ page, context }) => {
 	await desktop.keyboard.press('Control+V');
 	await expect.poll(clipboard).toBe('echo:pasted with Ctrl+V');
 	await desktop.close();
+});
+
+test('the search puts first what was picked for the same query before', async ({ page }) => {
+	await signIn(page);
+	await newFolder(page, `pick one ${run}`);
+	await newFolder(page, `pick two ${run}`);
+	const search = page.getByRole('searchbox');
+	const results = page.getByRole('list', { name: 'Search results' }).getByRole('button');
+
+	await search.fill(`pick ${run}`);
+	await expect(results.first()).toContainText(`pick one ${run}`);
+	await results.filter({ hasText: `pick two ${run}` }).click();
+
+	// Remembered on the server: a new page load still knows it.
+	await page.reload();
+	await search.fill(`pick ${run}`);
+	await expect(results.first()).toContainText(`pick two ${run}`);
+	// Enter takes the first result.
+	await search.press('Enter');
+	await expect(page.getByRole('heading', { name: `pick two ${run}`, level: 2 })).toBeVisible();
 });
 
 test('an administrator sets up a site connector and a device names it', async ({ page }) => {

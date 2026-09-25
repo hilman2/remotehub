@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { allows, type Device, type Tree } from '$lib/api/catalog';
-import { filter, nest, pathTo } from './tree';
+import { catalogItems } from '$lib/search/catalog';
+import { rank } from '$lib/search/rank';
+import { nest, pathTo } from './tree';
 
 function device(id: string, name: string, host: string): Device {
 	return {
@@ -58,19 +60,22 @@ describe('nest', () => {
 	});
 });
 
-describe('filter', () => {
-	it('keeps matches and the folders on the way', () => {
-		const roots = filter(nest(tree), 'db.example');
-		expect(roots.map((n) => n.folder.name)).toEqual(['Servers']);
-		expect(roots[0].folders.map((n) => n.folder.name)).toEqual(['Linux']);
-		expect(roots[0].folders[0].devices.map((d) => d.name)).toEqual(['Web01']);
+describe('searching the catalog', () => {
+	const find = (query: string) =>
+		rank(catalogItems(tree), query, [], 0, 'en').map((hit) => `${hit.kind}:${hit.name}`);
+
+	it('finds devices by host, with the folder path', () => {
+		expect(find('db.example')).toEqual(['device:Web01']);
+		const [hit] = rank(catalogItems(tree), 'db.example', [], 0);
+		expect(hit.where).toBe('Servers / Linux');
+		expect(hit.detail).toBe('db.example.com');
 	});
 
-	it('finds credentials by user name and shows a matching folder whole', () => {
-		expect(filter(nest(tree), 'ADMINISTRATOR')[0].folders[0].credentials).toHaveLength(1);
-		expect(filter(nest(tree), 'linux')[0].folders[0].devices).toHaveLength(2);
-		expect(filter(nest(tree), 'nothing matches')).toEqual([]);
-		expect(filter(nest(tree), '  ')).toHaveLength(2);
+	it('finds credentials by user name and what is in a folder by its name', () => {
+		expect(find('ADMINISTRATOR')).toEqual(['credential:domain admin']);
+		// The folder itself first, then its content.
+		expect(find('linux')).toEqual(['folder:Linux', 'device:Web01', 'device:web02']);
+		expect(find('nothing matches')).toEqual([]);
 	});
 });
 

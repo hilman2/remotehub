@@ -6,7 +6,10 @@
 	import Fingerprint from '@lucide/svelte/icons/fingerprint';
 	import Lock from '@lucide/svelte/icons/lock';
 	import Plus from '@lucide/svelte/icons/plus';
+	import Search from '@lucide/svelte/icons/search';
 	import { errorMessage } from '$lib/api/errors';
+	import { getLocale } from '$lib/i18n';
+	import { frequent, queryKey, rank, remember, type Pick } from '$lib/search/rank';
 	import Dialog from '$lib/components/Dialog.svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { session } from '$lib/session.svelte';
@@ -16,11 +19,13 @@
 		loadVault,
 		passkeysAvailable,
 		readEntries,
+		readPicks,
 		removeUnlock,
 		renewRecovery,
 		resetVault,
 		saveEntry,
 		savePassphrase,
+		savePicks,
 		setUp,
 		unlockWithPasskey,
 		unlockWithPassphrase,
@@ -57,6 +62,44 @@
 	let passkeyLabel = $state('');
 	let revealed = $state<string | null>(null);
 	let copied = $state<string | null>(null);
+
+	let query = $state('');
+	/** What the owner used after searching; sealed in the vault (#81). */
+	let picks = $state<Pick[]>([]);
+
+	/** Readable entries, best first; entries that do not open, last. */
+	const shown = $derived.by(() => {
+		const readable = entries.filter((entry) => entry.content);
+		if (queryKey(query)) {
+			return rank(
+				readable.map((entry) => ({
+					key: entry.id,
+					name: entry.content?.title ?? '',
+					fields: [
+						{ text: entry.content?.title ?? '', weight: 1 },
+						{ text: entry.content?.username ?? '', weight: 0.8 },
+						{ text: entry.content?.url ?? '', weight: 0.7 },
+						{ text: entry.content?.notes ?? '', weight: 0.5 }
+					],
+					item: entry
+				})),
+				query,
+				picks,
+				Date.now(),
+				getLocale()
+			);
+		}
+		// Without a query, the ones used most come first.
+		const order = frequent(picks, Date.now(), entries.length);
+		const place = (entry: Entry) => {
+			const at = order.indexOf(entry.id);
+			return at < 0 ? order.length : at;
+		};
+		return [
+			...[...readable].sort((a, b) => place(a) - place(b)),
+			...entries.filter((entry) => !entry.content)
+		];
+	});
 
 	let editing = $state<{ id: string | null; content: EntryContent } | null>(null);
 	let editorOpen = $state(false);
@@ -110,8 +153,16 @@
 		key = unlocked;
 		error = null;
 		passphrase = recoveryText = '';
-		entries = await readEntries(key, vault);
+		[entries, picks] = await Promise.all([readEntries(key, vault), readPicks(key, vault)]);
 		stage = 'open';
+	}
+
+	/** Remembers that `entry` was used after searching for the current query. */
+	function used(entry: Entry) {
+		if (!key) return;
+		picks = remember(picks, entry.id, query, Date.now());
+		// A preference: if it is not stored, the vault still works.
+		savePicks(key, picks);
 	}
 
 	async function unlock(event: SubmitEvent) {
@@ -137,6 +188,8 @@
 	function lock() {
 		key = null;
 		entries = [];
+		picks = [];
+		query = '';
 		revealed = null;
 		stage = 'locked';
 	}
@@ -148,6 +201,7 @@
 	}
 
 	function edit(entry: Entry | null) {
+		if (entry) used(entry);
 		editing = { id: entry?.id ?? null, content: { ...(entry?.content ?? EMPTY) } };
 		error = null;
 		editorOpen = true;
@@ -174,6 +228,7 @@
 
 	async function copy(entry: Entry) {
 		if (!entry.content) return;
+		used(entry);
 		await navigator.clipboard.writeText(entry.content.password);
 		copied = entry.id;
 		setTimeout(() => (copied = null), 2000);
@@ -374,8 +429,21 @@
 	{#if entries.length === 0}
 		<p class="mt-3 text-sm text-ink-3">{m.vault_empty()}</p>
 	{:else}
-		<ul class="mt-3 divide-y divide-line rounded-card border border-line bg-surface">
-			{#each entries as entry (entry.id)}
+		<label class="relative mt-4 block max-w-md">
+			<span class="sr-only">{m.vault_search()}</span>
+			<Search size={16} class="absolute top-3 left-3 text-ink-3" aria-hidden="true" />
+			<input
+				type="search"
+				class="h-10 w-full rounded-xl border border-line-strong bg-surface pr-3 pl-9 text-sm"
+				placeholder={m.vault_search()}
+				bind:value={query}
+			/>
+		</label>
+		{#if shown.length === 0}
+			<p class="mt-3 text-sm text-ink-2">{m.catalog_no_match()}</p>
+		{/if}
+		<ul class="mt-3 divide-y divide-line rounded-card border border-line bg-surface empty:hidden">
+			{#each shown as entry (entry.id)}
 				<li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
 					{#if entry.content}
 						<div class="min-w-0">
@@ -391,7 +459,10 @@
 							<button
 								type="button"
 								class={button}
-								onclick={() => (revealed = revealed === entry.id ? null : entry.id)}
+								onclick={() => {
+									if (revealed !== entry.id) used(entry);
+									revealed = revealed === entry.id ? null : entry.id;
+								}}
 							>
 								{#if revealed === entry.id}
 									<EyeOff size={16} aria-hidden="true" />

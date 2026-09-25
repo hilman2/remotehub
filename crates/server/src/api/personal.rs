@@ -7,6 +7,8 @@
 //! - `GET /api/personal/vault`: unlocks and entries
 //! - `POST /api/personal/unlocks`, `DELETE /api/personal/unlocks/{id}`
 //! - `PUT /api/personal/entries/{id}`, `DELETE /api/personal/entries/{id}`
+//! - `PUT /api/personal/search`: what the owner picked after searching,
+//!   sealed like an entry
 //! - `DELETE /api/personal/vault`: start over, everything is gone
 
 use axum::Json;
@@ -62,11 +64,21 @@ pub struct StoredEntry {
     ciphertext: Vec<u8>,
 }
 
+#[derive(Serialize, sqlx::FromRow)]
+pub struct StoredSearch {
+    #[serde(with = "bytes")]
+    nonce: Vec<u8>,
+    #[serde(with = "bytes")]
+    ciphertext: Vec<u8>,
+}
+
 #[derive(Serialize)]
 pub struct Vault {
     scheme: &'static str,
     unlocks: Vec<Unlock>,
     entries: Vec<StoredEntry>,
+    /// What the owner picked after searching, sealed; none before the first.
+    search: Option<StoredSearch>,
 }
 
 fn entry<'a>(session: &'a Session, action: Action, details: Value, address: &'a str) -> Entry<'a> {
@@ -99,10 +111,15 @@ pub async fn vault(
     .bind(session.user_id)
     .fetch_all(&state.db)
     .await?;
+    let search = sqlx::query_as("SELECT nonce, ciphertext FROM personal_search WHERE user_id = $1")
+        .bind(session.user_id)
+        .fetch_optional(&state.db)
+        .await?;
     Ok(Json(Vault {
         scheme: SCHEME,
         unlocks,
         entries,
+        search,
     }))
 }
 
@@ -307,6 +324,34 @@ pub async fn delete_entry(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Stores what the owner picked after searching the vault (#81), sealed in
+/// the browser like an entry (associated data `search`). A preference, not
+/// a secret: saved on every pick and not audited.
+pub async fn save_search(
+    State(state): State<AppState>,
+    session: Session,
+    input: Result<Json<EntryInput>, JsonRejection>,
+) -> Result<StatusCode, Problem> {
+    let input = body(input)?;
+    if input.nonce.len() != 12 {
+        return Err(invalid("nonce"));
+    }
+    if !(16..=65536).contains(&input.ciphertext.len()) {
+        return Err(invalid("ciphertext"));
+    }
+    sqlx::query(
+        "INSERT INTO personal_search (user_id, nonce, ciphertext) VALUES ($1, $2, $3)
+         ON CONFLICT (user_id) DO UPDATE
+             SET nonce = EXCLUDED.nonce, ciphertext = EXCLUDED.ciphertext, updated_at = now()",
+    )
+    .bind(session.user_id)
+    .bind(&input.nonce)
+    .bind(&input.ciphertext)
+    .execute(&state.db)
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Starts over: every entry and every way to unlock is gone. For an owner
 /// who has lost all of them; nobody can read the entries anyway.
 pub async fn reset(
@@ -320,6 +365,10 @@ pub async fn reset(
         .execute(&mut *tx)
         .await?
         .rows_affected();
+    sqlx::query("DELETE FROM personal_search WHERE user_id = $1")
+        .bind(session.user_id)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("DELETE FROM personal_vault_unlocks WHERE user_id = $1")
         .bind(session.user_id)
         .execute(&mut *tx)

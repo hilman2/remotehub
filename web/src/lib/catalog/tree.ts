@@ -31,24 +31,6 @@ export function nest(tree: Tree, locale?: string): FolderNode[] {
 	return roots.sort((a, b) => byName(a.folder, b.folder));
 }
 
-/** Keeps what matches `query` (name, host, user name) and the folders on the way. */
-export function filter(nodes: FolderNode[], query: string): FolderNode[] {
-	const q = query.trim().toLowerCase();
-	if (!q) return nodes;
-	const hit = (...values: string[]) => values.some((v) => v.toLowerCase().includes(q));
-	return nodes.flatMap((node) => {
-		const folders = filter(node.folders, query);
-		const devices = node.devices.filter((d) => hit(d.name, d.host, d.description));
-		const credentials = node.credentials.filter((c) => hit(c.name, c.username, c.domain));
-		const keep = hit(node.folder.name) || folders.length || devices.length || credentials.length;
-		if (!keep) return [];
-		// A matching folder shows its whole content.
-		return hit(node.folder.name)
-			? [node]
-			: [{ folder: node.folder, folders, devices, credentials }];
-	});
-}
-
 /** The folder path from the top down to (and including) a folder. */
 export function pathTo(tree: Tree, folderId: string | null): Folder[] {
 	const byId = new Map(tree.folders.map((f) => [f.id, f]));

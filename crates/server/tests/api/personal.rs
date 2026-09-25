@@ -39,6 +39,55 @@ async fn set_up(app: &Router, token: &str) {
     }
 }
 
+/// What the owner picked after searching (#81): sealed like an entry, kept
+/// per owner, gone with the vault, and no entry in the audit log per pick.
+#[sqlx::test(migrations = "../../migrations")]
+async fn search_picks_are_sealed_per_owner_and_not_audited(pool: PgPool) {
+    let app = app(state(pool.clone()), None);
+    let alice = token(&app, "alice").await;
+    let bob = token(&app, "bob").await;
+    let vault = |token: String| {
+        let app = app.clone();
+        async move {
+            send(&app, get("/api/personal/vault", Some(&token)))
+                .await
+                .json()
+        }
+    };
+    assert_eq!(vault(bob.clone()).await["search"], Value::Null);
+
+    let audited = || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM audit_log")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    let before = audited().await;
+    let sealed = json!({ "nonce": NONCE, "ciphertext": CIPHERTEXT });
+    for _ in 0..2 {
+        let saved = call(
+            &app,
+            &bob,
+            "PUT",
+            "/api/personal/search",
+            Some(sealed.clone()),
+        )
+        .await;
+        assert_eq!(saved.status, StatusCode::NO_CONTENT);
+    }
+    assert_eq!(audited().await, before);
+    assert_eq!(vault(bob.clone()).await["search"], sealed);
+    assert_eq!(vault(alice.clone()).await["search"], Value::Null);
+
+    let short = json!({ "nonce": "AAEC", "ciphertext": CIPHERTEXT });
+    let refused = call(&app, &bob, "PUT", "/api/personal/search", Some(short)).await;
+    assert_eq!(refused.json()["params"]["field"], "nonce");
+
+    let reset = call(&app, &bob, "DELETE", "/api/personal/vault", None).await;
+    assert_eq!(reset.status, StatusCode::NO_CONTENT);
+    assert_eq!(vault(bob).await["search"], Value::Null);
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn only_the_owner_gets_their_entries_back_as_stored(pool: PgPool) {
     let app = app(state(pool.clone()), None);

@@ -113,6 +113,11 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   key through HKDF, the passphrase through PBKDF2-SHA-256 (600 000 iterations). The server keeps
   ciphertext and wrapped keys for their owner only (`api/personal.rs`); nobody, the operator included, can
   reset the passphrase. Such entries cannot be injected into connections.
+- **Search** (`web/src/lib/search/rank.ts`) runs in the browser: parts of words in names, hosts,
+  descriptions and paths, ranked by match and by what the user picked for the same or a similar query
+  before. Picks from the device list are stored per user on the server (`search_picks`); picks in the
+  personal vault are sealed with the vault key like its entries (`personal_search`), so the server never
+  sees what someone looks for there. Picks are preferences, not audited.
 - Plaintext lives only in `secrecy`/`zeroize` types and never appears in logs, API responses (except the
   audited `reveal`), environment variables or command lines. Core dumps are disabled.
 
