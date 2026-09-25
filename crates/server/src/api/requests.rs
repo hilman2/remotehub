@@ -167,11 +167,10 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<serde_json::Value>), Problem> {
     let input = body(input)?;
     let target = object(&input.object.kind, input.object.id)?;
-    // The grant goes to the requester's own SID; break-glass accounts have
-    // none, and administer everything anyway.
+    // The grant goes to the requester's own principal; break-glass accounts
+    // have none, and administer everything anyway.
     let sid = session
-        .sid
-        .clone()
+        .principal()
         .ok_or(Problem::new(ErrorCode::Forbidden))?;
     let (subject, catalog) = context(&state, &session).await?;
     if catalog.effective_role(&subject, target).is_none() {

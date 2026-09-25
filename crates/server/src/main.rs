@@ -147,6 +147,11 @@ async fn serve() -> anyhow::Result<()> {
         rdp_keyboard_layout: config.rdp_keyboard_layout,
         trusted_proxies: config.trusted_proxies,
         ssh_ca,
+        kratos: config
+            .kratos
+            .as_ref()
+            .map(remotehub_server::kratos::Kratos::new),
+        admin_accounts: config.admin_accounts,
     };
     let state = AppState::new(pool.clone(), directory, settings, vault);
     tokio::spawn(purge_sessions(pool, config.session.idle));

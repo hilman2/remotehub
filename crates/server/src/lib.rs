@@ -10,6 +10,7 @@ pub mod config;
 pub mod connector_agent;
 pub mod connectors;
 pub mod db;
+pub mod kratos;
 pub mod proxy;
 pub mod secrets;
 pub mod session;
@@ -64,6 +65,11 @@ pub struct Settings {
     /// The SSH CA for devices that sign in with a certificate; none without
     /// `REMOTEHUB_SSH_CA_KEY_FILE`.
     pub ssh_ca: Option<Arc<remotehub_gateway::ssh_ca::SshCa>>,
+    /// Ory Kratos for local accounts (#103); none: they are off.
+    pub kratos: Option<kratos::Kratos>,
+    /// Local accounts, by lower-case e-mail address, that administer
+    /// remotehub.
+    pub admin_accounts: Vec<String>,
 }
 
 impl AppState {

@@ -200,7 +200,12 @@ const PURPOSE_MAX: usize = 500;
 /// Whether the caller states a purpose before every connection (#90): their
 /// own SID or one of their groups is among the `purpose_principals`.
 pub async fn purpose_required(db: &sqlx::PgPool, session: &Session) -> Result<bool, sqlx::Error> {
-    let sids: Vec<&String> = session.groups.iter().chain(&session.sid).collect();
+    let sids: Vec<String> = session
+        .groups
+        .iter()
+        .cloned()
+        .chain(session.principal())
+        .collect();
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM purpose_principals WHERE principal_sid = ANY($1))",
     )
