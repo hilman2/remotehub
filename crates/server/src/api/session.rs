@@ -20,6 +20,7 @@ use crate::audit::{self, Action, Actor, Entry};
 use crate::auth::{PER_ADDRESS, PER_USER};
 use crate::break_glass;
 use crate::proxy;
+use crate::second_factor;
 use crate::session::{self, Session};
 use crate::{AppState, Settings};
 
@@ -27,6 +28,12 @@ use crate::{AppState, Settings};
 pub struct SignIn {
     username: String,
     password: SecretString,
+    /// A code of the authenticator app (#107), once the server asked for it.
+    #[serde(default)]
+    code: Option<String>,
+    /// The secret the server offered, when the app is set up now.
+    #[serde(default)]
+    totp_secret: Option<SecretString>,
 }
 
 /// The signed-in user as the UI sees them.
@@ -96,8 +103,12 @@ pub async fn sign_in(
     ClientAddress(address): ClientAddress,
     body: Result<Json<SignIn>, JsonRejection>,
 ) -> Result<impl IntoResponse, Problem> {
-    let Json(SignIn { username, password }) =
-        body.map_err(|_| Problem::new(ErrorCode::InvalidRequest))?;
+    let Json(SignIn {
+        username,
+        password,
+        code,
+        totp_secret,
+    }) = body.map_err(|_| Problem::new(ErrorCode::InvalidRequest))?;
     let keys = [
         (PER_USER, username.as_str()),
         (PER_ADDRESS, address.as_str()),
@@ -135,14 +146,72 @@ pub async fn sign_in(
             return Err(problem);
         }
     };
-    state.limiter.succeeded(&username);
-
     let groups: Vec<String> = identity.groups.iter().map(ToString::to_string).collect();
     let mut tx = state.db.begin().await?;
     let user_id = upsert_directory_user(&mut *tx, &identity).await?;
     if session::blocked(&mut *tx, user_id).await? {
         drop(tx);
         return Err(refuse_blocked(&state, user_id, &identity.username, &address).await);
+    }
+    let sids: Vec<String> = groups
+        .iter()
+        .cloned()
+        .chain([identity.sid.to_string()])
+        .collect();
+    let second = second_factor::at_sign_in(
+        &mut tx,
+        &state.vault,
+        user_id,
+        &identity.username,
+        &sids,
+        code.as_deref(),
+        totp_secret.as_ref().map(ExposeSecret::expose_secret),
+    )
+    .await?;
+    let (second_factor, enrolled) = match second {
+        second_factor::Outcome::Passed { used, enrolled } => (used, enrolled),
+        second_factor::Outcome::Refused { problem, failed } => {
+            drop(tx);
+            if failed {
+                // A right password does not reset the count here: codes
+                // cannot be guessed on and on.
+                state.limiter.failed(&keys);
+                // By name like every failed sign-in: at the first one, the
+                // user's row went with the transaction.
+                audit::record(
+                    &state.db,
+                    Entry {
+                        actor: Actor {
+                            id: None,
+                            name: &identity.username,
+                        },
+                        action: Action::SignInFailed,
+                        object: None,
+                        details: json!({ "reason": problem.code }),
+                        address: Some(&address),
+                    },
+                )
+                .await?;
+            }
+            return Err(problem);
+        }
+    };
+    state.limiter.succeeded(&username);
+    if enrolled {
+        audit::record(
+            &mut *tx,
+            Entry {
+                actor: Actor {
+                    id: Some(user_id),
+                    name: &identity.username,
+                },
+                action: Action::SecondFactorEnrolled,
+                object: Some(("user", user_id)),
+                details: json!({}),
+                address: Some(&address),
+            },
+        )
+        .await?;
     }
     let token = session::create(&mut *tx, user_id, &groups, state.settings.session.max).await?;
     let mut cookies = vec![session::set_cookie(&token)];
@@ -161,7 +230,9 @@ pub async fn sign_in(
             },
             action: Action::SignIn,
             object: None,
-            details: json!({ "sid": identity.sid, "kind": "directory" }),
+            details: json!({
+                "sid": identity.sid, "kind": "directory", "second_factor": second_factor,
+            }),
             address: Some(&address),
         },
     )

@@ -45,6 +45,9 @@ pub struct UserRow {
     email: Option<String>,
     last_sign_in_at: Option<String>,
     blocked: bool,
+    /// Signs in with a second factor: local and break-glass accounts
+    /// always, directory users once they set one up (#107).
+    second_factor: bool,
     /// Sessions that have not run out.
     sessions: i64,
 }
@@ -156,6 +159,9 @@ pub async fn list(
                 to_char(u.last_sign_in_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                     AS last_sign_in_at,
                 u.blocked_at IS NOT NULL AS blocked,
+                (u.kind <> 'directory'
+                 OR EXISTS (SELECT 1 FROM second_factors f WHERE f.user_id = u.id))
+                    AS second_factor,
                 (SELECT count(*) FROM sessions s WHERE s.user_id = u.id AND s.expires_at > now())
                     AS sessions
          FROM users u WHERE u.kind <> 'deleted'
@@ -372,6 +378,7 @@ pub async fn delete(
         "DELETE FROM purpose_principals WHERE principal_sid = $1",
         "DELETE FROM group_members WHERE principal_sid = $1",
         "DELETE FROM role_assignments WHERE principal_sid = $1",
+        "DELETE FROM second_factor_principals WHERE principal_sid = $1",
     ] {
         sqlx::query(statement)
             .bind(&principal)

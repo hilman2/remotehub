@@ -14,8 +14,10 @@ pub mod kratos;
 pub mod principal;
 pub mod proxy;
 pub mod refresh;
+pub mod second_factor;
 pub mod secrets;
 pub mod session;
+pub mod totp;
 
 use std::path::Path;
 use std::sync::Arc;

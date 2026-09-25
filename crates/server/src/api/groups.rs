@@ -240,14 +240,16 @@ pub async fn delete(
         .execute(&mut *tx)
         .await?
         .rows_affected();
-    sqlx::query("DELETE FROM purpose_principals WHERE principal_sid = $1")
-        .bind(&principal)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM role_assignments WHERE principal_sid = $1")
-        .bind(&principal)
-        .execute(&mut *tx)
-        .await?;
+    for statement in [
+        "DELETE FROM purpose_principals WHERE principal_sid = $1",
+        "DELETE FROM role_assignments WHERE principal_sid = $1",
+        "DELETE FROM second_factor_principals WHERE principal_sid = $1",
+    ] {
+        sqlx::query(statement)
+            .bind(&principal)
+            .execute(&mut *tx)
+            .await?;
+    }
     sqlx::query("DELETE FROM groups WHERE id = $1")
         .bind(id)
         .execute(&mut *tx)

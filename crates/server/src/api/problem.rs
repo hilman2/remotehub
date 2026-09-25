@@ -73,6 +73,7 @@ error_codes! {
     AccountsUnavailable = ("accounts_unavailable", SERVICE_UNAVAILABLE, "The service for local accounts is not reachable"),
     SecondFactorRequired = ("second_factor_required", FORBIDDEN, "Confirm the sign-in with the second factor"),
     SecondFactorSetupRequired = ("second_factor_setup_required", FORBIDDEN, "Set up a second factor first"),
+    SecondFactorInvalid = ("second_factor_invalid", UNAUTHORIZED, "The code is not right"),
     DirectoryUnavailable = ("directory_unavailable", SERVICE_UNAVAILABLE, "Directory unavailable"),
     DatabaseUnavailable = ("database_unavailable", SERVICE_UNAVAILABLE, "Database unavailable"),
     Internal = ("internal", INTERNAL_SERVER_ERROR, "Internal server error"),

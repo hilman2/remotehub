@@ -22,6 +22,7 @@ mod refresh;
 mod requests;
 mod roles;
 mod search;
+mod second_factor;
 mod secrets;
 mod session;
 mod terminal;
