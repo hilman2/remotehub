@@ -44,7 +44,7 @@ fail() {
 
 echo "── init.sh"
 sh init.sh
-for secret in db_password master_key ssh_ca_key; do
+for secret in db_password master_key ssh_ca_key courier_token; do
   [ -f "secrets/$secret" ] || fail "init.sh did not create secrets/$secret"
 done
 [ "$(stat -c %a secrets)" = 700 ] || fail "secrets/ is not 0700"
@@ -55,6 +55,8 @@ done
 [ "$(stat -c %u:%g:%a secrets/kratos.yml)" = 10000:10000:400 ] || fail "secrets/kratos.yml is not 10000:10000, 0400"
 grep -q "^dsn: postgres://remotehub:$(cat secrets/db_password)@db:5432/kratos" secrets/kratos.yml ||
   fail "secrets/kratos.yml does not name Kratos' database"
+grep -q "value: Bearer $(cat secrets/courier_token)$" secrets/kratos.yml ||
+  fail "secrets/kratos.yml does not hold the courier token"
 sh init.sh | grep -q "kept    secrets/master_key" || fail "a second init.sh did not keep the secrets"
 
 echo "── docker compose up"
@@ -98,6 +100,9 @@ docker compose -p "$project" exec -T remotehub remotehub setup-code |
   grep -q 'http://localhost:8080/setup#code=' || fail "setup-code prints no link"
 
 echo "── Local accounts through Kratos"
+# Kratos hands its mails over on port 8081, and only with the token (#145).
+[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST -d '{}' "http://${remotehub}:8081/courier")" = 401 ] ||
+  fail "the courier's port takes mails without the token"
 curl -fsS "http://${remotehub}:8080/api/session/methods" | grep -q '"local":true' ||
   fail "local accounts are off"
 # A sign-in flow of Kratos, through remotehub, naming remotehub's address.

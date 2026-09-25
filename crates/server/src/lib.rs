@@ -13,6 +13,7 @@ pub mod db;
 pub mod directory;
 pub mod escrow;
 pub mod kratos;
+pub mod mail;
 pub mod principal;
 pub mod proxy;
 pub mod refresh;

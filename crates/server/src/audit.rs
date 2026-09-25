@@ -39,6 +39,8 @@ audit_actions! {
     SetupCompleted = "setup.completed",
     DirectoryChanged = "directory.changed",
     DirectoryRemoved = "directory.removed",
+    MailChanged = "mail.changed",
+    MailRemoved = "mail.removed",
     FolderCreated = "folder.created",
     FolderUpdated = "folder.updated",
     FolderDeleted = "folder.deleted",

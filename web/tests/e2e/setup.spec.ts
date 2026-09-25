@@ -1,14 +1,17 @@
 import { expect, test } from '@playwright/test';
+import { inbox } from './mailpit';
 import { step, totp } from './totp';
 
 // The setup wizard of a fresh installation (#143). It runs before every other
-// test (playwright.config.ts): they rely on the lab's directory (#144) and on
-// alice administering through "RH Admins", which the wizard sets up here.
+// test (playwright.config.ts): they rely on the lab's directory (#144), on
+// alice administering through "RH Admins", and on the lab's Mailpit as mail
+// server (#145), which the wizard sets up here.
 //
 // The link comes from `remotehub setup-code` (E2E_SETUP_LINK); the CI makes
 // one for its fresh database. A database set up before needs none.
 
 const run = Date.now().toString(36);
+const administrator = `setup-${run}@remotehub.test`;
 /** The wizard's page, and not /sign-in/setup. */
 const wizard = /^https?:\/\/[^/]+\/setup$/;
 
@@ -28,7 +31,7 @@ test('a fresh installation is set up in the browser', async ({ page }) => {
 	// The code leaves the address bar at once.
 	await expect(page).toHaveURL(wizard);
 	await page.getByLabel('Name').fill('Sam Setup');
-	await page.getByLabel('E-mail').fill(`setup-${run}@remotehub.test`);
+	await page.getByLabel('E-mail').fill(administrator);
 	await page.getByRole('button', { name: 'Create administrator' }).click();
 
 	// The invitation's code goes by itself; the password and the app follow.
@@ -64,6 +67,21 @@ test('a fresh installation is set up in the browser', async ({ page }) => {
 	await page.getByRole('button', { name: /RH Admins/ }).click();
 	await page.getByRole('button', { name: 'Add', exact: true }).click();
 	await expect(page.getByRole('list', { name: 'Administrators' })).toContainText('RH Admins');
+	await page.getByRole('button', { name: 'Continue' }).click();
+
+	// Then the lab's Mailpit as mail server (#145), with a test mail to the
+	// administrator first.
+	await expect(page.getByRole('heading', { name: 'Mail', exact: true })).toBeVisible();
+	await page.getByLabel('Mail server').fill('mail');
+	await page.getByLabel('None').check();
+	await page.getByLabel('Port', { exact: true }).fill('1025');
+	await page.getByLabel('Sender address').fill('remotehub@remotehub.test');
+	await expect(page.getByLabel('Test mail to')).toHaveValue(administrator);
+	await page.getByRole('button', { name: 'Send test mail' }).click();
+	await expect(page.getByTestId('mail-done')).toContainText('The test mail went to');
+	expect((await inbox(administrator)).map((mail) => mail.subject)).toEqual(['remotehub test mail']);
+	await page.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByTestId('mail-done')).toContainText('Saved.');
 	await page.getByRole('button', { name: 'Continue' }).click();
 
 	await expect(page.getByRole('heading', { name: 'Break-glass account' })).toBeVisible();

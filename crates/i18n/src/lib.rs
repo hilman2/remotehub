@@ -136,6 +136,15 @@ messages! {
     SetupReady = "setup-ready" {}
     /// `remotehub setup-code` on an installation that is set up already.
     SetupComplete = "setup-complete" {}
+    /// Mails (#145); the body is plain text, the HTML part is made from it.
+    MailTestSubject = "mail-test-subject" {}
+    MailTestBody = "mail-test-body" {}
+    MailRecoverySubject = "mail-recovery-subject" {}
+    MailRecoveryBody = "mail-recovery-body" { code: String }
+    MailInvitationSubject = "mail-invitation-subject" {}
+    MailInvitationBody = "mail-invitation-body" { name: String, link: String, code: String, expires: String }
+    MailSignInCodeSubject = "mail-sign-in-code-subject" {}
+    MailSignInCodeBody = "mail-sign-in-code-body" { name: String, link: String, code: String, expires: String }
     /// `remotehub verify-audit`: the hash chain holds.
     AuditIntact = "audit-intact" { entries: i64 }
     /// `remotehub verify-audit`: the chain breaks at entry `first`.
@@ -145,8 +154,14 @@ messages! {
 /// The catalog files of a locale, embedded in the binary.
 fn sources(locale: Locale) -> &'static [&'static str] {
     match locale {
-        Locale::En => &[include_str!("../locales/en/cli.ftl")],
-        Locale::De => &[include_str!("../locales/de/cli.ftl")],
+        Locale::En => &[
+            include_str!("../locales/en/cli.ftl"),
+            include_str!("../locales/en/mail.ftl"),
+        ],
+        Locale::De => &[
+            include_str!("../locales/de/cli.ftl"),
+            include_str!("../locales/de/mail.ftl"),
+        ],
     }
 }
 

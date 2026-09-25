@@ -44,7 +44,8 @@ After a few seconds all three services are up, and remotehub reports `healthy`. 
 | `master_key` | The key that encrypts every stored credential. | 65532, 0400 |
 | `db_password` | The database password, read by PostgreSQL and remotehub. | 65532:999, 0440 |
 | `ssh_ca_key` | The key of remotehub's SSH certificate authority. | 65532, 0400 |
-| `kratos.yml` | Database and secrets of Kratos, which keeps the local accounts; the SMTP server goes here too. | 10000, 0400 |
+| `courier_token` | The token with which Kratos hands its mails to remotehub. | 65532, 0400 |
+| `kratos.yml` | Database and secrets of Kratos, which keeps the local accounts, with the courier token. | 10000, 0400 |
 
 remotehub runs as user 65532, PostgreSQL as 999 and Kratos as 10000, so the files belong to them; `secrets/`
 itself is open to root only. Keep these owners and modes when you edit a file, e.g. with `sudo tee secrets/kratos.yml`.
@@ -156,14 +157,15 @@ Under *Settings → Administrators*, give directory groups the administrator rol
 Local accounts live in Ory Kratos, which the ops package runs next to remotehub. People reach it only
 through remotehub. Its settings are in `kratos/kratos.yml`; database and secrets in `secrets/kratos.yml`.
 
-- **Inviting and managing:** administrators invite local accounts under *Users* and hand over the link
-  and code shown there. The same page blocks anyone, local or from the directory, ends their sessions,
-  and deletes local accounts. Everything done there is in the audit log.
+- **Inviting and managing:** administrators invite local accounts under *Users*. With a mail server (see
+  [Send mail](#send-mail)), the link and the code go out by mail; the dialog shows them too, to hand over
+  by hand. The same page blocks anyone, local or from the directory, ends their sessions, and deletes
+  local accounts. Everything done there is in the audit log.
 - **Groups:** without a directory, put local accounts into groups under *Users* and grant access to the
   groups. Directory users and groups can be members too.
-- **Forgotten passwords:** "Forgot the password?" on the sign-in page mails a code. For that, add your SMTP
-  server to `secrets/kratos.yml` as its comment shows, then `docker compose up -d kratos`. Without it, an
-  administrator gives the person a *New sign-in code* under *Users*.
+- **Forgotten passwords:** with a mail server, "Forgot the password?" on the sign-in page mails a code, in
+  the language of the browser. Without one, the page says to ask an administrator, who gives the person a
+  *New sign-in code* under *Users*.
 - **Second factor:** every local account sets up an authenticator app before its first session, and can
   create recovery codes under *My account*. A lost authenticator app takes a *New sign-in code* too: it
   removes the second factor, and the person sets up a new one with the code.
@@ -171,6 +173,20 @@ through remotehub. Its settings are in `kratos/kratos.yml`; database and secrets
   instead of the password, and a security key can stand in for the authenticator app's code. Passkeys
   belong to `REMOTEHUB_HOST` in `.env`: changing it later makes every passkey useless.
 - **Backups:** Kratos' database sits next to remotehub's; see [Back up and restore](#back-up-and-restore).
+
+## Send mail
+
+remotehub sends invitations, new sign-in codes and the codes for a forgotten password itself; Kratos hands
+its mails to remotehub. Set the mail server in the setup wizard or under *Settings → Mail*: host, port,
+encryption, user and password, and the sender. "Send test mail" sends one with the form as it is and
+names what failed: the address, the connection, TLS, the sign-in, or the server's refusal, with its answer.
+
+- **Encryption:** TLS (usually port 465) or STARTTLS (587). *None* is for a relay inside your network,
+  usually on port 25; it takes no user name and no password, since they would travel unencrypted.
+- **Your own CA:** if the server's certificate comes from one, paste the CA's certificate under *More
+  settings*.
+- **The password** is stored encrypted like a vault entry and never shown again. Leave the field empty to
+  keep it; it stays only as long as the user name does.
 
 ## Sign in with Entra ID, Google or GitHub
 

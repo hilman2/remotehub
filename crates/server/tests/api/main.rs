@@ -18,6 +18,7 @@ mod generated;
 mod groups;
 mod http;
 mod journal;
+mod mail;
 mod personal;
 mod recovery;
 mod refresh;

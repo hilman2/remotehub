@@ -12,6 +12,8 @@ export const AUDIT_ACTIONS = [
 	'setup.completed',
 	'directory.changed',
 	'directory.removed',
+	'mail.changed',
+	'mail.removed',
 	'folder.created',
 	'folder.updated',
 	'folder.deleted',

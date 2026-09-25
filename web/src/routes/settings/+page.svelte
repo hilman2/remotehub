@@ -1,8 +1,8 @@
 <script lang="ts">
 	/**
 	 * Settings of the instance, for administrators: the directory and who
-	 * administers (#144), who states a purpose (#90), who needs a second
-	 * factor (#107).
+	 * administers (#144), the mail server (#145), who states a purpose (#90),
+	 * who needs a second factor (#107).
 	 */
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import { addAdministrator, loadAdministrators, removeAdministrator } from '$lib/api/directory';
@@ -13,6 +13,7 @@
 	import { m } from '$lib/paraglide/messages';
 	import { session } from '$lib/session.svelte';
 	import DirectoryForm from '$lib/settings/DirectoryForm.svelte';
+	import MailForm from '$lib/settings/MailForm.svelte';
 </script>
 
 <h1 class="text-4xl font-semibold">{m.nav_settings()}</h1>
@@ -30,6 +31,14 @@
 		<h2 id="directory-title" class="text-xl font-semibold">{m.directory_title()}</h2>
 		<p class="mt-1 text-sm text-ink-2">{m.directory_hint()}</p>
 		<DirectoryForm removable />
+	</section>
+	<section
+		class="mt-8 max-w-2xl rounded-card border border-line bg-surface p-6"
+		aria-labelledby="mail-title"
+	>
+		<h2 id="mail-title" class="text-xl font-semibold">{m.mail_title()}</h2>
+		<p class="mt-1 text-sm text-ink-2">{m.mail_hint()}</p>
+		<MailForm removable recipient={session.user.kind === 'local' ? session.user.username : ''} />
 	</section>
 	<PrincipalRules
 		id="administrator-search"

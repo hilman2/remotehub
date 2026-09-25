@@ -22,6 +22,7 @@
 	} from '$lib/kratos/flow';
 	import Messages from '$lib/kratos/Messages.svelte';
 	import { m } from '$lib/paraglide/messages';
+	import { loadMethods } from '$lib/session.svelte';
 
 	let flow = $state<Flow | null>(null);
 	let email = $state('');
@@ -32,6 +33,11 @@
 
 	/** Kratos asks for the address first, then for the code sent to it. */
 	const asksCode = $derived(flow !== null && offers(flow, 'code'));
+	/** No mail server is set: asking for the address would lead nowhere. */
+	let noMail = $state(false);
+	$effect(() => {
+		loadMethods().then((result) => (noMail = result.ok && !result.data.mail));
+	});
 
 	$effect(() => {
 		const id = page.url.searchParams.get('flow') ?? page.state.recoveryFlow;
@@ -105,7 +111,14 @@
 			<span class="font-display text-lg font-bold">remotehub</span>
 		</div>
 		<h1 class="text-3xl font-semibold">{m.recovery_title()}</h1>
-		<p class="text-sm text-ink-2">{asksCode ? m.recovery_code_hint() : m.recovery_email_hint()}</p>
+		{#if !asksCode && noMail}
+			<!-- Without a mail server, only an administrator's code helps (#145). -->
+			<p class="text-sm text-ink-2" data-testid="recovery-no-mail">{m.recovery_no_mail()}</p>
+		{:else}
+			<p class="text-sm text-ink-2">
+				{asksCode ? m.recovery_code_hint() : m.recovery_email_hint()}
+			</p>
+		{/if}
 
 		{#if asksCode}
 			<div class="flex flex-col gap-2">
@@ -119,7 +132,7 @@
 					bind:value={code}
 				/>
 			</div>
-		{:else}
+		{:else if !noMail}
 			<div class="flex flex-col gap-2">
 				<label class="text-sm font-medium" for="recovery-email">{m.sign_in_email()}</label>
 				<input
@@ -141,13 +154,15 @@
 			</p>
 		{/if}
 
-		<button
-			type="submit"
-			disabled={busy || !flow}
-			class="h-13 w-full rounded-xl bg-accent font-display text-lg font-semibold text-accent-ink hover:brightness-110 disabled:opacity-60"
-		>
-			{m.recovery_continue()}
-		</button>
+		{#if asksCode || !noMail}
+			<button
+				type="submit"
+				disabled={busy || !flow}
+				class="h-13 w-full rounded-xl bg-accent font-display text-lg font-semibold text-accent-ink hover:brightness-110 disabled:opacity-60"
+			>
+				{m.recovery_continue()}
+			</button>
+		{/if}
 		<a
 			href={resolve('/sign-in')}
 			class="self-center text-sm text-ink-3 hover:text-ink hover:underline"

@@ -46,27 +46,33 @@ random_password() { # length
   LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${1:-40}"
 }
 # Kratos' database and secrets, as a second configuration file next to
-# kratos/kratos.yml; its cipher secret has exactly 32 characters.
+# kratos/kratos.yml; its cipher secret has exactly 32 characters. It hands
+# its mails to remotehub with the courier token (#145).
 kratos_config() {
   cat <<EOF
 # Ory Kratos: its database and secrets (docs/install.md#local-accounts).
-# Add the SMTP server for forgotten passwords here, e.g.
-#   courier:
-#     smtp:
-#       connection_uri: smtps://user:password@mail.example.com:465/
-#       from_address: remotehub@example.com
 # Sign-in providers such as Entra ID go here too (docs/install.md#sign-in-with-entra-id-google-or-github).
 dsn: postgres://remotehub:$(cat secrets/db_password)@db:5432/kratos?sslmode=disable
 secrets:
   cookie: ["$(random_password)"]
   cipher: ["$(random_password 32)"]
   default: ["$(random_password)"]
+courier:
+  http:
+    request_config:
+      auth:
+        type: api_key
+        config:
+          name: Authorization
+          value: Bearer $(cat secrets/courier_token)
+          in: header
 EOF
 }
 
 new_secret db_password 65532:999 440 random_password
 new_secret master_key 65532:65532 400 docker run --rm "$image" generate-key
 new_secret ssh_ca_key 65532:65532 400 docker run --rm "$image" generate-ssh-ca
+new_secret courier_token 65532:65532 400 random_password
 new_secret kratos.yml 10000:10000 400 kratos_config
 
 echo

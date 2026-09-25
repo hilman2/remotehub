@@ -18,6 +18,7 @@ use thiserror::Error;
 use crate::proxy::Network;
 
 const DEFAULT_LISTEN: &str = "0.0.0.0:8080";
+const DEFAULT_COURIER_LISTEN: &str = "0.0.0.0:8081";
 /// The guacd service of the ops package's compose file.
 const DEFAULT_GUACD: &str = "guacd:4822";
 /// The browser service of the ops package's compose file.
@@ -26,6 +27,11 @@ const DEFAULT_BROWSER: &str = "browser:4823";
 pub struct Config {
     /// Address the HTTP server binds to.
     pub listen: SocketAddr,
+    /// The token Kratos presents when it hands over a mail (#145); without
+    /// it, the courier's port stays closed.
+    pub courier_token: Option<SecretString>,
+    /// The courier's port, for Kratos on the internal network only.
+    pub courier_listen: SocketAddr,
     /// PostgreSQL connection URL; may contain the password, never logged.
     pub database_url: String,
     /// The database password, if not in the URL. As a file, it can be the
@@ -210,8 +216,17 @@ impl Config {
             .transpose()?
             .unwrap_or_default();
 
+        let courier_token = setting("REMOTEHUB_COURIER_TOKEN")?.map(SecretString::from);
+        let courier_listen = parse_or(
+            "REMOTEHUB_COURIER_LISTEN",
+            setting("REMOTEHUB_COURIER_LISTEN")?,
+            DEFAULT_COURIER_LISTEN.parse().unwrap(),
+        )?;
+
         Ok(Config {
             listen,
+            courier_token,
+            courier_listen,
             database_url,
             database_password,
             web_dir,
@@ -301,6 +316,11 @@ impl fmt::Debug for Config {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Config")
             .field("listen", &self.listen)
+            .field(
+                "courier_token",
+                &self.courier_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("courier_listen", &self.courier_listen)
             .field("database_url", &"<redacted>")
             .field("database_password", &"<redacted>")
             .field("web_dir", &self.web_dir)

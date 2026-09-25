@@ -37,7 +37,7 @@
 	/** Kratos' message for a wrong identifier or password. */
 	const KRATOS_INVALID_CREDENTIALS = 4000006;
 
-	let methods = $state<Methods>({ directory: true, local: false, providers: [] });
+	let methods = $state<Methods>({ directory: true, local: false, providers: [], mail: false });
 	let username = $state('');
 	let password = $state('');
 	let busy = $state(false);

@@ -26,6 +26,8 @@ E2E_IMAGE="mcr.microsoft.com/playwright:v1.63.0-noble"
 KRATOS_IMAGE="oryd/kratos:v26.2.0"
 # The lab's OpenID Connect provider (#109); keep equal to deploy/compose.dev.yml.
 DEX_IMAGE="ghcr.io/dexidp/dex:v2.43.1"
+# The lab's mail server (#145); keep equal to deploy/compose.dev.yml.
+MAILPIT_IMAGE="axllent/mailpit:v1.31.2"
 
 # What each part depends on (path prefixes). scripts/ci/ counts for all.
 RUST_INPUTS=(crates/ migrations/ Cargo.toml Cargo.lock rust-toolchain.toml deploy/dev/rust.Dockerfile)
@@ -147,6 +149,7 @@ cargo_run() { # tools script
     -e REMOTEHUB_TEST_DESKTOP_HOST=desktop-target \
     -e REMOTEHUB_TEST_BROWSER=browser:4823 \
     -e REMOTEHUB_TEST_WEB_HOST=web-target \
+    -e REMOTEHUB_TEST_SMTP_HOST=mail \
     "$1" bash -euo pipefail -c "
       rsync -rlc --delete \\
         --exclude=/web/node_modules/ --exclude=/web/.svelte-kit/ \\
@@ -199,7 +202,7 @@ part_rust() { # tools lab(0|1)
 keep_lab_logs() { # directory
   local kept="${CI_PROTOKOLLE}/$1" name
   mkdir -p "$kept"
-  for name in dc ssh-target desktop-target web-target guacd browser oidc kratos; do
+  for name in dc ssh-target desktop-target web-target guacd browser mail oidc kratos; do
     docker logs "${CI_ID}-${name}" >"${kept}/${name}.log" 2>&1 || true
   done
   echo "Logs of the lab: ${kept}"
@@ -233,6 +236,8 @@ start_lab() { # tools
   ci_dienst ssh-target --hostname ssh-target remotehub-ci-testlab-ssh
   ci_dienst desktop-target --hostname desktop-target remotehub-ci-testlab-desktop
   ci_dienst web-target --hostname web-target remotehub-ci-testlab-web
+  ci_dienst mail --hostname mail -e MP_SMTP_AUTH_ACCEPT_ANY=true \
+    -e MP_SMTP_AUTH_ALLOW_INSECURE=true "$MAILPIT_IMAGE"
   ci_dienst guacd --read-only --tmpfs /tmp --tmpfs /home/guacd:uid=1000,mode=0700 \
     --cap-drop ALL --security-opt no-new-privileges remotehub-ci-guacd
   # As deploy/ops/compose.yml runs it: Chromium's sandbox needs seccomp:unconfined.
@@ -242,6 +247,8 @@ start_lab() { # tools
   ci_warten ssh-target 30 bash -c '</dev/tcp/127.0.0.1/22'
   ci_warten desktop-target 30 bash -c '</dev/tcp/127.0.0.1/3389 && </dev/tcp/127.0.0.1/5900'
   ci_warten web-target 30 bash -c '</dev/tcp/127.0.0.1/443 && </dev/tcp/127.0.0.1/8080'
+  # Mailpit's image has no shell: the web target asks for it.
+  ci_warten web-target 30 bash -c '</dev/tcp/mail/1025 && </dev/tcp/mail/8025'
   ci_warten guacd 30 bash -c '</dev/tcp/127.0.0.1/4822'
   ci_warten browser 30 bash -c '</dev/tcp/127.0.0.1/4823'
 }
@@ -328,10 +335,18 @@ start_kratos() {
     -e "SELFSERVICE_METHODS_OIDC_CONFIG_PROVIDERS=[{\"id\":\"lab\",\"label\":\"Lab\",\"provider\":\"generic\",\"issuer_url\":\"http://oidc:5556/dex\",\"client_id\":\"remotehub\",\"client_secret\":\"lab-oidc-secret\",\"scope\":[\"openid\",\"email\",\"profile\"],\"mapper_url\":\"file://${CI_SRC}/deploy/ops/kratos/oidc.jsonnet\"}]"
     -e SQA_OPT_OUT=true
     -e LOG_FORMAT=text
+    # Mails go to the server under test, which sends them to the lab's
+    # Mailpit once its settings name it (#145).
+    -e COURIER_HTTP_REQUEST_CONFIG_URL=http://e2e-server:8081/courier
+    -e "COURIER_HTTP_REQUEST_CONFIG_BODY=file://${CI_SRC}/deploy/ops/kratos/courier.jsonnet"
+    -e COURIER_HTTP_REQUEST_CONFIG_AUTH_TYPE=api_key
+    -e COURIER_HTTP_REQUEST_CONFIG_AUTH_CONFIG_NAME=Authorization
+    -e 'COURIER_HTTP_REQUEST_CONFIG_AUTH_CONFIG_VALUE=Bearer ci-courier-token'
+    -e COURIER_HTTP_REQUEST_CONFIG_AUTH_CONFIG_IN=header
   )
   docker run --rm --label "ci-lokal=${CI_ID}" --network "$CI_NETZ" "${env[@]}" \
     "$KRATOS_IMAGE" -c "$config" migrate sql up -e --yes >/dev/null
-  ci_dienst kratos "${env[@]}" "$KRATOS_IMAGE" serve -c "$config" --dev
+  ci_dienst kratos "${env[@]}" "$KRATOS_IMAGE" serve -c "$config" --dev --watch-courier
   # The image has no shell: the database's container asks for it.
   ci_warten db-e2e 30 bash -c '</dev/tcp/kratos/4433'
 }
@@ -353,6 +368,7 @@ part_e2e() { # tools
     -e REMOTEHUB_WEB_DIR="${CI_SRC}/web/build" \
     -e REMOTEHUB_KRATOS_URL=http://kratos:4433 \
     -e REMOTEHUB_KRATOS_ADMIN_URL=http://kratos:4434 \
+    -e REMOTEHUB_COURIER_TOKEN=ci-courier-token \
     "$1" /ci-target/debug/remotehub
   ci_warten e2e-server 60 bash -c '</dev/tcp/127.0.0.1/8080'
   # The fresh database waits for the setup wizard (#143): the tests go
@@ -365,6 +381,7 @@ part_e2e() { # tools
     -v "${CI_VOLUME}:${CI_SRC}" -w "${CI_SRC}/web" \
     -e E2E_BASE_URL=http://localhost:8080 -e E2E_SSH_HOST=ssh-target -e CI=1 \
     -e E2E_KRATOS_ADMIN_URL=http://kratos:4434 -e "E2E_SETUP_LINK=${setup_link}" \
+    -e E2E_MAILPIT_URL=http://mail:8025 \
     "$E2E_IMAGE" node node_modules/@playwright/test/cli.js test || rc=$?
   if [ "$rc" != 0 ]; then
     # The run's volume is removed afterwards: keep traces, page snapshots and

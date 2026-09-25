@@ -49,6 +49,8 @@ Kratos and sets both variables; its own settings are in `kratos/kratos.yml` and 
 |---|---|---|
 | `REMOTEHUB_KRATOS_URL` | – | Kratos' public API, e.g. `http://kratos:4433`. Browsers reach it through remotehub under `/api/auth/`. |
 | `REMOTEHUB_KRATOS_ADMIN_URL` | required with a URL | Kratos' admin API, e.g. `http://kratos:4434`. |
+| `REMOTEHUB_COURIER_TOKEN` | – | The token Kratos presents when it hands over a mail, as `Authorization: Bearer …`. Without it, remotehub takes no mails from Kratos. The mail server itself is set under *Settings → Mail*. |
+| `REMOTEHUB_COURIER_LISTEN` | `0.0.0.0:8081` | Address and port for Kratos' mails; never published. |
 
 ## Connections
 
