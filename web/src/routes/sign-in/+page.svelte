@@ -284,8 +284,19 @@
 		await follow(await submitFlow(second, values));
 	}
 
+	// A recovery that waited for the second factor goes on to its settings
+	// flow once it is shown (#149), for the new password.
+	const resume = page.state.settingsFlow;
+	const resumeWithPassword = page.state.newPassword === true;
+
 	/** remotehub's own session, for the account Kratos signed in. */
 	async function establish() {
+		if (resume) {
+			await goto(resolve('/sign-in/setup'), {
+				state: { settingsFlow: resume, newPassword: resumeWithPassword }
+			});
+			return;
+		}
 		const result = await signInLocal();
 		if (result.ok) {
 			await goto(resolve('/'));

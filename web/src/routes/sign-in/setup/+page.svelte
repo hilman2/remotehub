@@ -11,8 +11,10 @@
 	import { errorMessage } from '$lib/api/errors';
 	import Logo from '$lib/components/Logo.svelte';
 	import {
+		flowId,
 		loadFlow,
 		messages,
+		node,
 		startFlow,
 		submitFlow,
 		type Flow,
@@ -48,13 +50,34 @@
 				if (result.flow.state === 'success' && needsPassword) {
 					needsPassword = false;
 					texts = [];
+					// After a recovery, an account whose authenticator app is set
+					// up already is done now (#149).
+					if (!node(result.flow, 'totp_qr')) await establish();
 				} else if (result.flow.state === 'success') {
 					await establish();
 				}
 				return;
-			case 'redirect':
+			case 'redirect': {
+				// After a recovery, an account with a second factor must show it
+				// before it may change anything (#149). The sign-in asks for it,
+				// then sends the browser back here to this settings flow.
+				const back = result.to.searchParams.get('return_to');
+				if (result.to.searchParams.get('aal') === 'aal2' && back) {
+					await goto(resolve('/sign-in'), {
+						state: {
+							secondFactor: true,
+							settingsFlow: flowId(new URL(back)) ?? undefined,
+							newPassword: needsPassword
+						}
+					});
+					return;
+				}
+				// No Kratos session.
+				await goto(resolve('/sign-in'));
+				return;
+			}
 			case 'expired':
-				// No Kratos session, or it is too old to change anything.
+				// The Kratos session is too old to change anything.
 				await goto(resolve('/sign-in'));
 				return;
 			default:
