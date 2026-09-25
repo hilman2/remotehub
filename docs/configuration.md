@@ -54,11 +54,22 @@ Without `REMOTEHUB_LDAP_URL`, only break-glass accounts can sign in.
 | `REMOTEHUB_LDAP_USER_FILTER` | – | An LDAP filter that users must match as well, e.g. `(memberOf=CN=remotehub users,OU=Groups,DC=example,DC=com)`. |
 | `REMOTEHUB_LDAP_TIMEOUT_SECONDS` | `10` | Time limit for each directory request. |
 
+## Local accounts (Ory Kratos)
+
+Without `REMOTEHUB_KRATOS_URL`, only directory and break-glass accounts can sign in. The ops package runs
+Kratos and sets both variables; its own settings are in `kratos/kratos.yml` and `secrets/kratos.yml`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `REMOTEHUB_KRATOS_URL` | – | Kratos' public API, e.g. `http://kratos:4433`. Browsers reach it through remotehub under `/api/auth/`. |
+| `REMOTEHUB_KRATOS_ADMIN_URL` | required with a URL | Kratos' admin API, e.g. `http://kratos:4434`. |
+
 ## Administration
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `REMOTEHUB_ADMIN_GROUPS` | – | Groups whose members administer remotehub, separated by commas or semicolons: SIDs, or group names that are looked up in the directory at startup. |
+| `REMOTEHUB_ADMIN_ACCOUNTS` | – | Local accounts that administer remotehub: their e-mail addresses, separated by commas or semicolons. |
 
 ## Connections
 
@@ -113,6 +124,7 @@ verify-audit`.
 | `break-glass reset NAME` | Replaces both; the account's open sessions end. |
 | `break-glass delete NAME` | Deletes the account. |
 | `break-glass list` | Lists the accounts. |
+| `account invite EMAIL [--name NAME]` | Creates a local account and prints the link and one-time code, valid for 48 hours, with which its owner sets a password and an authenticator app. |
 | `verify-audit` | Checks the audit log's hash chain; exits with 1 if it is broken. |
 | `connector` | Runs as a site connector (see above) instead of the server. |
 | `healthcheck` | Asks the running server for `/api/health`; exits with 1 unless it answers 200. |

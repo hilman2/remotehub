@@ -126,8 +126,9 @@
 					{/each}
 				</nav>
 				<div class="ml-auto flex items-center gap-2">
-					<span
-						class="hidden h-9 items-center gap-2.5 rounded-full border border-line bg-surface py-1 pr-3.5 pl-1 text-sm md:inline-flex"
+					<a
+						href={resolve('/account')}
+						class="hidden h-9 items-center gap-2.5 rounded-full border border-line bg-surface py-1 pr-3.5 pl-1 text-sm hover:bg-surface-2 md:inline-flex"
 						title={m.signed_in_as({ name: session.user.username })}
 					>
 						<span
@@ -137,7 +138,7 @@
 							{initials(session.user.display_name)}
 						</span>
 						{session.user.display_name}
-					</span>
+					</a>
 					<button
 						type="button"
 						class="rounded-lg border border-line bg-surface p-2 text-ink-2 hover:text-ink"

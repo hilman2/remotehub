@@ -50,16 +50,17 @@ After a few seconds all three services are up, and remotehub reports `healthy`. 
 | `db_password` | The database password, read by PostgreSQL and remotehub. | 65532:999, 0440 |
 | `ssh_ca_key` | The key of remotehub's SSH certificate authority. | 65532, 0400 |
 | `ldap_bind_password` | The directory service account's password. Empty until you fill it in. | 65532, 0400 |
+| `kratos.yml` | Database and secrets of Kratos, which keeps the local accounts; the SMTP server goes here too. | 10000, 0400 |
 
-remotehub runs as user 65532 and PostgreSQL as 999, so the files belong to them; `secrets/` itself is open
-to root only. Keep these owners and modes when you edit a file, e.g. with `sudo tee secrets/ldap_bind_password`.
+remotehub runs as user 65532, PostgreSQL as 999 and Kratos as 10000, so the files belong to them; `secrets/`
+itself is open to root only. Keep these owners and modes when you edit a file, e.g. with `sudo tee secrets/ldap_bind_password`.
 
 Without `master_key`, the credentials in the database cannot be read by anyone. Keep a copy of it apart from
 the database backups. The same goes for `ssh_ca_key`: a new one means every device must trust the new
 public key.
 
-An installation from 0.1.0 has no `ssh_ca_key` yet; running `sudo sh init.sh` again creates it and keeps the
-other files.
+An installation from 0.1.0 has no `ssh_ca_key` and no `kratos.yml` yet; running `sudo sh init.sh` again
+creates them and keeps the other files.
 
 ## Reverse proxy
 
@@ -120,8 +121,19 @@ A proxy elsewhere than on this host goes into `REMOTEHUB_TRUSTED_PROXIES` in `co
 
 ## First sign-in
 
-Members of `REMOTEHUB_ADMIN_GROUPS` sign in with their directory account and administer everything. For the
-day the directory is unreachable, create a break-glass account:
+Members of `REMOTEHUB_ADMIN_GROUPS` sign in with their directory account and administer everything.
+
+Without a directory, invite the first administrator as a local account. Put the address into
+`REMOTEHUB_ADMIN_ACCOUNTS` in `.env`, run `docker compose up -d`, then:
+
+```bash
+sudo docker compose exec remotehub remotehub account invite you@example.com --name "Your Name"
+```
+
+It prints a link and a one-time code, valid for 48 hours. Open the link, enter the code, choose a password
+and set up an authenticator app: remotehub asks for its code at every sign-in.
+
+For the day the directory or Kratos is unreachable, create a break-glass account:
 
 ```bash
 sudo docker compose exec remotehub remotehub break-glass create emergency
@@ -129,6 +141,18 @@ sudo docker compose exec remotehub remotehub break-glass create emergency
 
 Its password and TOTP secret are shown only this once. Keep them offline, e.g. in a safe. It signs in at
 `/sign-in/break-glass`.
+
+## Local accounts
+
+Local accounts live in Ory Kratos, which the ops package runs next to remotehub. People reach it only
+through remotehub. Its settings are in `kratos/kratos.yml`; database and secrets in `secrets/kratos.yml`.
+
+- **Forgotten passwords:** "Forgot the password?" on the sign-in page mails a code. For that, add your SMTP
+  server to `secrets/kratos.yml` as its comment shows, then `docker compose up -d kratos`. Without it,
+  invite the person again with `account invite`.
+- **Second factor:** every local account sets up an authenticator app before its first session, and can
+  create recovery codes under *My account*.
+- **Backups:** Kratos' database sits next to remotehub's; see [Back up and restore](#back-up-and-restore).
 
 ## Sign in to SSH devices without stored passwords
 
@@ -207,18 +231,22 @@ with remotehub: [ADR 0008](adr/0008-site-connectors.md).
 
 ## Back up and restore
 
-Back up the database regularly, and `secrets/master_key` once, apart from it:
+Back up both databases regularly: `remotehub`, and `kratos` with the local accounts, their password hashes
+and the keys of their authenticator apps. Back up `secrets/master_key` and `secrets/kratos.yml` once, apart
+from them:
 
 ```bash
 sudo docker compose exec -T db pg_dump -U remotehub -Fc remotehub > remotehub-$(date +%F).dump
+sudo docker compose exec -T db pg_dump -U remotehub -Fc kratos > kratos-$(date +%F).dump
 ```
 
 To restore a backup into the running installation:
 
 ```bash
-sudo docker compose stop remotehub
+sudo docker compose stop remotehub kratos
 sudo docker compose exec -T db pg_restore -U remotehub -d remotehub --clean --if-exists < remotehub-2026-01-31.dump
-sudo docker compose start remotehub
+sudo docker compose exec -T db pg_restore -U remotehub -d kratos --clean --if-exists < kratos-2026-01-31.dump
+sudo docker compose start kratos remotehub
 ```
 
 The backup needs the `master_key` of the installation it came from.

@@ -92,13 +92,13 @@ pub struct Identity {
 pub struct Invitation {
     #[serde(default)]
     pub identity_id: Uuid,
-    /// remotehub's page where the code is entered (`/account/recovery`).
+    /// remotehub's page where the code is entered (`/sign-in/recovery`).
     pub recovery_link: String,
     pub recovery_code: String,
     pub expires_at: String,
 }
 
-/// What the identity schema (`deploy/kratos/identity.schema.json`) keeps.
+/// What the identity schema (`deploy/ops/kratos/identity.schema.json`) keeps.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Traits {
     pub email: String,
@@ -173,7 +173,7 @@ impl Kratos {
             StatusCode::OK => json(answer).await.map(Whoami::Session),
             StatusCode::UNAUTHORIZED => Ok(Whoami::None),
             // `session_aal2_required`: `session.whoami.required_aal` is
-            // `highest_available` (deploy/kratos/kratos.yml).
+            // `highest_available` (deploy/ops/kratos/kratos.yml).
             StatusCode::FORBIDDEN => Ok(Whoami::SecondFactorPending),
             status => Err(unexpected(status, answer).await),
         }

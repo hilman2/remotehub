@@ -90,7 +90,7 @@ services:
       dc:
         condition: service_healthy
 
-  # Ory Kratos for local accounts (#103, deploy/kratos): its own database on
+  # Ory Kratos for local accounts (#103, deploy/ops/kratos): its own database on
   # the same server. The browser reaches it only through the server
   # (/api/auth/); --dev lets its cookies work over http://localhost.
   kratos-db:
@@ -112,7 +112,7 @@ services:
       SELFSERVICE_FLOWS_ERROR_UI_URL: http://localhost:5180/sign-in
       SELFSERVICE_FLOWS_LOGIN_UI_URL: http://localhost:5180/sign-in
       SELFSERVICE_FLOWS_SETTINGS_UI_URL: http://localhost:5180/account
-      SELFSERVICE_FLOWS_RECOVERY_UI_URL: http://localhost:5180/account/recovery
+      SELFSERVICE_FLOWS_RECOVERY_UI_URL: http://localhost:5180/sign-in/recovery
       SELFSERVICE_FLOWS_LOGOUT_AFTER_DEFAULT_BROWSER_RETURN_URL: http://localhost:5180/sign-in
       # Development secrets, public on purpose.
       SECRETS_COOKIE: '["dev-cookie-secret-not-for-production"]'
@@ -123,7 +123,7 @@ services:
       # No usage reports to Ory.
       SQA_OPT_OUT: "true"
     volumes:
-      - ./kratos:/etc/config/kratos:ro
+      - ./ops/kratos:/etc/config/kratos:ro
     command: -c /etc/config/kratos/kratos.yml migrate sql up -e --yes
     depends_on:
       kratos-db:
@@ -133,7 +133,7 @@ services:
     image: oryd/kratos:v26.2.0
     environment: *kratos-env
     volumes:
-      - ./kratos:/etc/config/kratos:ro
+      - ./ops/kratos:/etc/config/kratos:ro
     command: serve -c /etc/config/kratos/kratos.yml --dev
     depends_on:
       kratos-migrate:

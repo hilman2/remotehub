@@ -1,5 +1,6 @@
 /** The signed-in user, shared by all pages. */
 import { api, type ApiResult } from './api/client';
+import { endSession } from './kratos/flow';
 
 export interface User {
 	username: string;
@@ -28,8 +29,32 @@ export async function signIn(username: string, password: string): Promise<ApiRes
 }
 
 export async function signOut(): Promise<void> {
+	const local = session.user?.kind === 'local';
 	await api('DELETE', '/api/session');
+	// The server ends the Kratos session too; this clears its cookie.
+	if (local) await endSession();
 	session.user = null;
+}
+
+/** Which ways to sign in this instance offers. */
+export interface Methods {
+	/** Active Directory. */
+	directory: boolean;
+	/** Local accounts in Kratos (#103). */
+	local: boolean;
+}
+
+export const loadMethods = () => api<Methods>('GET', '/api/session/methods');
+
+/**
+ * Turns this browser's Kratos session into a remotehub session. Fails with
+ * `second_factor_required` or `second_factor_setup_required` until the
+ * account's second factor was used.
+ */
+export async function signInLocal(): Promise<ApiResult<User>> {
+	const result = await api<User>('POST', '/api/session/local');
+	if (result.ok) session.user = result.data;
+	return result;
 }
 
 export async function signInBreakGlass(

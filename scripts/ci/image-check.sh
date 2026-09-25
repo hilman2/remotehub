@@ -54,6 +54,9 @@ done
 [ "$(stat -c %u:%g:%a secrets/db_password)" = 65532:999:440 ] || fail "secrets/db_password is not 65532:999, 0440"
 [ "$(stat -c %u:%g:%a secrets/ssh_ca_key)" = 65532:65532:400 ] || fail "secrets/ssh_ca_key is not 65532:65532, 0400"
 [ -s secrets/master_key ] || fail "secrets/master_key is empty"
+[ "$(stat -c %u:%g:%a secrets/kratos.yml)" = 10000:10000:400 ] || fail "secrets/kratos.yml is not 10000:10000, 0400"
+grep -q "^dsn: postgres://remotehub:$(cat secrets/db_password)@db:5432/kratos" secrets/kratos.yml ||
+  fail "secrets/kratos.yml does not name Kratos' database"
 sh init.sh | grep -q "kept    secrets/master_key" || fail "a second init.sh did not keep the secrets"
 
 echo "── docker compose up"
@@ -85,6 +88,18 @@ curl -fsS "http://${remotehub}:8080/api/ssh-ca.pub" | grep -q '^ssh-ed25519 ' ||
   fail "the SSH CA's public key is not served"
 curl -fsS "http://${remotehub}:8080/devices/any" | grep -q '<html' ||
   fail "routes of the SPA do not fall back to index.html"
+
+echo "── Local accounts through Kratos"
+curl -fsS "http://${remotehub}:8080/api/session/methods" | grep -q '"local":true' ||
+  fail "local accounts are off"
+# A sign-in flow of Kratos, through remotehub, naming remotehub's address.
+curl -fsS -H 'Accept: application/json' "http://${remotehub}:8080/api/auth/self-service/login/browser" |
+  grep -q '"action":"http://localhost:8080/api/auth/self-service/login?flow=' ||
+  fail "Kratos does not start a sign-in through remotehub"
+kratos_networks="$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}' \
+  "$(docker compose -p "$project" ps -q kratos)")"
+[ "$kratos_networks" = "${project}_database ${project}_default " ] ||
+  fail "Kratos is on the networks: ${kratos_networks}"
 
 echo "── Hardening"
 container="$(docker compose -p "$project" ps -q remotehub)"
@@ -124,6 +139,8 @@ docker compose -p "$project" exec -T remotehub remotehub break-glass create chec
   fail "break-glass create"
 docker compose -p "$project" exec -T remotehub remotehub verify-audit | tee /dev/stderr |
   grep -q "audit log intact" || fail "verify-audit"
+docker compose -p "$project" exec -T remotehub remotehub account invite check@example.com |
+  grep -q "/sign-in/recovery?flow=" || fail "account invite"
 
 echo "── Restart keeps the data"
 docker compose -p "$project" restart remotehub

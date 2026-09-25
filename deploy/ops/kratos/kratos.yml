@@ -82,7 +82,7 @@ selfservice:
     recovery:
       enabled: true
       use: code
-      ui_url: https://remotehub.example.com/account/recovery
+      ui_url: https://remotehub.example.com/sign-in/recovery
       notify_unknown_recipients: false
     verification:
       enabled: false
