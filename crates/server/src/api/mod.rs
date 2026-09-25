@@ -6,6 +6,7 @@ mod catalog;
 mod connect;
 mod connectors;
 mod display;
+mod fields;
 mod groups;
 pub mod health;
 mod journal;

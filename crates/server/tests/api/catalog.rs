@@ -982,6 +982,113 @@ async fn stored_secrets_are_shown_only_with_reveal_and_audited(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn credentials_keep_keepass_fields_and_seal_the_protected_ones(pool: PgPool) {
+    let f = fixture(pool).await;
+    let body = |fields: Value, icon: i64| {
+        json!({
+            "folder_id": f.linux, "name": "router", "username": "admin",
+            "url": "https://router.lan", "notes": "Rack 2\nPort 4", "icon": icon, "fields": fields,
+        })
+    };
+    let mut first = body(
+        json!([
+            { "name": "PIN", "protected": true, "value": "1234" },
+            { "name": "Serial", "value": "SN-42" },
+        ]),
+        3,
+    );
+    first["password"] = json!("Router-Pass!");
+    let id = create(&f.app, &f.alice, "/api/credentials", first).await;
+    let row = |tree: Value| {
+        tree["credentials"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == id.as_str())
+            .cloned()
+            .unwrap()
+    };
+    let shown = row(tree(&f.app, &f.alice).await);
+    assert_eq!(
+        (
+            &shown["url"],
+            &shown["notes"],
+            &shown["icon"],
+            &shown["fields"]
+        ),
+        (
+            &json!("https://router.lan"),
+            &json!("Rack 2\nPort 4"),
+            &json!(3),
+            &json!([{ "name": "PIN", "protected": true }, { "name": "Serial", "value": "SN-42" }])
+        )
+    );
+    assert!(!tree(&f.app, &f.alice).await.to_string().contains("1234"));
+    let reveal = format!("/api/credentials/{id}/reveal");
+    let revealed = |app: Router, token: String| {
+        let reveal = reveal.clone();
+        async move {
+            call(
+                &app,
+                &token,
+                "POST",
+                &reveal,
+                Some(json!({ "purpose": "show" })),
+            )
+            .await
+            .json()
+        }
+    };
+    let seen = revealed(f.app.clone(), f.alice.clone()).await;
+    assert_eq!(seen["fields"], json!([{ "name": "PIN", "value": "1234" }]));
+
+    let uri = format!("/api/credentials/{id}");
+    let change = |fields: Value| call(&f.app, &f.alice, "PUT", &uri, Some(body(fields, 3)));
+    // Plain changes keep the version; the protected value stays.
+    let kept = change(
+        json!([{ "name": "PIN", "protected": true }, { "name": "Serial", "value": "SN-43" }]),
+    )
+    .await;
+    assert_eq!(kept.status, StatusCode::NO_CONTENT, "{}", kept.json());
+    assert_eq!(row(tree(&f.app, &f.alice).await)["version"], 1);
+    // A new protected value makes a new version; the password and the
+    // other protected values come along.
+    change(json!([
+        { "name": "PIN", "protected": true },
+        { "name": "PUK", "protected": true, "value": "5678" },
+    ]))
+    .await;
+    change(json!([
+        { "name": "PIN", "protected": true, "value": "9876" },
+        { "name": "PUK", "protected": true },
+    ]))
+    .await;
+    assert_eq!(row(tree(&f.app, &f.alice).await)["version"], 3);
+    let seen = revealed(f.app.clone(), f.alice.clone()).await;
+    assert_eq!(
+        (&seen["password"], &seen["fields"]),
+        (
+            &json!("Router-Pass!"),
+            &json!([{ "name": "PIN", "value": "9876" }, { "name": "PUK", "value": "5678" }])
+        )
+    );
+    // A protected field that goes, goes from the new version.
+    change(json!([])).await;
+    let seen = revealed(f.app.clone(), f.alice.clone()).await;
+    assert_eq!(row(tree(&f.app, &f.alice).await)["version"], 4);
+    assert_eq!(
+        (&seen["password"], seen.get("fields")),
+        (&json!("Router-Pass!"), None)
+    );
+
+    // Nothing to keep that was not there, and only KeePass' icons.
+    let invented = change(json!([{ "name": "TAN", "protected": true }])).await;
+    assert_eq!(invented.json()["params"]["field"], "fields");
+    let odd = call(&f.app, &f.alice, "PUT", &uri, Some(body(json!([]), 69))).await;
+    assert_eq!(odd.json()["params"]["field"], "icon");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn a_device_keeps_credentials_of_its_own(pool: PgPool) {
     let f = fixture(pool.clone()).await;
     let device = |host: &str, password: Option<&str>| {
