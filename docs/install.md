@@ -37,9 +37,23 @@ If nothing listens on ports 80 and 443, the installer turns on Caddy of the ops 
 (`COMPOSE_PROFILES=caddy` in `.env`) and opens both ports in `ufw` or `firewalld` if one of them is active.
 Caddy gets a certificate from Let's Encrypt if the internet reaches the host under its name. Otherwise, which
 is the usual case for an internal tool, it signs one with a CA of its own, named after the host. Browsers
-warn about that CA until the clients trust it.
+warn about that CA until the clients trust it. A certificate from that CA lasts 12 hours, and each renewal
+asks Let's Encrypt first: a host the internet reaches later gets a Let's Encrypt certificate within hours,
+without a change.
+
+*Settings → Certificate* shows which certificate Caddy serves. With Caddy's own CA, it offers the CA's root
+certificate for the clients, as `.crt` and as `.cer` for Windows, with its fingerprint and how to install it
+on Windows through group policy, on macOS and on Linux. Anyone can fetch it from `https://HOST/ca.crt`.
+Compare the fingerprint on the client with the one on the page.
+
+A certificate of your own, from your company's CA or a public one, is uploaded on the same page as a PFX file
+or as PEM files. remotehub refuses a certificate that does not cover the host, whose key does not belong to
+it, or that is not valid for at least another day. Caddy serves it at once, and a banner warns 30 days
+before it runs out. *Back to automatic* returns to Let's Encrypt or Caddy's own CA.
 
 Caddy keeps its certificates and its CA's key in `caddy/data` (see [Back up and restore](#back-up-and-restore)).
+A certificate of your own lives in the database, its key sealed like a password; remotehub writes it to
+`caddy/remotehub` for Caddy every time it starts.
 
 ## Next to a reverse proxy of your own
 

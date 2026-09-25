@@ -45,6 +45,9 @@ export const ERROR_CODES = [
 	'break_glass_exists',
 	'last_administrator',
 	'directory_check_failed',
+	'certificate_refused',
+	'caddy_refused',
+	'caddy_unavailable',
 	'directory_unavailable',
 	'database_unavailable',
 	'internal'

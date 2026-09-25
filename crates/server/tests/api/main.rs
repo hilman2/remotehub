@@ -11,6 +11,7 @@ mod accounts;
 mod audit;
 mod break_glass;
 mod catalog;
+mod certificate;
 mod connectors;
 mod directory;
 mod display;

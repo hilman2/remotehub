@@ -37,6 +37,7 @@ pub fn settings() -> Settings {
         trusted_proxies: Vec::new(),
         ssh_ca: None,
         kratos: None,
+        caddy: None,
     }
 }
 

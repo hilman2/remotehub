@@ -81,6 +81,10 @@ host own "" "
   echo | openssl s_client -connect 127.0.0.1:443 -servername remotehub.test 2>/dev/null |
     openssl x509 -noout -issuer | grep -q 'remotehub remotehub.test Intermediate' ||
     { echo 'FAILED: the certificate is not from the CA named after the host'; exit 1; }
+  # Caddy runs without capabilities and reads what remotehub writes through
+  # the group root (#146).
+  [ \"\$(stat -c '%a %u:%g' /opt/remotehub/caddy/remotehub/tls.caddy)\" = '640 65532:0' ] ||
+    { echo 'FAILED: the snippet for Caddy is not 640 65532:0'; ls -ln /opt/remotehub/caddy/remotehub; exit 1; }
   before=\$(sha256sum /opt/remotehub/.env /opt/remotehub/secrets/* | sha256sum)
   sh /install.sh | tee /tmp/second.log
   grep -q 'installed in /opt/remotehub already' /tmp/second.log || { echo 'FAILED: a second run did not keep the installation'; exit 1; }

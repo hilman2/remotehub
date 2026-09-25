@@ -174,7 +174,7 @@ async fn serve() -> anyhow::Result<()> {
         }
     };
 
-    let settings = Settings {
+    let mut settings = Settings {
         public_origin: config.public_origin,
         session: config.session,
         own_account_connections: config.own_account_connections,
@@ -187,7 +187,33 @@ async fn serve() -> anyhow::Result<()> {
             .kratos
             .as_ref()
             .map(remotehub_server::kratos::Kratos::new),
+        caddy: None,
     };
+    settings.caddy = config
+        .caddy
+        .clone()
+        .map(|caddy| Arc::new(remotehub_server::caddy::Caddy::new(caddy, settings.host())));
+    // Caddy starts once remotehub is healthy and imports the snippet written
+    // here (#146): with the certificate of your own from the database, which
+    // also brings it back after a restore onto a new host, else automatic.
+    if let Some(caddy) = &settings.caddy {
+        use remotehub_server::caddy::Tls;
+        let tls = match remotehub_server::certificate::stored(&pool, &vault).await {
+            Ok(Some(own)) => {
+                let (chain, key) = remotehub_server::certificate::to_pem(&own);
+                Some(Tls::Own { chain, key })
+            }
+            Ok(None) => Some(Tls::Automatic),
+            // The files stay as they are.
+            Err(error) => {
+                tracing::error!(%error, "cannot read the stored certificate");
+                None
+            }
+        };
+        if let Some(Err(error)) = tls.map(|tls| caddy.prepare(&tls)) {
+            tracing::error!(%error, "cannot write the certificate settings for Caddy");
+        }
+    }
     let state = AppState::new(pool.clone(), directory, settings, vault);
     tokio::spawn(purge_sessions(pool, config.session.idle));
     tokio::spawn(remotehub_server::refresh::run(state.clone()));

@@ -28,11 +28,14 @@ KRATOS_IMAGE="oryd/kratos:v26.2.0"
 DEX_IMAGE="ghcr.io/dexidp/dex:v2.43.1"
 # The lab's mail server (#145); keep equal to deploy/compose.dev.yml.
 MAILPIT_IMAGE="axllent/mailpit:v1.31.2"
+# Caddy of the ops package in the lab (#146); the job `base` checks it
+# against deploy/compose.dev.yml and deploy/ops/compose.yml.
+CADDY_IMAGE="caddy:2.11.4"
 
 # What each part depends on (path prefixes). scripts/ci/ counts for all.
 RUST_INPUTS=(crates/ migrations/ Cargo.toml Cargo.lock rust-toolchain.toml deploy/dev/rust.Dockerfile)
 WEB_INPUTS=(web/ deploy/dev/web.Dockerfile)
-LAB_INPUTS=("${RUST_INPUTS[@]}" deploy/testlab/ deploy/guacd/ deploy/browser/)
+LAB_INPUTS=("${RUST_INPUTS[@]}" deploy/testlab/ deploy/guacd/ deploy/browser/ deploy/ops/caddy/)
 # The end-to-end tests check the UI most; CI_E2E=1 forces them.
 E2E_INPUTS=(web/src/ web/tests/e2e/ web/playwright.config.ts deploy/ops/kratos/ deploy/testlab/oidc/)
 # The production images build a release binary; they are tried when they or
@@ -108,6 +111,7 @@ job_base() {
     same node "FROM node:[^ ]*" deploy/dev/web.Dockerfile deploy/Dockerfile scripts/ci/tools.Dockerfile
     same pnpm "pnpm@[0-9.]*" deploy/dev/web.Dockerfile deploy/Dockerfile scripts/ci/tools.Dockerfile
     same postgres "postgres:[0-9][^ \"]*" deploy/compose.dev.yml deploy/ops/compose.yml scripts/ci/lokal.sh
+    same caddy "caddy:[0-9][0-9]*[.][0-9.]*" deploy/compose.dev.yml deploy/ops/compose.yml scripts/ci/lokal.sh
   '
 }
 
@@ -138,8 +142,10 @@ job_image() {
 # files that really changed get written (and a new mtime), and cargo rebuilds
 # just the crates they belong to. The registry, target/ and /src live in
 # volumes without a label — gemeinsam.sh removes labelled volumes after a run.
-cargo_run() { # tools script
-  ci_docker_run \
+cargo_run() { # tools script [docker-run-options...]
+  local tools="$1" script="$2"
+  shift 2
+  ci_docker_run "$@" \
     -v remotehub-ci-cargo-registry:/usr/local/cargo/registry \
     -v remotehub-ci-cargo-git:/usr/local/cargo/git \
     -v remotehub-ci-target:/ci-target \
@@ -153,13 +159,13 @@ cargo_run() { # tools script
     -e REMOTEHUB_TEST_BROWSER=browser:4823 \
     -e REMOTEHUB_TEST_WEB_HOST=web-target \
     -e REMOTEHUB_TEST_SMTP_HOST=mail \
-    "$1" bash -euo pipefail -c "
+    "$tools" bash -euo pipefail -c "
       rsync -rlc --delete \\
         --exclude=/web/node_modules/ --exclude=/web/.svelte-kit/ \\
         --exclude=/web/build/ --exclude=/web/src/lib/paraglide/ \\
         ./ /src/
       cd /src
-      $2"
+      $script"
 }
 
 # Rust: formatting, Clippy without warnings and the tests of the whole
@@ -190,10 +196,12 @@ part_rust() { # tools lab(0|1)
   if [ -n "$lab_pid" ]; then
     wait "$lab_pid"
     local rc=0
+    # Caddy's admin socket and the files it imports, as the server has them.
     cargo_run "$tools" '
       echo "── cargo nextest (test lab)"
       cargo nextest run --workspace --locked --no-tests=warn --run-ignored only
-    ' || rc=$?
+    ' -v "${CI_ID}-caddy-admin:/run/caddy" -v "${CI_ID}-caddy-sites:/run/caddy-sites" \
+      -e REMOTEHUB_TEST_CADDY_SOCKET=/run/caddy/admin.sock || rc=$?
     [ "$rc" = 0 ] || keep_lab_logs lab
     return "$rc"
   fi
@@ -205,7 +213,7 @@ part_rust() { # tools lab(0|1)
 keep_lab_logs() { # directory
   local kept="${CI_PROTOKOLLE}/$1" name
   mkdir -p "$kept"
-  for name in dc ssh-target desktop-target web-target guacd browser mail oidc kratos; do
+  for name in dc ssh-target desktop-target web-target guacd browser mail caddy oidc kratos; do
     docker logs "${CI_ID}-${name}" >"${kept}/${name}.log" 2>&1 || true
   done
   echo "Logs of the lab: ${kept}"
@@ -246,6 +254,16 @@ start_lab() { # tools
   # As deploy/ops/compose.yml runs it: Chromium's sandbox needs seccomp:unconfined.
   ci_dienst browser --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
     --security-opt seccomp=unconfined remotehub-ci-browser
+  # Caddy of the ops package with its Caddyfile (#146), as in
+  # deploy/compose.dev.yml: it starts once the test has written the snippet
+  # it imports. The volumes carry the run's label, so they go with it. A
+  # test restarts it through its admin API.
+  docker volume create --label "ci-lokal=${CI_ID}" "${CI_ID}-caddy-admin" >/dev/null
+  docker volume create --label "ci-lokal=${CI_ID}" "${CI_ID}-caddy-sites" >/dev/null
+  ci_dienst caddy --restart unless-stopped -e REMOTEHUB_HOST=remotehub.test -v "${CI_VOLUME}:${CI_SRC}:ro" \
+    -v "${CI_ID}-caddy-admin:/run/caddy" -v "${CI_ID}-caddy-sites:/etc/caddy/remotehub:ro" \
+    "$CADDY_IMAGE" sh -c "until [ -f /etc/caddy/remotehub/tls.caddy ]; do sleep 1; done
+      exec caddy run --config ${CI_SRC}/deploy/ops/caddy/Caddyfile --adapter caddyfile"
   ci_warten dc 60 bash -c '</dev/tcp/127.0.0.1/636'
   ci_warten ssh-target 30 bash -c '</dev/tcp/127.0.0.1/22'
   ci_warten desktop-target 30 bash -c '</dev/tcp/127.0.0.1/3389 && </dev/tcp/127.0.0.1/5900'

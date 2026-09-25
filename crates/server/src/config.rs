@@ -15,6 +15,7 @@ use remotehub_gateway::guacamole::KEYBOARD_LAYOUTS;
 use secrecy::SecretString;
 use thiserror::Error;
 
+use crate::caddy::CaddyConfig;
 use crate::proxy::Network;
 
 const DEFAULT_LISTEN: &str = "0.0.0.0:8080";
@@ -32,6 +33,9 @@ pub struct Config {
     pub courier_token: Option<SecretString>,
     /// The courier's port, for Kratos on the internal network only.
     pub courier_listen: SocketAddr,
+    /// Caddy of the ops package, whose certificate the settings page sets
+    /// (#146); none behind a reverse proxy of your own.
+    pub caddy: Option<CaddyConfig>,
     /// PostgreSQL connection URL; may contain the password, never logged.
     pub database_url: String,
     /// The database password, if not in the URL. As a file, it can be the
@@ -223,10 +227,20 @@ impl Config {
             DEFAULT_COURIER_LISTEN.parse().unwrap(),
         )?;
 
+        // Caddy of the ops package (#146): its admin socket turns it on; the
+        // other files are where deploy/ops/compose.yml mounts them.
+        let caddy = setting("REMOTEHUB_CADDY_SOCKET")?.map(|socket| CaddyConfig {
+            socket: PathBuf::from(socket),
+            sites: PathBuf::from("/run/caddy-sites"),
+            caddyfile: PathBuf::from("/run/caddy-config/Caddyfile"),
+            address: "caddy:443".to_owned(),
+        });
+
         Ok(Config {
             listen,
             courier_token,
             courier_listen,
+            caddy,
             database_url,
             database_password,
             web_dir,
@@ -321,6 +335,7 @@ impl fmt::Debug for Config {
                 &self.courier_token.as_ref().map(|_| "<redacted>"),
             )
             .field("courier_listen", &self.courier_listen)
+            .field("caddy", &self.caddy)
             .field("database_url", &"<redacted>")
             .field("database_password", &"<redacted>")
             .field("web_dir", &self.web_dir)

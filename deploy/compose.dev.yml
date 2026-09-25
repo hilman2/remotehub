@@ -22,6 +22,10 @@ x-rust: &rust
     - target:/target
     - cargo-registry:/usr/local/cargo/registry
     - cargo-git:/usr/local/cargo/git
+    # Caddy of the lab, as deploy/ops/compose.yml mounts it (#146).
+    - caddy-admin:/run/caddy
+    - caddy-sites:/run/caddy-sites
+    - ./ops/caddy/Caddyfile:/run/caddy-config/Caddyfile:ro
   environment: &rust-env
     TZ: Europe/Berlin
     RUST_LOG: info,remotehub_server=debug,tower_http=debug
@@ -36,6 +40,7 @@ x-rust: &rust
     REMOTEHUB_TEST_BROWSER: browser:4823
     REMOTEHUB_TEST_WEB_HOST: web-target
     REMOTEHUB_TEST_SMTP_HOST: mail
+    REMOTEHUB_TEST_CADDY_SOCKET: /run/caddy/admin.sock
 
 services:
   db:
@@ -78,6 +83,8 @@ services:
       REMOTEHUB_KRATOS_ADMIN_URL: http://kratos:4434
       # Kratos hands over its mails on port 8081 (#145).
       REMOTEHUB_COURIER_TOKEN: dev-courier-token
+      # Settings -> Certificate, with the lab's Caddy (#146).
+      REMOTEHUB_CADDY_SOCKET: /run/caddy/admin.sock
     command: >
       watchexec --poll 1000ms --restart --watch crates --watch migrations --watch Cargo.toml
       --exts rs,toml,sql,ftl -- cargo run --package remotehub-server
@@ -87,6 +94,8 @@ services:
       dc:
         condition: service_healthy
       mail:
+        condition: service_started
+      caddy:
         condition: service_started
 
   # Ory Kratos for local accounts (#103, deploy/ops/kratos): its own database on
@@ -172,6 +181,8 @@ services:
         condition: service_started
       mail:
         condition: service_started
+      caddy:
+        condition: service_started
 
   # End-to-end tests in a real browser against this stack (web/tests/e2e):
   #   docker compose -f deploy/compose.dev.yml --profile e2e run --rm e2e
@@ -235,6 +246,24 @@ services:
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: "true"
       MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+
+  # Caddy of the ops package with its Caddyfile (#146): HTTPS on caddy:443
+  # for remotehub.test, from its own CA or a certificate of your own. It
+  # starts once the server or a test has written the snippet it imports.
+  caddy:
+    image: caddy:2.11.4
+    hostname: caddy
+    # As in the ops package; a test restarts it through its admin API.
+    restart: unless-stopped
+    environment:
+      REMOTEHUB_HOST: remotehub.test
+    command: >
+      sh -c 'until [ -f /etc/caddy/remotehub/tls.caddy ]; do sleep 1; done;
+      exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile'
+    volumes:
+      - ./ops/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-sites:/etc/caddy/remotehub:ro
+      - caddy-admin:/run/caddy
 
   # An OpenID Connect provider for sign-in through Kratos (#109).
   oidc:
@@ -301,3 +330,5 @@ volumes:
   cargo-registry:
   cargo-git:
   web-node-modules:
+  caddy-admin:
+  caddy-sites:

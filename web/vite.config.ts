@@ -57,7 +57,11 @@ export default defineConfig({
 		port: 5180,
 		strictPort: true,
 		watch: polling ? { usePolling: true, interval: 500 } : undefined,
-		proxy: { '/api': { target: server, changeOrigin: true, ws: true } }
+		proxy: {
+			'/api': { target: server, changeOrigin: true, ws: true },
+			// The root certificate of Caddy's own CA (#146).
+			'^/ca\\.(crt|cer)$': { target: server, changeOrigin: true }
+		}
 	},
 	test: {
 		expect: { requireAssertions: true },
