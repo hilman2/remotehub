@@ -115,11 +115,13 @@ pub fn link(public_origin: &str, code: &str) -> String {
 }
 
 /// Requests allowed while no administrator exists: the wizard, the health
-/// check, and signing in and out, with Kratos' flows for it. A session
-/// started now reaches nothing else either.
+/// check, the SSH CA's public key, which devices fetch without signing in,
+/// and signing in and out, with Kratos' flows for it. A session started now
+/// reaches nothing else either.
 fn open_while_pending(path: &str) -> bool {
     [
         ("/health", false),
+        ("/ssh-ca.pub", false),
         ("/setup", true),
         ("/session", true),
         ("/auth", true),
@@ -160,6 +162,7 @@ mod tests {
     fn only_the_wizard_and_signing_in_are_open_while_pending() {
         for path in [
             "/health",
+            "/ssh-ca.pub",
             "/setup",
             "/setup/administrator",
             "/session",
