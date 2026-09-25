@@ -39,7 +39,19 @@ Caddy gets a certificate from Let's Encrypt if the internet reaches the host und
 is the usual case for an internal tool, it signs one with a CA of its own, named after the host. Browsers
 warn about that CA until the clients trust it.
 
+*Settings → Certificate* shows which certificate Caddy serves. With Caddy's own CA, it offers the CA's root
+certificate for the clients, as `.crt` and as `.cer` for Windows, with its fingerprint and how to install it
+on Windows through group policy, on macOS and on Linux. Anyone can fetch it from `https://HOST/ca.crt`.
+Compare the fingerprint on the client with the one on the page.
+
+A certificate of your own, from your company's CA or a public one, is uploaded on the same page as a PFX file
+or as PEM files. remotehub refuses a certificate that does not cover the host, whose key does not belong to
+it, or that is not valid for at least another day. Caddy serves it at once, and a banner warns 30 days
+before it runs out. *Back to automatic* returns to Let's Encrypt or Caddy's own CA.
+
 Caddy keeps its certificates and its CA's key in `caddy/data` (see [Back up and restore](#back-up-and-restore)).
+A certificate of your own lives in the database, its key sealed like a password; remotehub writes it to
+`caddy/remotehub` for Caddy every time it starts.
 
 ## Next to a reverse proxy of your own
 

@@ -34,6 +34,8 @@ services:
       - "443:443/udp"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Where the certificate comes from, written by remotehub (#146).
+      - ./caddy/remotehub:/etc/caddy/remotehub:ro
       # Certificates and the key of Caddy's CA: back them up with the rest.
       - ./caddy/data:/data
       - ./caddy/config:/config
@@ -43,6 +45,7 @@ services:
         # A fixed address, so that remotehub trusts the client it names; at
         # the top of the range, since Docker hands out from the bottom.
         ipv4_address: ${REMOTEHUB_CADDY_ADDRESS:-10.213.213.254}
+    # remotehub writes the snippet the Caddyfile imports before it is healthy.
     depends_on:
       remotehub:
         condition: service_healthy
@@ -72,6 +75,13 @@ services:
       # the gateway of the network below; either names the client in
       # X-Forwarded-For. REMOTEHUB_EXTRA_PROXIES adds others, e.g. Traefik.
       REMOTEHUB_TRUSTED_PROXIES: ${REMOTEHUB_GATEWAY:-10.213.213.1},${REMOTEHUB_CADDY_ADDRESS:-10.213.213.254}${REMOTEHUB_EXTRA_PROXIES:-}
+      # Settings -> Certificate talks to Caddy above through its admin
+      # socket (#146); without Caddy, the socket is not there.
+      REMOTEHUB_CADDY_SOCKET: /run/caddy/admin.sock
+    volumes:
+      - caddy-admin:/run/caddy
+      - ./caddy/remotehub:/run/caddy-sites
+      - ./caddy/Caddyfile:/run/caddy-config/Caddyfile:ro
     secrets: [db_password, master_key, ssh_ca_key, courier_token]
     ports:
       - "127.0.0.1:${REMOTEHUB_PORT:-8080}:8080"

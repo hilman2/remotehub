@@ -5,7 +5,9 @@ pub mod api;
 pub mod audit;
 pub mod auth;
 pub mod break_glass;
+pub mod caddy;
 pub mod catalog;
+pub mod certificate;
 pub mod config;
 pub mod connector_agent;
 pub mod connectors;
@@ -76,6 +78,23 @@ pub struct Settings {
     pub ssh_ca: Option<Arc<remotehub_gateway::ssh_ca::SshCa>>,
     /// Ory Kratos for local accounts (#103); none: they are off.
     pub kratos: Option<kratos::Kratos>,
+    /// Caddy of the ops package (#146); none behind a reverse proxy of
+    /// your own.
+    pub caddy: Option<Arc<caddy::Caddy>>,
+}
+
+impl Settings {
+    /// The host people open: the public origin without scheme and port.
+    pub fn host(&self) -> String {
+        let origin = &self.public_origin;
+        let authority = origin
+            .split_once("://")
+            .map_or(origin.as_str(), |(_, rest)| rest);
+        authority
+            .rsplit_once(':')
+            .map_or(authority, |(host, _)| host)
+            .to_owned()
+    }
 }
 
 impl AppState {
@@ -101,7 +120,11 @@ impl AppState {
 /// given, the SPA for every other path (unknown paths get index.html, the
 /// SPA routes in the browser).
 pub fn app(state: AppState, web_dir: Option<&Path>) -> Router {
-    let mut app = Router::new().nest("/api", api::router(state.clone()));
+    let mut app = Router::new()
+        .nest("/api", api::router(state.clone()))
+        // The root of Caddy's own CA, for clients to trust (#146).
+        .route("/ca.crt", axum::routing::get(api::certificate::root_pem))
+        .route("/ca.cer", axum::routing::get(api::certificate::root_der));
     if let Some(dir) = web_dir {
         let spa = ServeDir::new(dir).fallback(ServeFile::new(dir.join("index.html")));
         app = app.fallback_service(spa);

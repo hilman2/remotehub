@@ -1,7 +1,8 @@
 <script lang="ts">
 	/**
 	 * Settings of the instance, for administrators: the directory and who
-	 * administers (#144), the mail server (#145), who states a purpose (#90),
+	 * administers (#144), the mail server (#145), the certificate (#146),
+	 * who states a purpose (#90),
 	 * who needs a second factor (#107).
 	 */
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
@@ -12,6 +13,7 @@
 	import PrincipalRules from '$lib/components/PrincipalRules.svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { session } from '$lib/session.svelte';
+	import CertificateForm from '$lib/settings/CertificateForm.svelte';
 	import DirectoryForm from '$lib/settings/DirectoryForm.svelte';
 	import MailForm from '$lib/settings/MailForm.svelte';
 </script>
@@ -39,6 +41,15 @@
 		<h2 id="mail-title" class="text-xl font-semibold">{m.mail_title()}</h2>
 		<p class="mt-1 text-sm text-ink-2">{m.mail_hint()}</p>
 		<MailForm removable recipient={session.user.kind === 'local' ? session.user.username : ''} />
+	</section>
+	<section
+		id="certificate"
+		class="mt-8 max-w-2xl scroll-mt-4 rounded-card border border-line bg-surface p-6"
+		aria-labelledby="certificate-title"
+	>
+		<h2 id="certificate-title" class="text-xl font-semibold">{m.certificate_title()}</h2>
+		<p class="mt-1 text-sm text-ink-2">{m.certificate_hint()}</p>
+		<CertificateForm />
 	</section>
 	<PrincipalRules
 		id="administrator-search"

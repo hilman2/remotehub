@@ -27,6 +27,12 @@ if [ "$(id -u)" != 0 ]; then
 fi
 mkdir -p secrets
 chmod 700 secrets
+# remotehub writes Caddy's certificate settings here (#146). Caddy runs as
+# root without capabilities, so it reads them through the group, which new
+# files take from the directory.
+mkdir -p caddy/remotehub
+chown 65532:0 caddy/remotehub
+chmod 2750 caddy/remotehub
 umask 077
 
 new_secret() { # file owner mode command...

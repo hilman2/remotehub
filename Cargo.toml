@@ -65,6 +65,11 @@ tempfile = "3.27.0"
 tokio-tungstenite = "0.30.0"
 # Already in the tree through ldap3; reads the public key of a certificate.
 x509-parser = "0.18.1"
+# A certificate of your own for Caddy, as a PFX file (#146).
+p12-keystore = "0.3.2"
+# Tests only: certificates to check (#146).
+rcgen = "0.14"
+time = "0.3"
 futures-util = "0.3.31"
 
 [workspace.lints.rust]

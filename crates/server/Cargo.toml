@@ -33,7 +33,9 @@ http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 lettre.workspace = true
+p12-keystore.workspace = true
 rustls.workspace = true
+x509-parser.workspace = true
 rustls-native-certs.workspace = true
 rustls-pki-types.workspace = true
 secrecy.workspace = true
@@ -55,7 +57,9 @@ uuid.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+rcgen.workspace = true
 tempfile.workspace = true
+time.workspace = true
 tower.workspace = true
 
 [lints]

@@ -4,6 +4,7 @@ mod accounts;
 mod attachments;
 mod audit;
 mod catalog;
+pub mod certificate;
 mod connect;
 mod connectors;
 pub mod courier;
@@ -105,6 +106,14 @@ pub fn router(state: AppState) -> Router<AppState> {
             get(mail::get).put(mail::save).delete(mail::remove),
         )
         .route("/settings/mail/test", post(mail::test))
+        .route(
+            "/settings/certificate",
+            get(certificate::status)
+                .put(certificate::upload)
+                .delete(certificate::reset)
+                // Base64 of a PFX file or PEM text of a few kilobytes.
+                .layer(DefaultBodyLimit::max(256 * 1024)),
+        )
         .route("/roles", get(roles::list))
         .route(
             "/roles/{role}/members/{sid}",
