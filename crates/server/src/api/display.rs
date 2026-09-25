@@ -10,7 +10,7 @@
 //! Browser → server:
 //! - first text frame: `{"type":"start","width":…,"height":…,"dpi":…,
 //!   "timezone":…}`, plus `"username"` and `"password"` when the device asks
-//!   for credentials
+//!   for credentials, and `"purpose"` when the user must state one (#90)
 //! - then text frames with Guacamole instructions; only input, display size,
 //!   clipboard and stream acknowledgements reach guacd
 //!
@@ -64,6 +64,7 @@ enum ClientMessage {
         timezone: Option<String>,
         username: Option<String>,
         password: Option<SecretString>,
+        purpose: Option<String>,
     },
 }
 
@@ -176,10 +177,18 @@ async fn run(
         timezone: zone,
         username,
         password,
+        purpose,
     }) = start
     else {
         send_problem(&mut socket, &Problem::new(ErrorCode::InvalidRequest)).await;
         return;
+    };
+    let purpose = match connect::purpose(&state, &session, purpose).await {
+        Ok(purpose) => purpose,
+        Err(problem) => {
+            send_problem(&mut socket, &problem).await;
+            return;
+        }
     };
 
     // 2. Credentials: from the vault, as entered, or the own account. VNC
@@ -395,12 +404,13 @@ async fn run(
             json!({
                 "protocol": target.protocol, "host": target.host, "port": target.port,
                 "username": username, "auth_mode": target.auth_mode,
-                "credential_id": target.credential_id,
+                "credential_id": target.credential_id, "purpose": purpose,
             }),
             &address,
         ),
     )
     .await;
+    let journal = connect::journal_opened(&state, &session, &target, &purpose).await;
     let pinned_now = match &certificate {
         Some(fingerprint) if target.certificate_fingerprint.is_none() => {
             pin_certificate(&state, &session, &target, fingerprint, &address).await
@@ -421,6 +431,7 @@ async fn run(
     connection.close().await;
     drop(browser);
     let _ = socket.send(Message::Close(None)).await;
+    connect::journal_closed(&state, journal).await;
 
     let _ = audit::record(
         &state.db,

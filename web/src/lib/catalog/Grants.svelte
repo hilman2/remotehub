@@ -1,14 +1,11 @@
 <script lang="ts">
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import Clock from '@lucide/svelte/icons/clock';
-	import User from '@lucide/svelte/icons/user';
-	import Users from '@lucide/svelte/icons/users';
 	import {
 		ROLES,
 		addGrant,
 		loadGrants,
 		removeGrant,
-		searchPrincipals,
 		type GrantRow,
 		type ObjectKind,
 		type Principal,
@@ -18,6 +15,8 @@
 	import { formatLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
 	import { ROLE_LABELS } from './labels';
+	import PrincipalName from './PrincipalName.svelte';
+	import PrincipalPicker from './PrincipalPicker.svelte';
 
 	let { kind, id }: { kind: ObjectKind; id: string } = $props();
 
@@ -25,9 +24,9 @@
 
 	let direct = $state<GrantRow[]>([]);
 	let inherited = $state<GrantRow[]>([]);
-	let query = $state('');
-	let found = $state<Principal[]>([]);
 	let chosen = $state<Principal | null>(null);
+	/** Counts the grants added here: a new picker for each. */
+	let added = $state(0);
 	let role = $state<Role>('connect');
 	let error = $state<string | null>(null);
 
@@ -45,28 +44,13 @@
 		load();
 	});
 
-	// Searches the directory while typing, from two characters on.
-	$effect(() => {
-		const q = query.trim();
-		if (q.length < 2) {
-			found = [];
-			return;
-		}
-		const timer = setTimeout(async () => {
-			const result = await searchPrincipals(q);
-			found = result.ok ? result.data : [];
-			if (!result.ok) error = errorMessage(result.code);
-		}, 250);
-		return () => clearTimeout(timer);
-	});
-
 	async function grant(event: SubmitEvent) {
 		event.preventDefault();
 		if (!chosen) return;
 		const result = await addGrant(kind, id, chosen, role);
 		if (result.ok) {
 			chosen = null;
-			query = '';
+			added += 1;
 			error = null;
 			await load();
 		} else {
@@ -80,19 +64,6 @@
 		else error = errorMessage(result.code);
 	}
 </script>
-
-{#snippet principal(kindOf: 'user' | 'group', name: string)}
-	<span class="inline-flex min-w-0 items-center gap-2">
-		{#if kindOf === 'group'}
-			<Users size={15} class="shrink-0 text-ink-3" aria-hidden="true" />
-			<span class="sr-only">{m.principal_group()}</span>
-		{:else}
-			<User size={15} class="shrink-0 text-ink-3" aria-hidden="true" />
-			<span class="sr-only">{m.principal_user()}</span>
-		{/if}
-		<span class="truncate">{name}</span>
-	</span>
-{/snippet}
 
 {#snippet until(expiresAt: string | null)}
 	{#if expiresAt}
@@ -110,7 +81,7 @@
 	<ul class="mt-2 divide-y divide-line rounded-lg border border-line">
 		{#each direct as g (g.id)}
 			<li class="flex items-center gap-3 px-3 py-2 text-sm">
-				{@render principal(g.principal_kind, g.principal_name)}
+				<PrincipalName kind={g.principal_kind} name={g.principal_name} />
 				<span class="ml-auto text-ink-2">{ROLE_LABELS[g.role]()}</span>
 				{@render until(g.expires_at)}
 				<button
@@ -130,7 +101,7 @@
 	<ul class="mt-2 divide-y divide-line rounded-lg border border-line text-ink-2">
 		{#each inherited as g (g.id)}
 			<li class="flex items-center gap-3 px-3 py-2 text-sm">
-				{@render principal(g.principal_kind, g.principal_name)}
+				<PrincipalName kind={g.principal_kind} name={g.principal_name} />
 				<span class="ml-auto">{ROLE_LABELS[g.role]()}</span>
 				{@render until(g.expires_at)}
 			</li>
@@ -139,32 +110,9 @@
 {/if}
 
 <form class="mt-5 border-t border-line pt-4" onsubmit={grant}>
-	<label class="block text-sm font-medium" for="grant-search">{m.grants_search()}</label>
-	<input
-		id="grant-search"
-		class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
-		autocomplete="off"
-		bind:value={query}
-	/>
-	{#if found.length > 0 && !chosen}
-		<ul class="mt-1 max-h-48 overflow-y-auto rounded-lg border border-line">
-			{#each found as p (p.sid)}
-				<li>
-					<button
-						type="button"
-						class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-surface-2"
-						onclick={() => {
-							chosen = p;
-							query = p.name;
-						}}
-					>
-						{@render principal(p.kind, p.name)}
-						{#if p.detail}<span class="ml-auto truncate text-xs text-ink-3">{p.detail}</span>{/if}
-					</button>
-				</li>
-			{/each}
-		</ul>
-	{/if}
+	{#key added}
+		<PrincipalPicker id="grant-search" bind:chosen onerror={(message) => (error = message)} />
+	{/key}
 
 	<div class="mt-3 flex items-center gap-2">
 		<select class="flex-1 rounded-lg border border-line bg-page px-3 py-2" bind:value={role}>

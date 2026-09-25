@@ -232,6 +232,76 @@ test('access asked for just in time is approved by someone else', async ({ page,
 	await bobs.close();
 });
 
+test('chosen users state a purpose, and the device journal keeps it', async ({ page, browser }) => {
+	await signIn(page);
+	const dialog = page.getByRole('dialog');
+	const folder = `E2E journal ${run}`;
+	await newFolder(page, folder);
+	const credential = `journal tester ${run}`;
+	await page.getByRole('button', { name: 'New credential' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(credential);
+	await dialog.getByLabel('User name', { exact: true }).fill('tester');
+	await dialog.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name: credential })).toBeVisible();
+	const name = `lab ssh journal ${run}`;
+	await newDevice(page, folder, name, credential);
+
+	// bob may connect to it.
+	await page.getByRole('button', { name: 'Settings' }).click();
+	await page.getByRole('menuitem', { name: 'Permissions' }).click();
+	await dialog.getByLabel('Search users and groups').fill('Bob');
+	await dialog.getByRole('button', { name: /Bob Helpdesk/ }).click();
+	await dialog.locator('select').selectOption({ label: 'Connect' });
+	await dialog.getByRole('button', { name: 'Grant' }).click();
+	await expect(dialog.getByText('Bob Helpdesk')).toBeVisible();
+	await page.keyboard.press('Escape');
+
+	// alice leaves a note in the device's journal.
+	const journal = page.getByRole('list', { name: 'Journal' });
+	// Ctrl+Enter saves it.
+	await page.getByLabel('Note', { exact: true }).fill('Replaced the disk.');
+	await page.getByLabel('Note', { exact: true }).press('Control+Enter');
+	await expect(journal).toContainText('Replaced the disk.');
+
+	// From now on bob states a purpose before connecting.
+	await page.getByRole('link', { name: 'Settings' }).click();
+	const rules = page.getByRole('list', { name: 'Purpose before connecting' });
+	await page.getByLabel('Search users and groups').fill('Bob');
+	await page.getByRole('button', { name: /Bob Helpdesk/ }).click();
+	await page.getByRole('button', { name: 'Add', exact: true }).click();
+	await expect(rules).toContainText('Bob Helpdesk');
+
+	const bobs = await browser.newContext();
+	const bob = await bobs.newPage();
+	await signIn(bob, 'bob', 'Bob-Passw0rd!');
+	await bob.getByRole('searchbox').fill(name);
+	await bob
+		.getByRole('list', { name: 'Search results' })
+		.getByRole('button', { name: new RegExp(name) })
+		.click();
+	await bob.getByRole('button', { name: 'Connect', exact: true }).click();
+	await bob.getByLabel('Purpose').fill('Rotate the logs');
+	await bob.getByRole('button', { name: 'Connect', exact: true }).click();
+	await expect(bob.getByText(/host key/)).toBeVisible();
+
+	// The journal says who connected and why, next to alice's note.
+	await bob.getByRole('button', { name: 'Show devices' }).click();
+	const bobsJournal = bob.getByRole('list', { name: 'Journal' });
+	await expect(bobsJournal.getByRole('listitem').first()).toContainText('Rotate the logs');
+	await expect(bobsJournal.getByRole('listitem').first()).toContainText('Bob Helpdesk');
+	await expect(bobsJournal).toContainText('Replaced the disk.');
+	await bobs.close();
+
+	// The development database outlives the test: bob goes off the list again.
+	await rules
+		.getByRole('listitem')
+		.filter({ hasText: 'Bob Helpdesk' })
+		.getByRole('button', { name: 'Remove' })
+		.click();
+	await expect(page.getByText('Bob Helpdesk')).toHaveCount(0);
+});
+
 test('an RDP desktop opens with the password LAPS keeps in the directory', async ({ page }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');

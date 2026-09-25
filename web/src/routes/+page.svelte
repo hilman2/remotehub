@@ -52,6 +52,7 @@
 	import DeviceForm from '$lib/catalog/DeviceForm.svelte';
 	import FolderNodeView from '$lib/catalog/FolderNodeView.svelte';
 	import Grants from '$lib/catalog/Grants.svelte';
+	import Journal from '$lib/catalog/Journal.svelte';
 	import {
 		AUTH_MODE_LABELS,
 		CREDENTIAL_KIND_LABELS,
@@ -260,7 +261,7 @@
 	/** A double-click on a device in a list connects, where the user may. */
 	function connectTo(id: string) {
 		const target = tree?.devices.find((d) => d.id === id);
-		if (target && allows(target.role, 'connect')) tabs.open(target);
+		if (target && tree && allows(target.role, 'connect')) tabs.open(target, tree.purpose_required);
 	}
 
 	/** Behind the gear: changing, permissions and deleting, as far as `role` allows. */
@@ -591,7 +592,7 @@
 							<button
 								type="button"
 								class="inline-flex h-14 items-center rounded-2xl bg-accent px-8 font-display text-lg font-semibold text-accent-ink hover:brightness-110"
-								onclick={() => device && tabs.open(device)}
+								onclick={() => connectTo(device.id)}
 							>
 								{m.device_connect()}
 							</button>
@@ -652,6 +653,12 @@
 					<section class="{card} md:col-span-3">
 						<h3 class="eyebrow">{m.field_description()}</h3>
 						<p class="whitespace-pre-line">{device.description}</p>
+					</section>
+				{/if}
+				{#if allows(device.role, 'connect')}
+					<section class="{card} md:col-span-3">
+						<h3 class="eyebrow">{m.journal_title()}</h3>
+						<Journal deviceId={device.id} />
 					</section>
 				{/if}
 			</div>

@@ -14,6 +14,7 @@ mod connectors;
 mod display;
 mod generated;
 mod http;
+mod journal;
 mod personal;
 mod requests;
 mod search;

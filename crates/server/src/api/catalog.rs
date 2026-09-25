@@ -40,7 +40,7 @@ pub(super) async fn context(
 
 /// `not_found` for objects the subject cannot see at all, `forbidden` for
 /// objects they see but may not act on in this way.
-fn require(
+pub(super) fn require(
     catalog: &Catalog,
     subject: &Subject,
     needed: Role,
@@ -123,6 +123,8 @@ pub struct Tree {
     /// The visible folders this user has open in the tree; the rest are
     /// closed.
     open: Vec<Uuid>,
+    /// Whether this user states a purpose before every connection (#90).
+    purpose_required: bool,
 }
 
 #[derive(Serialize)]
@@ -218,9 +220,11 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
         visible.roles.contains_key(&ObjectId::Folder(*id)) || visible.path_only.contains(id)
     };
     let open = open.into_iter().filter(sees).collect();
+    let purpose_required = super::connect::purpose_required(&state.db, &session).await?;
 
     Ok(Json(Tree {
         open,
+        purpose_required,
         folders: folders
             .into_iter()
             .filter_map(|(id, parent_id, name)| {

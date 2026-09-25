@@ -65,6 +65,8 @@ audit_actions! {
     PersonalVaultReset = "personal.vault_reset",
     ConnectorCreated = "connector.created",
     ConnectorDeleted = "connector.deleted",
+    PurposeRequired = "purpose.required",
+    PurposeWaived = "purpose.waived",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).

@@ -7,6 +7,7 @@
 	import SessionView from '$lib/session/SessionView.svelte';
 
 	let device = $state<Device | null>(null);
+	let askPurpose = $state(false);
 	let error = $state<string | null>(null);
 
 	$effect(() => {
@@ -16,6 +17,7 @@
 				error = errorMessage(result.code);
 				return;
 			}
+			askPurpose = result.data.purpose_required;
 			device = result.data.devices.find((d) => d.id === id) ?? null;
 			if (!device) error = errorMessage('not_found');
 		});
@@ -34,6 +36,6 @@
 {:else if device}
 	<h1 class="sr-only">{device.name}</h1>
 	<div class="flex min-h-0 flex-1 flex-col">
-		<SessionView {device} />
+		<SessionView {device} {askPurpose} />
 	</div>
 {/if}

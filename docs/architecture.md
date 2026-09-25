@@ -121,6 +121,10 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - **Session tabs** (`web/src/lib/session/`): sessions open as tabs inside the page and keep running
   while the user moves between its pages; a reload ends them. `/connect/{id}` shows one session alone,
   for a window of its own.
+- **Device journal** (`device_journal`, `api/journal.rs`): every opened connection with its purpose and
+  end, and the notes people leave; only ever added to, readable by who may connect. Users and groups in
+  `purpose_principals` (chosen by administrators, audited) state a purpose before every connection; the
+  server refuses the connection without one, before anything reaches the device.
 - Plaintext lives only in `secrecy`/`zeroize` types and never appears in logs, API responses (except the
   audited `reveal`), environment variables or command lines. Core dumps are disabled.
 

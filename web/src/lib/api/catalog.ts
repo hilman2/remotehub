@@ -89,6 +89,8 @@ export interface Tree {
 	may_create_top_level: boolean;
 	/** Folders this user has open in the tree; all others are closed. */
 	open: string[];
+	/** Whether this user states a purpose before every connection (#90). */
+	purpose_required: boolean;
 }
 
 export interface DeviceInput {

@@ -194,6 +194,70 @@ pub fn entry<'a>(
     }
 }
 
+/// The longest purpose of a connection, in characters.
+const PURPOSE_MAX: usize = 500;
+
+/// Whether the caller states a purpose before every connection (#90): their
+/// own SID or one of their groups is among the `purpose_principals`.
+pub async fn purpose_required(db: &sqlx::PgPool, session: &Session) -> Result<bool, sqlx::Error> {
+    let sids: Vec<&String> = session.groups.iter().chain(&session.sid).collect();
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM purpose_principals WHERE principal_sid = ANY($1))",
+    )
+    .bind(sids)
+    .fetch_one(db)
+    .await
+}
+
+/// The purpose the caller gave, trimmed, or empty if they gave none and need
+/// not. Checked before anything reaches the device.
+pub async fn purpose(
+    state: &AppState,
+    session: &Session,
+    given: Option<String>,
+) -> Result<String, Problem> {
+    let given = given.unwrap_or_default().trim().to_owned();
+    if given.chars().count() > PURPOSE_MAX {
+        return Err(Problem::new(ErrorCode::InvalidRequest).param("field", "purpose"));
+    }
+    if given.is_empty() && purpose_required(&state.db, session).await? {
+        return Err(Problem::new(ErrorCode::PurposeRequired));
+    }
+    Ok(given)
+}
+
+/// Writes an opened connection into the device's journal and returns the
+/// entry, for [`journal_closed`]. A journal that cannot be written does not
+/// stop the session: the audit log has the connection as well.
+pub async fn journal_opened(
+    state: &AppState,
+    session: &Session,
+    target: &Target,
+    purpose: &str,
+) -> Option<Uuid> {
+    sqlx::query_scalar(
+        "INSERT INTO device_journal (device_id, user_id, kind, protocol, text)
+         VALUES ($1, $2, 'connection', $3, $4) RETURNING id",
+    )
+    .bind(target.id)
+    .bind(session.user_id)
+    .bind(&target.protocol)
+    .bind(purpose)
+    .fetch_one(&state.db)
+    .await
+    .inspect_err(|error| tracing::warn!(device = %target.id, %error, "cannot write the journal"))
+    .ok()
+}
+
+/// Notes the end of the session in its journal entry.
+pub async fn journal_closed(state: &AppState, entry: Option<Uuid>) {
+    let Some(entry) = entry else { return };
+    let _ = sqlx::query("UPDATE device_journal SET ended_at = now() WHERE id = $1")
+        .bind(entry)
+        .execute(&state.db)
+        .await;
+}
+
 /// How to sign in to the target, resolved on the server.
 pub enum Login {
     Password(SecretString),

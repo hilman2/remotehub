@@ -21,10 +21,13 @@
 
 	let {
 		device,
+		askPurpose = false,
 		visible = true,
 		onphase
 	}: {
 		device: Device;
+		/** Asks why before connecting, for the device's journal (#90). */
+		askPurpose?: boolean;
 		/** Hidden tabs keep running, but do not follow the window's size. */
 		visible?: boolean;
 		/** For the tab: how far the session got. */
@@ -52,12 +55,17 @@
 	let credentials = $state<Credentials | null>(null);
 	let username = $state('');
 	let password = $state('');
+	/** Given once; connecting again keeps it. */
+	let purpose = $state<string | null>(null);
+	let purposeText = $state('');
 	let status = $state<Status>({ kind: 'connecting' });
 	// Remounting the view starts a new connection.
 	let attempt = $state(0);
 
 	const graphical = $derived(isGraphical(device.protocol));
 	const needsCredentials = $derived(device.auth_mode === 'ask' && credentials === null);
+	const needsPurpose = $derived(askPurpose && purpose === null);
+	const asking = $derived(needsCredentials || needsPurpose);
 	const phase = $derived<Phase>(
 		status.kind === 'connecting' || status.kind === 'connected' || status.kind === 'closed'
 			? status.kind
@@ -103,7 +111,7 @@
 	// The footer tells about this session while it is the one on screen.
 	const owner = shown.claim();
 	$effect(() => {
-		if (visible && !error && !needsCredentials) shown.set(owner, { phase, text });
+		if (visible && !error && !asking) shown.set(owner, { phase, text });
 		else shown.release(owner);
 	});
 	$effect(() => () => shown.release(owner));
@@ -154,8 +162,11 @@
 
 	function signIn(event: SubmitEvent) {
 		event.preventDefault();
-		credentials = { username, password };
-		password = '';
+		if (needsPurpose) purpose = purposeText.trim();
+		if (needsCredentials) {
+			credentials = { username, password };
+			password = '';
+		}
 		status = { kind: 'connecting' };
 	}
 
@@ -169,35 +180,59 @@
 		<CircleAlert size={16} class="text-critical" aria-hidden="true" />
 		{error}
 	</p>
-{:else if needsCredentials}
+{:else if asking}
 	<form
 		class="mx-auto mt-16 w-full max-w-sm rounded-card border border-line bg-surface p-7"
 		onsubmit={signIn}
 		autocomplete="off"
 	>
-		<h2 class="text-2xl font-semibold">{m.terminal_credentials_title({ name: device.name })}</h2>
-		<p class="mt-1 text-sm text-ink-2">{m.terminal_credentials_hint()}</p>
-		<!-- VNC servers mostly know only a password. -->
-		<label class="mt-4 block text-sm font-medium" for="target-username-{device.id}">
-			{device.protocol === 'vnc' ? m.credentials_username_optional() : m.field_username()}
-		</label>
-		<input
-			id="target-username-{device.id}"
-			class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
-			required={device.protocol !== 'vnc'}
-			spellcheck="false"
-			bind:value={username}
-		/>
-		<label class="mt-3 block text-sm font-medium" for="target-password-{device.id}">
-			{m.field_password()}
-		</label>
-		<input
-			id="target-password-{device.id}"
-			type="password"
-			class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
-			required
-			bind:value={password}
-		/>
+		{#if needsPurpose}
+			<h2 class="text-2xl font-semibold">{m.purpose_title({ name: device.name })}</h2>
+			<p class="mt-1 text-sm text-ink-2">{m.purpose_hint()}</p>
+			<label class="mt-4 block text-sm font-medium" for="purpose-{device.id}">
+				{m.purpose_label()}
+			</label>
+			<!-- Only spaces count as nothing, as on the server. -->
+			<textarea
+				id="purpose-{device.id}"
+				class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
+				rows="3"
+				maxlength="500"
+				required
+				bind:value={purposeText}
+				oninput={(event) =>
+					event.currentTarget.setCustomValidity(
+						purposeText.trim() ? '' : m.error_purpose_required()
+					)}></textarea>
+		{:else}
+			<h2 class="text-2xl font-semibold">{m.terminal_credentials_title({ name: device.name })}</h2>
+		{/if}
+		{#if needsCredentials}
+			<p class="mt-1 text-sm text-ink-2" class:mt-5={needsPurpose}>
+				{m.terminal_credentials_hint()}
+			</p>
+			<!-- VNC servers mostly know only a password. -->
+			<label class="mt-4 block text-sm font-medium" for="target-username-{device.id}">
+				{device.protocol === 'vnc' ? m.credentials_username_optional() : m.field_username()}
+			</label>
+			<input
+				id="target-username-{device.id}"
+				class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
+				required={device.protocol !== 'vnc'}
+				spellcheck="false"
+				bind:value={username}
+			/>
+			<label class="mt-3 block text-sm font-medium" for="target-password-{device.id}">
+				{m.field_password()}
+			</label>
+			<input
+				id="target-password-{device.id}"
+				type="password"
+				class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
+				required
+				bind:value={password}
+			/>
+		{/if}
 		<button
 			type="submit"
 			class="mt-6 h-12 w-full rounded-xl bg-accent font-display text-lg font-semibold text-accent-ink hover:brightness-110"
@@ -213,13 +248,14 @@
 					deviceId={device.id}
 					name={device.name}
 					{credentials}
+					{purpose}
 					{visible}
 					{onevent}
 					{onfailure}
 					{onend}
 				/>
 			{:else}
-				<TerminalView deviceId={device.id} {credentials} {visible} {onevent} {onend} />
+				<TerminalView deviceId={device.id} {credentials} {purpose} {visible} {onevent} {onend} />
 			{/if}
 		{/key}
 

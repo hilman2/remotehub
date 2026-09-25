@@ -825,3 +825,37 @@ async fn an_https_device_behind_a_connector_signs_in_through_it(pool: PgPool) {
     assert!(crate::connectors::carried(&app, &token, 1).await >= 1);
     leave(socket).await;
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_desktop_asks_for_the_purpose_first(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let rdp = create(
+        &app,
+        &token,
+        "/api/devices",
+        json!({
+            "folder_id": folder, "name": "nowhere", "protocol": "rdp", "host": "nowhere.invalid",
+            "port": 3389, "auth_mode": "ask", "credential_id": null,
+        }),
+    )
+    .await;
+    crate::terminal::require_purpose(&app, &token).await;
+    let address = serve(state).await;
+    let login = json!({ "username": "tester", "password": "x" });
+
+    let mut socket = open(address, &rdp, &token, "display", ORIGIN)
+        .await
+        .unwrap();
+    start(&mut socket, login.clone()).await;
+    let error: Value = serde_json::from_str(&text(&mut socket).await).unwrap();
+    assert_eq!(error["code"], "purpose_required", "{error}");
+
+    let mut socket = open(address, &rdp, &token, "display", ORIGIN)
+        .await
+        .unwrap();
+    let mut extra = login;
+    extra["purpose"] = json!("Install updates");
+    start(&mut socket, extra).await;
+    let error: Value = serde_json::from_str(&text(&mut socket).await).unwrap();
+    assert_eq!(error["code"], "target_unreachable", "{error}");
+}

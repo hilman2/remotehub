@@ -37,7 +37,9 @@ export const AUDIT_ACTIONS = [
 	'personal.entry_deleted',
 	'personal.vault_reset',
 	'connector.created',
-	'connector.deleted'
+	'connector.deleted',
+	'purpose.required',
+	'purpose.waived'
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

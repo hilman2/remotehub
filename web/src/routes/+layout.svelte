@@ -41,7 +41,8 @@
 		...(session.user?.admin
 			? [
 					{ href: resolve('/connectors'), label: m.nav_connectors },
-					{ href: resolve('/audit'), label: m.nav_audit }
+					{ href: resolve('/audit'), label: m.nav_audit },
+					{ href: resolve('/settings'), label: m.nav_settings }
 				]
 			: [])
 	]);
@@ -180,6 +181,7 @@
 					<div class="absolute inset-0 overflow-auto {tab.key === showing?.key ? '' : 'hidden'}">
 						<SessionView
 							device={tab.device}
+							askPurpose={tab.askPurpose}
 							visible={tab.key === showing?.key}
 							onphase={(phase) => tabs.setPhase(tab.key, phase)}
 						/>

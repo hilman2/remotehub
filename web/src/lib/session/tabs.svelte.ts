@@ -10,6 +10,8 @@ export type Phase = 'connecting' | 'connected' | 'closed' | 'failed';
 export interface Tab {
 	key: number;
 	device: Device;
+	/** The user states a purpose first (#90). */
+	askPurpose: boolean;
 	phase: Phase;
 }
 
@@ -20,14 +22,14 @@ class Tabs {
 	#next = 1;
 
 	/** Shows the device's session, and starts one if it has none yet. */
-	open(device: Device) {
+	open(device: Device, askPurpose: boolean) {
 		const existing = this.list.find((tab) => tab.device.id === device.id);
 		if (existing) {
 			this.active = existing.key;
 			return;
 		}
 		const key = this.#next++;
-		this.list.push({ key, device, phase: 'connecting' });
+		this.list.push({ key, device, askPurpose, phase: 'connecting' });
 		this.active = key;
 	}
 
