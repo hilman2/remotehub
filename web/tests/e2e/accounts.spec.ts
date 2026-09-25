@@ -346,7 +346,9 @@ test('a directory account signs in with a security key remotehub keeps', async (
 	page,
 	browser
 }) => {
-	// A key an earlier run left behind would lock bob out of the other tests.
+	// erin is this test's alone: a key on her would stop any other test that
+	// signs her in, and the tests run in parallel. A key an earlier run left
+	// behind goes first.
 	const admins = await browser.newContext();
 	const admin = await admins.newPage();
 	await typeDirectory(admin, 'alice', 'Alice-Passw0rd!');
@@ -356,12 +358,12 @@ test('a directory account signs in with a security key remotehub keeps', async (
 			id: string;
 			username: string;
 		}[];
-		const bob = users.find((user) => user.username === 'bob');
-		if (bob) await fetch(`/api/users/${bob.id}/second-factor`, { method: 'DELETE' });
+		const erin = users.find((user) => user.username === 'erin');
+		if (erin) await fetch(`/api/users/${erin.id}/second-factor`, { method: 'DELETE' });
 	});
 	await admins.close();
 
-	await typeDirectory(page, 'bob', 'Bob-Passw0rd!');
+	await typeDirectory(page, 'erin', 'Erin-Passw0rd!');
 	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
 	const cdp = await page.context().newCDPSession(page);
 	await cdp.send('WebAuthn.enable');
@@ -374,20 +376,20 @@ test('a directory account signs in with a security key remotehub keeps', async (
 			automaticPresenceSimulation: true
 		}
 	});
-	await page.getByRole('link', { name: /Bob Helpdesk/ }).click();
+	await page.getByRole('link', { name: /Erin Keys/ }).click();
 	const keys = page.getByRole('region', { name: 'Security keys' });
-	await keys.getByLabel('Name of the key').fill('Bob’s key');
+	await keys.getByLabel('Name of the key').fill('Erin’s key');
 	await keys.getByRole('button', { name: 'Add a security key' }).click();
-	await expect(keys.getByRole('button', { name: 'Remove Bob’s key' })).toBeVisible();
+	await expect(keys.getByRole('button', { name: 'Remove Erin’s key' })).toBeVisible();
 
 	// The password, then the key: no app was ever set up.
 	await signOut(page);
-	await typeDirectory(page, 'bob', 'Bob-Passw0rd!');
+	await typeDirectory(page, 'erin', 'Erin-Passw0rd!');
 	await expect(page.getByLabel('Code', { exact: true })).toHaveCount(0);
 	await page.getByRole('button', { name: 'Use a security key or passkey' }).click();
 	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
 
-	await page.getByRole('link', { name: /Bob Helpdesk/ }).click();
-	await keys.getByRole('button', { name: 'Remove Bob’s key' }).click();
+	await page.getByRole('link', { name: /Erin Keys/ }).click();
+	await keys.getByRole('button', { name: 'Remove Erin’s key' }).click();
 	await expect(keys.getByRole('button', { name: /^Remove / })).toHaveCount(0);
 });
