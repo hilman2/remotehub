@@ -17,6 +17,7 @@
 	import SessionTabs from '$lib/session/SessionTabs.svelte';
 	import SessionView from '$lib/session/SessionView.svelte';
 	import { tabs } from '$lib/session/tabs.svelte';
+	import { unlocked } from '$lib/vault/unlocked.svelte';
 
 	let { children } = $props();
 
@@ -65,8 +66,10 @@
 	$effect(() => {
 		if (!session.loaded || session.user) return;
 		// Signed out elsewhere or expired: the sessions are gone with the page
-		// below, and must not start again on the next sign-in.
+		// below, and must not start again on the next sign-in; the next user
+		// does not find the vault open either.
 		tabs.clear();
+		unlocked.key = null;
 		if (!signInPage) goto(resolve('/sign-in'));
 	});
 
@@ -77,6 +80,7 @@
 
 	async function leave() {
 		tabs.clear();
+		unlocked.key = null;
 		await signOut();
 		await goto(resolve('/sign-in'));
 	}

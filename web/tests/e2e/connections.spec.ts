@@ -31,6 +31,28 @@ async function newFolder(page: Page, name: string) {
 	await expect(page.getByRole('heading', { name })).toBeVisible();
 }
 
+/**
+ * Sets up the signed-in user's personal vault anew with `passphrase`: an
+ * earlier run may have left one behind. Returns the recovery key.
+ */
+async function freshVault(page: Page, passphrase: string) {
+	await page.getByRole('link', { name: 'My vault' }).click();
+	const unlockHeading = page.getByRole('heading', { name: 'Unlock your vault' });
+	const setupHeading = page.getByRole('heading', { name: 'Set up your vault' });
+	await expect(unlockHeading.or(setupHeading)).toBeVisible();
+	if (await unlockHeading.isVisible()) {
+		await page.getByRole('button', { name: 'Start over' }).click();
+		await page.getByRole('dialog').getByRole('button', { name: 'Start over' }).click();
+		await expect(setupHeading).toBeVisible();
+	}
+	await page.getByLabel('Passphrase', { exact: true }).fill(passphrase);
+	await page.getByLabel('Passphrase again').fill(passphrase);
+	await page.getByRole('button', { name: 'Set up' }).click();
+	const recovery = (await page.getByTestId('recovery-key').innerText()).trim();
+	await page.getByRole('button', { name: 'I have kept it safe' }).click();
+	return recovery;
+}
+
 /** A device in the folder that signs in with the credential (SSH by default). */
 async function newDevice(
 	page: Page,
@@ -407,24 +429,10 @@ test('the personal vault opens only in the browser, with passphrase, passkey or 
 		}
 	});
 	await signIn(page);
-	await page.getByRole('link', { name: 'My vault' }).click();
-
-	// Start from nothing: an earlier run may have left a vault behind.
-	const unlockHeading = page.getByRole('heading', { name: 'Unlock your vault' });
-	const setupHeading = page.getByRole('heading', { name: 'Set up your vault' });
-	await expect(unlockHeading.or(setupHeading)).toBeVisible();
-	if (await unlockHeading.isVisible()) {
-		await page.getByRole('button', { name: 'Start over' }).click();
-		await page.getByRole('dialog').getByRole('button', { name: 'Start over' }).click();
-		await expect(setupHeading).toBeVisible();
-	}
 	const passphrase = 'long enough passphrase';
-	await page.getByLabel('Passphrase', { exact: true }).fill(passphrase);
-	await page.getByLabel('Passphrase again').fill(passphrase);
-	await page.getByRole('button', { name: 'Set up' }).click();
-	const recovery = (await page.getByTestId('recovery-key').innerText()).trim();
+	const recovery = await freshVault(page, passphrase);
 	expect(recovery).toMatch(/^([A-Z2-7]{4}-){7}[A-Z2-7]{4}$/);
-	await page.getByRole('button', { name: 'I have kept it safe' }).click();
+	const unlockHeading = page.getByRole('heading', { name: 'Unlock your vault' });
 
 	const secret = `Router-Pw-${run}`;
 	await page.getByRole('button', { name: 'New entry' }).click();
@@ -473,6 +481,41 @@ test('the personal vault opens only in the browser, with passphrase, passkey or 
 	await page.getByLabel('Passphrase', { exact: true }).fill(passphrase);
 	await page.getByRole('button', { name: 'Unlock', exact: true }).click();
 	await expect(page.getByText('Office router')).toBeVisible();
+});
+
+test('a device that asks for credentials takes them from the unlocked vault', async ({ page }) => {
+	await signIn(page);
+	await freshVault(page, 'long enough passphrase');
+	const dialog = page.getByRole('dialog');
+	await page.getByRole('button', { name: 'New entry' }).click();
+	await dialog.getByLabel('Title').fill(`Lab tester ${run}`);
+	await dialog.getByLabel('User name').fill('tester');
+	await dialog.getByLabel('Password').fill('Tester-Passw0rd!');
+	await dialog.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText(`Lab tester ${run}`)).toBeVisible();
+
+	// The vault stays open on the way to the devices.
+	await page.getByRole('link', { name: 'Devices' }).click();
+	await newFolder(page, `E2E from vault ${run}`);
+	const name = `lab ssh asks ${run}`;
+	await page.getByRole('button', { name: 'New device' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(name);
+	await dialog.getByLabel('Host name or IP address').fill(sshHost);
+	await dialog
+		.getByLabel('Sign in with')
+		.selectOption({ label: 'Credentials asked for when connecting' });
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name })).toBeVisible();
+
+	await page.getByRole('button', { name: 'Connect', exact: true }).click();
+	await page.getByLabel('From my vault').selectOption({ label: `Lab tester ${run} · tester` });
+	await expect(page.getByLabel('User name')).toHaveValue('tester');
+	await page.getByRole('button', { name: 'Connect', exact: true }).click();
+	await expect(page.getByText(/host key/)).toBeVisible();
+	await page.locator('.xterm').click();
+	await page.keyboard.type('echo "vault says $(whoami)"');
+	await page.keyboard.press('Enter');
+	await expect(page.locator('.xterm-rows')).toContainText('vault says tester');
 });
 
 test('an RDP desktop opens in the browser', async ({ page, context }) => {
