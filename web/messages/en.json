@@ -303,5 +303,13 @@
 	"audit_connector_deleted": "Deleted a site connector",
 	"search_results": "Search results",
 	"search_frequent": "Frequently used",
-	"vault_search": "Search entries"
+	"vault_search": "Search entries",
+	"session_tabs": "Open sessions",
+	"session_close": "Close {name}",
+	"session_connecting": "Connecting",
+	"session_connected": "Connected",
+	"session_closed": "Ended",
+	"session_failed": "Failed",
+	"session_show_devices": "Show devices",
+	"session_new_window": "Open in a new window"
 }

@@ -13,10 +13,21 @@
 	import { getLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
 	import { loadSession, session, signOut } from '$lib/session.svelte';
+	import SessionStatus from '$lib/session/SessionStatus.svelte';
+	import SessionTabs from '$lib/session/SessionTabs.svelte';
+	import SessionView from '$lib/session/SessionView.svelte';
+	import { tabs } from '$lib/session/tabs.svelte';
 
 	let { children } = $props();
 
 	const signInPage = $derived(page.url.pathname.startsWith(resolve('/sign-in')));
+	// The devices page shows the active session in place of the device's
+	// details (#85).
+	const showing = $derived(
+		page.url.pathname === resolve('/')
+			? tabs.list.find((tab) => tab.key === tabs.active)
+			: undefined
+	);
 	// The devices page and sessions fill the window and scroll inside; the
 	// other pages sit in a column and scroll as a whole.
 	const fullBleed = $derived(
@@ -51,10 +62,20 @@
 
 	// Everything but the sign-in page needs a session.
 	$effect(() => {
-		if (session.loaded && !session.user && !signInPage) goto(resolve('/sign-in'));
+		if (!session.loaded || session.user) return;
+		// Signed out elsewhere or expired: the sessions are gone with the page
+		// below, and must not start again on the next sign-in.
+		tabs.clear();
+		if (!signInPage) goto(resolve('/sign-in'));
 	});
 
+	// A reload or a closed tab ends every session: the browser asks first.
+	function beforeUnload(event: BeforeUnloadEvent) {
+		if (tabs.list.length > 0) event.preventDefault();
+	}
+
 	async function leave() {
+		tabs.clear();
 		await signOut();
 		await goto(resolve('/sign-in'));
 	}
@@ -62,8 +83,10 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-	<title>remotehub</title>
+	<title>{showing ? `${showing.device.name} · remotehub` : 'remotehub'}</title>
 </svelte:head>
+
+<svelte:window onbeforeunload={beforeUnload} />
 
 {#if signInPage}
 	<div class="fixed top-3 right-3 flex items-center gap-2">
@@ -135,19 +158,40 @@
 			</div>
 		{/if}
 
-		{#if fullBleed}
-			<main id="main" class="flex min-h-0 flex-1 flex-col">
-				{@render children()}
-			</main>
-		{:else}
-			<main id="main" class="mx-auto w-full max-w-7xl flex-1 px-4 pt-10 pb-16 sm:px-8">
-				{@render children()}
-			</main>
+		{#if tabs.list.length > 0}
+			<SessionTabs />
 		{/if}
 
+		<div class="flex flex-1 {fullBleed ? 'min-h-0' : ''}">
+			{#if fullBleed}
+				<main id="main" class="flex min-h-0 flex-col {showing ? 'flex-none' : 'min-w-0 flex-1'}">
+					{@render children()}
+				</main>
+			{:else}
+				<main id="main" class="mx-auto w-full max-w-7xl flex-1 px-4 pt-10 pb-16 sm:px-8">
+					{@render children()}
+				</main>
+			{/if}
+
+			<!-- The sessions stay here on every page, so they outlive a visit to
+			     another one; hidden, they keep running. -->
+			<div class="relative min-w-0 flex-1 {showing ? '' : 'hidden'}">
+				{#each tabs.list as tab (tab.key)}
+					<div class="absolute inset-0 overflow-auto {tab.key === showing?.key ? '' : 'hidden'}">
+						<SessionView
+							device={tab.device}
+							visible={tab.key === showing?.key}
+							onphase={(phase) => tabs.setPhase(tab.key, phase)}
+						/>
+					</div>
+				{/each}
+			</div>
+		</div>
+
 		<footer class="border-t border-line bg-sunken">
-			<div class="px-4 py-2.5 sm:px-6">
-				<ServerStatus />
+			<div class="flex items-center gap-4 px-4 py-2.5 sm:px-6">
+				<div class="shrink-0"><ServerStatus /></div>
+				<SessionStatus />
 			</div>
 		</footer>
 	</div>

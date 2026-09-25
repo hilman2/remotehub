@@ -53,7 +53,7 @@ async function newDevice(
 	await expect(page.getByRole('heading', { name })).toBeVisible();
 }
 
-test('an AD user adds an SSH device and works in its terminal', async ({ page, context }) => {
+test('an AD user adds an SSH device and works in its terminal', async ({ page }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');
 
@@ -72,26 +72,40 @@ test('an AD user adds an SSH device and works in its terminal', async ({ page, c
 	await expect(page.locator('body')).not.toContainText('Tester-Passw0rd!');
 
 	// An SSH device that signs in with it.
-	await newDevice(page, folder, `lab ssh ${run}`, credential);
+	const name = `lab ssh ${run}`;
+	await newDevice(page, folder, name, credential);
 
-	// Its terminal opens in a new tab; the first connection pins the host key.
-	const [terminal] = await Promise.all([
-		context.waitForEvent('page'),
-		page.getByRole('link', { name: 'Connect', exact: true }).click()
-	]);
-	await expect(terminal.getByText(/is now pinned/)).toBeVisible();
-	await terminal.locator('.xterm').click();
-	await terminal.keyboard.type('echo "e2e says $(whoami)"');
-	await terminal.keyboard.press('Enter');
-	await expect(terminal.locator('.xterm-rows')).toContainText('e2e says tester');
-	await terminal.close();
+	// Its terminal opens as a tab inside remotehub; the first connection pins
+	// the host key.
+	await page.getByRole('button', { name: 'Connect', exact: true }).click();
+	await expect(page.getByText(/is now pinned/)).toBeVisible();
+	await page.locator('.xterm').click();
+	await page.keyboard.type('echo "e2e says $(whoami)"');
+	await page.keyboard.press('Enter');
+	await expect(page.locator('.xterm-rows')).toContainText('e2e says tester');
 
 	// The connection is in the audit log.
 	await page.getByRole('link', { name: 'Audit log' }).click();
 	await expect(page.getByText('Opened a connection').first()).toBeVisible();
+
+	// The session ran on meanwhile: its tab brings back the same terminal.
+	const sessions = page.getByRole('navigation', { name: 'Open sessions' });
+	await sessions
+		.getByRole('button', { name: new RegExp(name) })
+		.first()
+		.click();
+	await expect(page.locator('.xterm-rows')).toContainText('e2e says tester');
+
+	// The devices wait in a strip; closing the tab ends the session.
+	await page.getByRole('button', { name: 'Show devices' }).click();
+	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
+	await expect(page.locator('.xterm')).toBeHidden();
+	await sessions.getByRole('button', { name: `Close ${name}` }).click();
+	await expect(sessions).toHaveCount(0);
+	await expect(page.locator('.xterm')).toHaveCount(0);
 });
 
-test('an SSH key protected by a passphrase signs in', async ({ page, context }) => {
+test('an SSH key protected by a passphrase signs in', async ({ page }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');
 	const folder = `E2E keys ${run}`;
@@ -119,18 +133,16 @@ test('an SSH key protected by a passphrase signs in', async ({ page, context }) 
 	await expect(page.locator('body')).not.toContainText('PRIVATE KEY');
 
 	await newDevice(page, folder, `lab ssh key ${run}`, credential);
-	const [terminal] = await Promise.all([
-		context.waitForEvent('page'),
-		page.getByRole('link', { name: 'Connect', exact: true }).click()
-	]);
-	await terminal.locator('.xterm').click();
-	await terminal.keyboard.type('echo "key says $(whoami)"');
-	await terminal.keyboard.press('Enter');
-	await expect(terminal.locator('.xterm-rows')).toContainText('key says tester');
-	await terminal.close();
+	await page.getByRole('button', { name: 'Connect', exact: true }).click();
+	// Typing waits for the session, as a person would.
+	await expect(page.getByText(/host key/)).toBeVisible();
+	await page.locator('.xterm').click();
+	await page.keyboard.type('echo "key says $(whoami)"');
+	await page.keyboard.press('Enter');
+	await expect(page.locator('.xterm-rows')).toContainText('key says tester');
 });
 
-test('an SSH device signs in with a certificate from remotehub', async ({ page, context }) => {
+test('an SSH device signs in with a certificate from remotehub', async ({ page }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');
 	const folder = `E2E ca ${run}`;
@@ -149,15 +161,12 @@ test('an SSH device signs in with a certificate from remotehub', async ({ page, 
 	await dialog.getByRole('button', { name: 'Create' }).click();
 	await expect(page.getByRole('heading', { name })).toBeVisible();
 
-	const [terminal] = await Promise.all([
-		context.waitForEvent('page'),
-		page.getByRole('link', { name: 'Connect', exact: true }).click()
-	]);
-	await terminal.locator('.xterm').click();
-	await terminal.keyboard.type('echo "ca says $(whoami)"');
-	await terminal.keyboard.press('Enter');
-	await expect(terminal.locator('.xterm-rows')).toContainText('ca says alice');
-	await terminal.close();
+	await page.getByRole('button', { name: 'Connect', exact: true }).click();
+	await expect(page.getByText(/host key/)).toBeVisible();
+	await page.locator('.xterm').click();
+	await page.keyboard.type('echo "ca says $(whoami)"');
+	await page.keyboard.press('Enter');
+	await expect(page.locator('.xterm-rows')).toContainText('ca says alice');
 });
 
 test('access asked for just in time is approved by someone else', async ({ page, browser }) => {
@@ -191,7 +200,7 @@ test('access asked for just in time is approved by someone else', async ({ page,
 		.getByRole('button', { name: `${name} ${sshHost}` });
 	await bob.getByRole('searchbox').fill(name);
 	await entry.click();
-	await expect(bob.getByRole('link', { name: 'Connect', exact: true })).toHaveCount(0);
+	await expect(bob.getByRole('button', { name: 'Connect', exact: true })).toHaveCount(0);
 	await bob.getByRole('button', { name: 'Request access' }).click();
 	await bob.getByRole('dialog').getByLabel('Reason').fill('Rotate the logs');
 	await bob.getByRole('dialog').getByRole('button', { name: 'Send request' }).click();
@@ -207,16 +216,18 @@ test('access asked for just in time is approved by someone else', async ({ page,
 	await bob.reload();
 	await bob.getByRole('searchbox').fill(name);
 	await entry.click();
-	await expect(bob.getByRole('link', { name: 'Connect', exact: true })).toBeVisible();
+	await expect(bob.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
 	await bob.getByRole('link', { name: 'Access requests' }).click();
-	await expect(bob.getByText(/Approved · until .* · by alice/)).toBeVisible();
+	await expect(
+		bob
+			.getByRole('listitem')
+			.filter({ hasText: name })
+			.getByText(/Approved · until .* · by alice/)
+	).toBeVisible();
 	await bobs.close();
 });
 
-test('an RDP desktop opens with the password LAPS keeps in the directory', async ({
-	page,
-	context
-}) => {
+test('an RDP desktop opens with the password LAPS keeps in the directory', async ({ page }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');
 	const folder = `E2E laps ${run}`;
@@ -234,16 +245,13 @@ test('an RDP desktop opens with the password LAPS keeps in the directory', async
 	await dialog.getByRole('button', { name: 'Create' }).click();
 	await expect(page.getByRole('heading', { name })).toBeVisible();
 
-	const [desktop] = await Promise.all([
-		context.waitForEvent('page'),
-		page.getByRole('link', { name: 'Connect', exact: true }).click()
-	]);
-	await expect(desktop.getByRole('application')).toBeVisible();
+	await page.getByRole('button', { name: 'Connect', exact: true }).click();
+	await expect(page.getByRole('application')).toBeVisible();
 	// The lab desktop's background (#1e5b8c): the sign-in worked.
 	await expect
 		.poll(
 			() =>
-				desktop.evaluate(() => {
+				page.evaluate(() => {
 					const canvas = document.querySelector<HTMLCanvasElement>('[role=application] canvas');
 					const pixel = canvas?.getContext('2d')?.getImageData(4, 4, 1, 1).data;
 					return pixel ? [pixel[0], pixel[1], pixel[2]] : null;
@@ -251,7 +259,6 @@ test('an RDP desktop opens with the password LAPS keeps in the directory', async
 			{ timeout: 15_000 }
 		)
 		.toEqual([30, 91, 140]);
-	await desktop.close();
 });
 
 test('the personal vault opens only in the browser, with passphrase, passkey or recovery key', async ({
@@ -361,19 +368,16 @@ test('an RDP desktop opens in the browser', async ({ page, context }) => {
 		label: 'Remote Desktop (RDP)',
 		host: desktopHost
 	});
-	const [desktop] = await Promise.all([
-		context.waitForEvent('page'),
-		page.getByRole('link', { name: 'Connect', exact: true }).click()
-	]);
+	await page.getByRole('button', { name: 'Connect', exact: true }).click();
 	// The first connection pins the device's certificate.
-	await expect(desktop.getByText(/the certificate .* is now pinned/)).toBeVisible();
-	await expect(desktop.getByRole('application')).toBeVisible();
+	await expect(page.getByText(/the certificate .* is now pinned/)).toBeVisible();
+	await expect(page.getByRole('application')).toBeVisible();
 
 	// The lab desktop's background (#1e5b8c) in the corner of the picture.
 	await expect
 		.poll(
 			() =>
-				desktop.evaluate(() => {
+				page.evaluate(() => {
 					const canvas = document.querySelector<HTMLCanvasElement>('[role=application] canvas');
 					const pixel = canvas?.getContext('2d')?.getImageData(4, 4, 1, 1).data;
 					return pixel ? [pixel[0], pixel[1], pixel[2]] : null;
@@ -385,17 +389,15 @@ test('an RDP desktop opens in the browser', async ({ page, context }) => {
 	// The clipboard, both ways: the lab desktop answers every text that
 	// reaches its clipboard with `echo:<text>`, which comes back to the
 	// browser's clipboard. First what was copied before the view had focus…
-	const clipboard = () => desktop.evaluate(() => navigator.clipboard.readText());
-	const copy = (text: string) =>
-		desktop.evaluate((text) => navigator.clipboard.writeText(text), text);
+	const clipboard = () => page.evaluate(() => navigator.clipboard.readText());
+	const copy = (text: string) => page.evaluate((text) => navigator.clipboard.writeText(text), text);
 	await copy('copied in the browser');
-	await desktop.getByRole('application').click();
+	await page.getByRole('application').click();
 	await expect.poll(clipboard).toBe('echo:copied in the browser');
 	// …then what was copied while it had focus, with the paste key.
 	await copy('pasted with Ctrl+V');
-	await desktop.keyboard.press('Control+V');
+	await page.keyboard.press('Control+V');
 	await expect.poll(clipboard).toBe('echo:pasted with Ctrl+V');
-	await desktop.close();
 });
 
 test('folders start closed and stay as the user left them', async ({ page }) => {
@@ -474,7 +476,7 @@ test('an administrator sets up a site connector and a device names it', async ({
 	await expect(page.getByText(`${site} · not connected`)).toBeVisible();
 });
 
-test('a web interface opens signed in, in a browser on the server', async ({ page, context }) => {
+test('a web interface opens signed in, in a browser on the server', async ({ page }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');
 	const folder = `E2E appliances ${run}`;
@@ -492,18 +494,15 @@ test('a web interface opens signed in, in a browser on the server', async ({ pag
 		label: 'Web interface (HTTPS)',
 		host: webHost
 	});
-	const [appliance] = await Promise.all([
-		context.waitForEvent('page'),
-		page.getByRole('link', { name: 'Connect', exact: true }).click()
-	]);
-	await expect(appliance.getByText(/the certificate .* is now pinned/)).toBeVisible();
-	await expect(appliance.getByRole('application')).toBeVisible();
+	await page.getByRole('button', { name: 'Connect', exact: true }).click();
+	await expect(page.getByText(/the certificate .* is now pinned/)).toBeVisible();
+	await expect(page.getByRole('application')).toBeVisible();
 
 	// The lab appliance turns green (#2e7d32) once signed in, red if not.
 	await expect
 		.poll(
 			() =>
-				appliance.evaluate(() => {
+				page.evaluate(() => {
 					const canvas = document.querySelector<HTMLCanvasElement>('[role=application] canvas');
 					const pixel = canvas?.getContext('2d')?.getImageData(4, 4, 1, 1).data;
 					return pixel ? [pixel[0], pixel[1], pixel[2]] : null;
@@ -511,5 +510,4 @@ test('a web interface opens signed in, in a browser on the server', async ({ pag
 			{ timeout: 15_000 }
 		)
 		.toEqual([46, 125, 50]);
-	await appliance.close();
 });

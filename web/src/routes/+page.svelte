@@ -2,10 +2,12 @@
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import Clock from '@lucide/svelte/icons/clock';
+	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import FolderClosed from '@lucide/svelte/icons/folder-closed';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import Lock from '@lucide/svelte/icons/lock';
+	import PanelLeftOpen from '@lucide/svelte/icons/panel-left-open';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Search from '@lucide/svelte/icons/search';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
@@ -38,6 +40,7 @@
 	import { loadConnectors, type Connector } from '$lib/api/connectors';
 	import { createRequest, requestableRoles } from '$lib/api/requests';
 	import { loadPicks, savePick } from '$lib/api/search';
+	import { tabs } from '$lib/session/tabs.svelte';
 	import ProtocolChip from '$lib/catalog/ProtocolChip.svelte';
 	import { catalogItems, pickKey, type Hit } from '$lib/search/catalog';
 	import { frequent, queryKey, rank, remember, type Pick } from '$lib/search/rank';
@@ -360,7 +363,28 @@
 	{/if}
 {/snippet}
 
-<div class="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+{#if tabs.active !== null}
+	<!-- A session fills the page (see +layout.svelte); the devices wait in a strip. -->
+	<div class="flex w-12 flex-1 flex-col items-center gap-4 border-r border-line bg-sunken py-3">
+		<button
+			type="button"
+			class="flex size-9 items-center justify-center rounded-lg border border-line-strong text-ink-2 hover:bg-surface-2 hover:text-ink"
+			title={m.session_show_devices()}
+			onclick={() => (tabs.active = null)}
+		>
+			<PanelLeftOpen size={17} aria-hidden="true" />
+			<span class="sr-only">{m.session_show_devices()}</span>
+		</button>
+		<span class="rotate-180 eyebrow [writing-mode:vertical-rl]" aria-hidden="true">
+			{m.devices_title()}
+		</span>
+	</div>
+{/if}
+
+<div
+	class="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden"
+	class:hidden={tabs.active !== null}
+>
 	<aside
 		class="flex shrink-0 flex-col gap-4 border-b border-line bg-sunken px-3 py-5 lg:w-84 lg:overflow-y-auto lg:border-r lg:border-b-0"
 	>
@@ -528,15 +552,25 @@
 					</div>
 				</div>
 				{#if allows(device.role, 'connect')}
-					<!-- A browser tab per session: several sessions side by side for free. -->
-					<a
-						href={resolve('/connect/[id]', { id: device.id })}
-						target="_blank"
-						rel="noopener"
-						class="inline-flex h-14 items-center rounded-2xl bg-accent px-8 font-display text-lg font-semibold text-accent-ink hover:brightness-110"
-					>
-						{m.device_connect()}
-					</a>
+					<div class="flex flex-col items-end gap-2">
+						<button
+							type="button"
+							class="inline-flex h-14 items-center rounded-2xl bg-accent px-8 font-display text-lg font-semibold text-accent-ink hover:brightness-110"
+							onclick={() => device && tabs.open(device)}
+						>
+							{m.device_connect()}
+						</button>
+						<!-- A window of its own, e.g. for a second screen. -->
+						<a
+							href={resolve('/connect/[id]', { id: device.id })}
+							target="_blank"
+							rel="noopener"
+							class="inline-flex items-center gap-1.5 text-sm text-ink-2 underline hover:text-ink"
+						>
+							<ExternalLink size={14} aria-hidden="true" />
+							{m.session_new_window()}
+						</a>
+					</div>
 				{/if}
 			</div>
 
