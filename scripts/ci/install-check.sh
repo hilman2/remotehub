@@ -5,7 +5,8 @@
 # mounts look alike on both sides. Three hosts, each with a fresh daemon:
 #
 #   own     nothing on ports 80 and 443: Caddy of the package serves remotehub
-#           with a certificate of its own CA; a second run changes nothing
+#           with a certificate of its own CA; a second run changes nothing.
+#           It installs from the files of a release, as the one-liner does.
 #   caddy   Caddy on the host already: remotehub is attached to it
 #   nginx   nginx on the host already: remotehub is attached to it
 #
@@ -25,18 +26,22 @@ echo "── Host image and ops package"
 docker build --quiet --tag "$host_image" --file scripts/ci/install-host.Dockerfile scripts/ci >/dev/null
 rm -rf "$work"
 mkdir -p "$work"
-# As release.sh packs it: the directory `remotehub` with deploy/ops in it.
+# As release.sh packs it: the directory `remotehub` with deploy/ops in it,
+# and the files of a release made from it (#158).
 tar -C deploy -czf "${work}/remotehub-ops.tar.gz" --transform 's,^ops,remotehub,' ops
+bash scripts/ci/release-assets.sh "${work}/remotehub-ops.tar.gz" "$tag" "${work}/release"
 
 fail() {
   echo "FAILED: $*"
   exit 1
 }
 
-# Runs `script` on a fresh host with Docker-in-Docker; `prepare` runs before
-# the installer, `check` after it.
-host() { # name prepare check
+# Runs the installer on a fresh host with Docker-in-Docker; `prepare` runs
+# before it, `check` after it. `install` starts it, by default from the
+# package on disk.
+host() { # name prepare check [install]
   local name="$1" prepare="$2" check="$3"
+  local install="${4:-sh /install.sh --package /install/remotehub-ops.tar.gz}"
   local dind="${project}-${name}" opt="${project}-${name}-opt"
   echo "── Host: ${name}"
   docker volume create "$opt" >/dev/null
@@ -59,7 +64,7 @@ host() { # name prepare check
     -e REMOTEHUB_VERSION="$tag" \
     "$host_image" bash -euo pipefail -c "
       ${prepare}
-      sh /install.sh --domain remotehub.test --package /install/remotehub-ops.tar.gz | tee /tmp/first.log ||
+      ${install} --domain remotehub.test | tee /tmp/first.log ||
         { tail -n 40 /var/log/remotehub-install.log; exit 1; }
       grep -q 'https://remotehub.test/setup#code=' /tmp/first.log || { echo 'FAILED: no setup link'; exit 1; }
       ${check}
@@ -75,7 +80,13 @@ host() { # name prepare check
 # What people get: remotehub's health, through the proxy, over HTTPS.
 health='curl -skf --resolve remotehub.test:443:127.0.0.1 https://remotehub.test/api/health | grep -q "\"database\":\"ok\"" || { echo "FAILED: no remotehub behind the proxy"; exit 1; }'
 
-host own "" "
+# The own host installs as the one-liner does, from a mirror of the release's
+# files: install.sh through curl, then download and checksum (#158).
+mirror=http://127.0.0.1:8099
+host own "
+  caddy file-server --root /install/release --listen 127.0.0.1:8099 >/dev/null 2>&1 &
+  for _ in \$(seq 1 30); do curl -sf ${mirror}/SHA256SUMS >/dev/null && break; sleep 1; done
+" "
   ${health}
   grep -qx 'COMPOSE_PROFILES=caddy' /opt/remotehub/.env || { echo 'FAILED: Caddy of the package is not on'; exit 1; }
   echo | openssl s_client -connect 127.0.0.1:443 -servername remotehub.test 2>/dev/null |
@@ -90,7 +101,7 @@ host own "" "
   grep -q 'installed in /opt/remotehub already' /tmp/second.log || { echo 'FAILED: a second run did not keep the installation'; exit 1; }
   [ \"\$before\" = \"\$(sha256sum /opt/remotehub/.env /opt/remotehub/secrets/* | sha256sum)\" ] ||
     { echo 'FAILED: a second run changed .env or the secrets'; exit 1; }
-"
+" "curl -fsSL ${mirror}/install.sh | sh -s -- --from ${mirror}"
 
 host caddy "
   mkdir -p /etc/caddy

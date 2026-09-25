@@ -31,6 +31,11 @@ the link again, as long as setup is not done; it never upgrades (see [Upgrade](#
 For an install without questions: `--domain NAME`, `--version X.Y.Z` for another release than the latest,
 and `--mode caddy` or `--mode external` to choose what the next two sections describe.
 
+A host that cannot reach GitHub installs from a mirror: copy `install.sh`, `remotehub-ops.tar.gz` and
+`SHA256SUMS` of the release to a web server it reaches, then run
+`curl -fsSL https://mirror.example.com/remotehub/install.sh | sudo sh -s -- --from https://mirror.example.com/remotehub`.
+The images still come from `ghcr.io`.
+
 ## HTTPS on a host of its own
 
 If nothing listens on ports 80 and 443, the installer turns on Caddy of the ops package

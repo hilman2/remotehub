@@ -85,12 +85,7 @@ echo "ops package: ${ops}"
 # install.sh (#142) fetches the package under a name without the version,
 # from the latest release or a given one, and checks it against SHA256SUMS.
 assets="${CI_ABLAGE}/assets-${version}"
-rm -rf "$assets"
-mkdir -p "$assets"
-cp "$ops" "${assets}/remotehub-ops-${version}.tar.gz"
-cp "$ops" "${assets}/remotehub-ops.tar.gz"
-git show "${CI_SHA}:deploy/ops/install.sh" >"${assets}/install.sh"
-(cd "$assets" && sha256sum remotehub-ops-"${version}".tar.gz remotehub-ops.tar.gz install.sh >SHA256SUMS)
+bash "$(dirname "${BASH_SOURCE[0]}")/release-assets.sh" "$ops" "$version" "$assets"
 
 if [ "$dry_run" = 1 ]; then
   echo "✓ dry run: ${IMAGE}:${version}, ${GUACD_IMAGE}:${version} and ${BROWSER_IMAGE}:${version} built and tried, nothing published"

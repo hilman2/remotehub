@@ -15,6 +15,8 @@
 #   --mode caddy|external
 #                       caddy: Caddy of the package on ports 80 and 443;
 #                       external: a reverse proxy of your own
+#   --from URL          download the release from a mirror, which holds
+#                       remotehub-ops.tar.gz and SHA256SUMS
 #   --package FILE      an ops package on disk instead of the download
 #   --dir DIR           where it goes (default /opt/remotehub)
 set -eu
@@ -26,6 +28,7 @@ domain=""
 version=latest
 mode=""
 package=""
+from=""
 
 say() {
   printf '%s\n' "$*"
@@ -42,9 +45,10 @@ while [ $# -gt 0 ]; do
     --domain) domain="$2"; shift 2 ;;
     --version) version="$2"; shift 2 ;;
     --mode) mode="$2"; shift 2 ;;
+    --from) from="$2"; shift 2 ;;
     --package) package="$2"; shift 2 ;;
     --dir) dir="$2"; shift 2 ;;
-    -h | --help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,22p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -112,15 +116,18 @@ fetch_package() {
   if [ -n "$package" ]; then
     cp "$package" "$work/remotehub-ops.tar.gz"
   else
-    case "$version" in
-      latest) base="https://github.com/${REPO}/releases/latest/download" ;;
-      *) base="https://github.com/${REPO}/releases/download/v${version}" ;;
+    case "$from:$version" in
+      :latest) base="https://github.com/${REPO}/releases/latest/download" ;;
+      :*) base="https://github.com/${REPO}/releases/download/v${version}" ;;
+      *) base="${from%/}" ;;
     esac
     say "Downloading remotehub ($version) …"
     curl -fsSL "$base/remotehub-ops.tar.gz" -o "$work/remotehub-ops.tar.gz" ||
       die "cannot download $base/remotehub-ops.tar.gz"
     curl -fsSL "$base/SHA256SUMS" -o "$work/SHA256SUMS" || die "cannot download $base/SHA256SUMS"
-    (cd "$work" && grep ' remotehub-ops.tar.gz$' SHA256SUMS | sha256sum -c - >/dev/null) ||
+    # The package's line, whether sha256sum marked it as text (" ") or as
+    # binary ("*"); none at all fails too.
+    (cd "$work" && grep '[ *]remotehub-ops[.]tar[.]gz$' SHA256SUMS | sha256sum -c - >/dev/null) ||
       die "the ops package does not match its checksum"
   fi
   tar -xzf "$work/remotehub-ops.tar.gz" -C "$work"
