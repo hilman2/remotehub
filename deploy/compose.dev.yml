@@ -253,6 +253,8 @@ services:
   caddy:
     image: caddy:2.11.4
     hostname: caddy
+    # As in the ops package; a test restarts it through its admin API.
+    restart: unless-stopped
     environment:
       REMOTEHUB_HOST: remotehub.test
     command: >

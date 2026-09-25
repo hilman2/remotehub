@@ -53,9 +53,14 @@ export const uploadPfx = (pfx: string, password: string) =>
 	api<OwnCertificate>('PUT', '/api/settings/certificate', { pfx, password });
 export const resetCertificate = () => api('DELETE', '/api/settings/certificate');
 
-/** An own certificate this close to its end gets a warning. */
-export const EXPIRY_WARNING_DAYS = 30;
+/** Days before its end at which an own certificate gets a warning, the nearest first. */
+const EXPIRY_WARNINGS = [7, 30] as const;
 
-/** Whether `info` runs out within the warning time, or has. */
-export const runsOutSoon = (info: CertificateInfo, now = Date.now()) =>
-	info.not_after * 1000 - now < EXPIRY_WARNING_DAYS * 24 * 3600 * 1000;
+/**
+ * The nearest warning `info` has reached, in days before its end (also once
+ * it has run out); null while it has more than the first to go.
+ */
+export function expiryWarning(info: CertificateInfo, now = Date.now()): number | null {
+	const left = (info.not_after * 1000 - now) / (24 * 3600 * 1000);
+	return EXPIRY_WARNINGS.find((days) => left < days) ?? null;
+}

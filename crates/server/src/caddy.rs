@@ -88,7 +88,7 @@ impl Caddy {
         &self,
         method: Method,
         path: &str,
-        content_type: Option<&str>,
+        headers: &[(hyper::header::HeaderName, &str)],
         body: Vec<u8>,
     ) -> Result<(u16, Bytes), CaddyError> {
         let unreachable = |e: &dyn std::fmt::Display| CaddyError::Unreachable(e.to_string());
@@ -106,8 +106,8 @@ impl Caddy {
                 .uri(path)
                 // The admin API refuses requests without a host it knows.
                 .header(hyper::header::HOST, "localhost");
-            if let Some(content_type) = content_type {
-                request = request.header(hyper::header::CONTENT_TYPE, content_type);
+            for (name, value) in headers {
+                request = request.header(name, *value);
             }
             let request = request
                 .body(Full::new(Bytes::from(body)))
@@ -133,7 +133,7 @@ impl Caddy {
     /// The root certificate of Caddy's own CA, as PEM.
     pub async fn root(&self) -> Result<String, CaddyError> {
         let (status, body) = self
-            .request(Method::GET, "/pki/ca/local", None, Vec::new())
+            .request(Method::GET, "/pki/ca/local", &[], Vec::new())
             .await?;
         if status != 200 {
             return Err(CaddyError::Refused(
@@ -171,9 +171,18 @@ impl Caddy {
 
     /// Has Caddy load its Caddyfile again, which imports remotehub's files.
     async fn load(&self) -> Result<(), CaddyError> {
+        use hyper::header::{CACHE_CONTROL, CONTENT_TYPE};
         let caddyfile = tokio::fs::read(&self.config.caddyfile).await?;
+        // A new certificate of your own comes in the same files as the one
+        // before, so Caddy's configuration does not change, and without
+        // must-revalidate Caddy would skip the reload and keep serving the
+        // old certificate.
+        let headers = [
+            (CONTENT_TYPE, "text/caddyfile"),
+            (CACHE_CONTROL, "must-revalidate"),
+        ];
         let (status, body) = self
-            .request(Method::POST, "/load", Some("text/caddyfile"), caddyfile)
+            .request(Method::POST, "/load", &headers, caddyfile)
             .await?;
         if status == 200 {
             Ok(())

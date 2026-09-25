@@ -24,11 +24,16 @@ use crate::common::{self, FakeDirectory, authed, get, send, sign_in_request, sta
 /// A self-signed certificate for `name`, valid from yesterday for 90 days,
 /// and its key, as PEM.
 fn made(name: &str) -> (String, String) {
+    made_for(name, -1, 90)
+}
+
+/// As `made`, valid from `from` to `until` days from now.
+fn made_for(name: &str, from: i64, until: i64) -> (String, String) {
     let key = rcgen::KeyPair::generate().unwrap();
     let mut params = rcgen::CertificateParams::new(vec![name.to_owned()]).unwrap();
     let now = time::OffsetDateTime::now_utc();
-    params.not_before = now - time::Duration::days(1);
-    params.not_after = now + time::Duration::days(90);
+    params.not_before = now + time::Duration::days(from);
+    params.not_after = now + time::Duration::days(until);
     (params.self_signed(&key).unwrap().pem(), key.serialize_pem())
 }
 
@@ -75,21 +80,28 @@ async fn without_caddy_there_is_nothing_to_set_but_a_misfit_is_refused(pool: PgP
         json!({ "host": "remotehub.test", "runs": false })
     );
 
-    let (other, other_key) = made("other.example.com");
-    let misfit = send(
-        &app,
-        authed(
-            "PUT",
-            "/api/settings/certificate",
-            Some(json!({ "certificate": other, "key": other_key })),
-            &alice,
-        ),
-    )
-    .await;
-    assert_eq!(misfit.code(), "certificate_refused");
-    assert_eq!(misfit.json()["params"]["reason"], "wrong_name");
-
     let (fitting, key) = made("remotehub.test");
+    let (other, other_key) = made("other.example.com");
+    let (expired, expired_key) = made_for("remotehub.test", -90, -1);
+    for (certificate, key, reason) in [
+        (&other, &other_key, "wrong_name"),
+        (&fitting, &other_key, "key_mismatch"),
+        (&expired, &expired_key, "expired"),
+    ] {
+        let misfit = send(
+            &app,
+            authed(
+                "PUT",
+                "/api/settings/certificate",
+                Some(json!({ "certificate": certificate, "key": key })),
+                &alice,
+            ),
+        )
+        .await;
+        assert_eq!(misfit.code(), "certificate_refused", "{reason}");
+        assert_eq!(misfit.json()["params"]["reason"], reason);
+    }
+
     let fits = send(
         &app,
         authed(
@@ -147,6 +159,43 @@ async fn status_when(app: &Router, token: &str, ready: impl Fn(&Value) -> bool) 
     panic!("the certificate status did not come: {status}");
 }
 
+/// Fails unless `issuer`'s key signed `certificate`.
+fn signed_by(certificate: &[u8], issuer: &[u8]) {
+    let (_, certificate) = x509_parser::parse_x509_certificate(certificate).unwrap();
+    let (_, issuer) = x509_parser::parse_x509_certificate(issuer).unwrap();
+    certificate
+        .verify_signature(Some(issuer.public_key()))
+        .unwrap_or_else(|e| {
+            panic!(
+                "{} not signed by {}: {e}",
+                certificate.subject(),
+                issuer.subject()
+            )
+        });
+}
+
+/// Stops the lab's Caddy through its admin API; its container starts it
+/// again, which reads the Caddyfile and what it imports anew. Returns once
+/// the old process is gone.
+async fn restart_caddy() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let socket = std::env::var("REMOTEHUB_TEST_CADDY_SOCKET").unwrap();
+    let mut stream = tokio::net::UnixStream::connect(&socket).await.unwrap();
+    stream
+        .write_all(b"POST /stop HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut answer = Vec::new();
+    let _ = stream.read_to_end(&mut answer).await;
+    for _ in 0..200 {
+        if tokio::net::UnixStream::connect(&socket).await.is_err() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("the lab's Caddy did not stop");
+}
+
 fn sites_file(name: &str) -> Option<String> {
     std::fs::read_to_string(Path::new(SITES).join(name)).ok()
 }
@@ -193,6 +242,9 @@ async fn caddy_serves_its_own_ca_a_certificate_of_your_own_and_back(pool: PgPool
     assert_eq!(fingerprint(&der), root);
     let cer = send(&app, get("/ca.cer", None)).await;
     assert_eq!(fingerprint(&cer.body), root);
+    let served = caddy.current().await.unwrap();
+    signed_by(&served[0], &served[1]);
+    signed_by(&served[1], &der);
 
     let (certificate, key) = made("remotehub.test");
     let uploaded = send(
@@ -213,13 +265,37 @@ async fn caddy_serves_its_own_ca_a_certificate_of_your_own_and_back(pool: PgPool
     let serving = status_when(&app, &alice, |s| s["source"] == "own").await;
     assert_eq!(serving["served"]["fingerprint"], own.as_str());
     assert_eq!(serving["own"]["info"]["fingerprint"], own.as_str());
+
+    // Its successor lives in the same files, so Caddy's configuration
+    // stays the same: Caddy must load it all the same.
+    let (successor, successor_key) = made("remotehub.test");
+    let uploaded = send(
+        &app,
+        authed(
+            "PUT",
+            "/api/settings/certificate",
+            Some(json!({ "certificate": successor, "key": successor_key })),
+            &alice,
+        ),
+    )
+    .await;
+    assert_eq!(uploaded.status, StatusCode::OK, "{}", uploaded.json());
+    let own = uploaded.json()["info"]["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    status_when(&app, &alice, |s| s["served"]["fingerprint"] == own.as_str()).await;
     let audited: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_log WHERE action = 'tls_certificate.uploaded'",
     )
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(audited, 1);
+    assert_eq!(audited, 2);
+
+    // A restart of Caddy reads the files remotehub wrote.
+    restart_caddy().await;
+    status_when(&app, &alice, |s| s["served"]["fingerprint"] == own.as_str()).await;
 
     // Caddy refuses what does not load: its configuration and remotehub's
     // files stay as they were.

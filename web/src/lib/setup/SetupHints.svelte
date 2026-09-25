@@ -5,11 +5,11 @@
 	 * certificate (#146) asks for: the root certificate of Caddy's own CA on
 	 * the clients, a certificate of your own before it runs out. Each hint
 	 * stays until it is made up for or dismissed in this browser; the one
-	 * about running out is dismissed per certificate.
+	 * about running out comes 30 and again 7 days before the end.
 	 */
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { resolve } from '$app/paths';
-	import { loadCertificate, runsOutSoon } from '$lib/api/certificate';
+	import { expiryWarning, loadCertificate } from '$lib/api/certificate';
 	import { loadUsers } from '$lib/api/users';
 	import { formatLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
@@ -47,10 +47,12 @@
 				found.push({ kind: 'certificate_root', key: 'certificate_root' });
 			}
 			const own = certificate.ok ? certificate.data.own : undefined;
-			if (own && runsOutSoon(own.info)) {
+			const warning = own ? expiryWarning(own.info) : null;
+			if (own && warning !== null) {
 				found.push({
 					kind: 'certificate_expiry',
-					key: `certificate_expiry:${own.info.fingerprint}`,
+					// Dismissed at 30 days, it comes back at 7.
+					key: `certificate_expiry:${own.info.fingerprint}:${warning}`,
 					date: date.format(new Date(own.info.not_after * 1000))
 				});
 			}

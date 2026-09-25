@@ -256,10 +256,11 @@ start_lab() { # tools
     --security-opt seccomp=unconfined remotehub-ci-browser
   # Caddy of the ops package with its Caddyfile (#146), as in
   # deploy/compose.dev.yml: it starts once the test has written the snippet
-  # it imports. The volumes carry the run's label, so they go with it.
+  # it imports. The volumes carry the run's label, so they go with it. A
+  # test restarts it through its admin API.
   docker volume create --label "ci-lokal=${CI_ID}" "${CI_ID}-caddy-admin" >/dev/null
   docker volume create --label "ci-lokal=${CI_ID}" "${CI_ID}-caddy-sites" >/dev/null
-  ci_dienst caddy -e REMOTEHUB_HOST=remotehub.test -v "${CI_VOLUME}:${CI_SRC}:ro" \
+  ci_dienst caddy --restart unless-stopped -e REMOTEHUB_HOST=remotehub.test -v "${CI_VOLUME}:${CI_SRC}:ro" \
     -v "${CI_ID}-caddy-admin:/run/caddy" -v "${CI_ID}-caddy-sites:/etc/caddy/remotehub:ro" \
     "$CADDY_IMAGE" sh -c "until [ -f /etc/caddy/remotehub/tls.caddy ]; do sleep 1; done
       exec caddy run --config ${CI_SRC}/deploy/ops/caddy/Caddyfile --adapter caddyfile"

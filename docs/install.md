@@ -37,7 +37,9 @@ If nothing listens on ports 80 and 443, the installer turns on Caddy of the ops 
 (`COMPOSE_PROFILES=caddy` in `.env`) and opens both ports in `ufw` or `firewalld` if one of them is active.
 Caddy gets a certificate from Let's Encrypt if the internet reaches the host under its name. Otherwise, which
 is the usual case for an internal tool, it signs one with a CA of its own, named after the host. Browsers
-warn about that CA until the clients trust it.
+warn about that CA until the clients trust it. A certificate from that CA lasts 12 hours, and each renewal
+asks Let's Encrypt first: a host the internet reaches later gets a Let's Encrypt certificate within hours,
+without a change.
 
 *Settings → Certificate* shows which certificate Caddy serves. With Caddy's own CA, it offers the CA's root
 certificate for the clients, as `.crt` and as `.cer` for Windows, with its fingerprint and how to install it

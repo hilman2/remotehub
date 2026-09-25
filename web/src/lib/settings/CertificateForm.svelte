@@ -12,8 +12,8 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import {
 		loadCertificate,
+		expiryWarning,
 		resetCertificate,
-		runsOutSoon,
 		uploadPem,
 		uploadPfx,
 		type CertificateInfo,
@@ -152,6 +152,8 @@
 			<dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-ink-2">
 				<dt>{m.certificate_names()}</dt>
 				<dd class="font-mono break-all">{status.served.names.join(', ')}</dd>
+				<dt>{m.certificate_valid_from()}</dt>
+				<dd>{date.format(new Date(status.served.not_before * 1000))}</dd>
 				<dt>{m.certificate_valid_until()}</dt>
 				<dd>{until(status.served)}</dd>
 				<dt>{m.certificate_fingerprint()}</dt>
@@ -172,7 +174,7 @@
 				<CircleAlert size={16} class="mt-0.5 shrink-0" aria-hidden="true" />
 				{m.certificate_expired({ date: until(own.info) })}
 			</p>
-		{:else if runsOutSoon(own.info)}
+		{:else if expiryWarning(own.info) !== null}
 			<p class="mt-3 flex items-start gap-2 text-sm" role="alert">
 				<TriangleAlert size={16} class="mt-0.5 shrink-0 text-warning" aria-hidden="true" />
 				{m.certificate_runs_out({ date: until(own.info) })}
@@ -208,6 +210,7 @@
 			</p>
 			<ul class="mt-3 list-disc space-y-1 pl-5 text-sm text-ink-2">
 				<li>{m.certificate_root_windows()}</li>
+				<li>{m.certificate_root_intune()}</li>
 				<li>{m.certificate_root_mac()}</li>
 				<li>{m.certificate_root_linux()}</li>
 			</ul>
