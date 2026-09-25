@@ -111,7 +111,7 @@ job_base() {
     same node "FROM node:[^ ]*" deploy/dev/web.Dockerfile deploy/Dockerfile scripts/ci/tools.Dockerfile
     same pnpm "pnpm@[0-9.]*" deploy/dev/web.Dockerfile deploy/Dockerfile scripts/ci/tools.Dockerfile
     same postgres "postgres:[0-9][^ \"]*" deploy/compose.dev.yml deploy/ops/compose.yml scripts/ci/lokal.sh
-    same caddy "caddy:2[0-9.]*" deploy/compose.dev.yml deploy/ops/compose.yml scripts/ci/lokal.sh
+    same caddy "caddy:[0-9][0-9]*[.][0-9.]*" deploy/compose.dev.yml deploy/ops/compose.yml scripts/ci/lokal.sh
   '
 }
 
