@@ -8,6 +8,14 @@
 set -euo pipefail
 
 ops="$1" version="$2" dir="$3"
+# The package goes to Linux hosts: a carriage return anywhere in it, e.g. from
+# Git for Windows' core.autocrlf, breaks its shell scripts (#161). -U: grep
+# in Git Bash drops carriage returns before it matches otherwise. -c, not -q:
+# grep reads to the end, so tar gets no SIGPIPE, which pipefail would count.
+if tar -xzOf - <"$ops" | grep -cU $'\r' >/dev/null; then
+  echo "The ops package has CRLF line endings: ${ops}" >&2
+  exit 1
+fi
 rm -rf "$dir"
 mkdir -p "$dir"
 cp "$ops" "${dir}/remotehub-ops-${version}.tar.gz"
