@@ -77,7 +77,7 @@ async function typeDirectory(page: Page, user: string, password: string) {
 	await page.goto('/sign-in');
 	await page.getByLabel('User name or e-mail').fill(user);
 	await page.getByLabel('Password').fill(password);
-	await page.getByRole('button', { name: 'Sign in' }).click();
+	await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 }
 
 async function signOut(page: Page) {
@@ -89,7 +89,7 @@ async function signInLocal(page: Page, email: string, password: string, secret: 
 	await page.goto('/sign-in');
 	await page.getByLabel('User name or e-mail').fill(email);
 	await page.getByLabel('Password').fill(password);
-	await page.getByRole('button', { name: 'Sign in' }).click();
+	await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 	// The next time step: another code than the one used just before, and
 	// still within what Kratos accepts.
 	await page.getByLabel('Code', { exact: true }).fill(totp(secret, step() + 1));
@@ -123,7 +123,7 @@ test('a wrong code keeps an account with a second factor out', async ({ page }) 
 	await page.goto('/sign-in');
 	await page.getByLabel('User name or e-mail').fill(email);
 	await page.getByLabel('Password').fill(password);
-	await page.getByRole('button', { name: 'Sign in' }).click();
+	await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 	const wrong = totp(secret, step() + 5);
 	await page.getByLabel('Code', { exact: true }).fill(wrong);
 	await page.getByRole('button', { name: 'Confirm' }).click();
