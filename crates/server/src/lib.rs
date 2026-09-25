@@ -10,6 +10,7 @@ pub mod config;
 pub mod connector_agent;
 pub mod connectors;
 pub mod db;
+pub mod directory;
 pub mod escrow;
 pub mod kratos;
 pub mod principal;
@@ -41,8 +42,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
-    /// The configured directory; `None` if only break-glass accounts exist.
-    pub directory: Option<Arc<dyn Authenticator>>,
+    /// The directory, set on the settings page (#144); none without one.
+    pub directory: Arc<directory::Current>,
     pub settings: Arc<Settings>,
     pub limiter: Arc<SignInLimiter>,
     /// Seals and opens stored secrets (ADR 0004).
@@ -85,7 +86,7 @@ impl AppState {
     ) -> Self {
         AppState {
             db,
-            directory,
+            directory: Arc::new(directory::Current::new(directory)),
             settings: Arc::new(settings),
             limiter: Arc::new(SignInLimiter::new(Duration::from_secs(5 * 60))),
             vault: Arc::new(vault),

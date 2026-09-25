@@ -27,7 +27,10 @@
 	} from '$lib/api/setup';
 	import Logo from '$lib/components/Logo.svelte';
 	import { m } from '$lib/paraglide/messages';
+	import { addAdministrator, loadAdministrators, removeAdministrator } from '$lib/api/directory';
+	import PrincipalRules from '$lib/components/PrincipalRules.svelte';
 	import { session, setup } from '$lib/session.svelte';
+	import DirectoryForm from '$lib/settings/DirectoryForm.svelte';
 	import BreakGlassSheet from '$lib/setup/BreakGlassSheet.svelte';
 	import NewRecoveryKey from '$lib/vault/NewRecoveryKey.svelte';
 
@@ -103,6 +106,7 @@
 	/** The steps the administrator goes through, in order. */
 	const STEPS = [
 		{ step: STEP.administrator, label: m.wizard_step_administrator },
+		{ step: STEP.directory, label: m.wizard_step_directory },
 		{ step: STEP.breakGlass, label: m.wizard_step_break_glass },
 		{ step: STEP.recoveryKey, label: m.wizard_step_recovery_key },
 		{ step: STEP.done, label: m.wizard_step_done }
@@ -134,6 +138,9 @@
 	let stored = $state(false);
 
 	// Step 4: the break-glass account.
+	// Step 2: the directory, and who of it administers.
+	let directorySaved = $state(false);
+
 	let breakGlass = $state<BreakGlassAccount | null>(null);
 	let breakGlassExists = $state(false);
 
@@ -276,6 +283,32 @@
 			<a class="{primary} self-start" href={resolve('/sign-in')}>{m.sign_in_submit()}</a>
 		{:else if status?.phase === 'administrator' && !settingUp}
 			<p class="text-sm text-ink-2">{m.wizard_not_yours()}</p>
+		{:else if settingUp && current === STEP.directory}
+			<h2 class="text-xl font-semibold">{m.wizard_step_directory()}</h2>
+			<p class="text-sm text-ink-2">{m.wizard_directory_hint()}</p>
+			<div class="rounded-card border border-line bg-surface p-6">
+				<DirectoryForm onsaved={() => (directorySaved = true)} />
+			</div>
+			{#if directorySaved}
+				<PrincipalRules
+					id="administrator-search"
+					title={m.administrators_title()}
+					hint={m.wizard_administrators_hint()}
+					load={loadAdministrators}
+					add={addAdministrator}
+					remove={removeAdministrator}
+				/>
+				<button
+					type="button"
+					class="{primary} self-start"
+					disabled={busy}
+					onclick={() => next(STEP.directory)}
+				>
+					{m.setup_continue()}
+				</button>
+			{:else}
+				{@render skip(STEP.directory)}
+			{/if}
 		{:else if settingUp && current === STEP.breakGlass}
 			<h2 class="text-xl font-semibold print:hidden">{m.wizard_step_break_glass()}</h2>
 			<p class="text-sm text-ink-2 print:hidden">{m.wizard_break_glass_hint()}</p>

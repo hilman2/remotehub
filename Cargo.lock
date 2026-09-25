@@ -2237,16 +2237,21 @@ dependencies = [
 name = "remotehub-directory"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "ldap3",
  "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "secrecy",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "thiserror",
  "tokio",
+ "tokio-rustls",
  "tracing",
  "uuid",
+ "x509-parser",
 ]
 
 [[package]]

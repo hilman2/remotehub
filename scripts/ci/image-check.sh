@@ -32,8 +32,6 @@ export REMOTEHUB_IMAGE="$image" GUACD_IMAGE="$guacd" BROWSER_IMAGE="$browser_ima
 export REMOTEHUB_PUBLIC_URL=http://localhost:8080 REMOTEHUB_HOST=localhost
 # The checks go through the stack's network; any free port on the host.
 export REMOTEHUB_PORT=0
-# No directory: remotehub starts without one; break-glass accounts work.
-export REMOTEHUB_LDAP_URL=''
 project="${COMPOSE_PROJECT_NAME:-remotehub-check}"
 cd "$dir"
 
@@ -46,7 +44,7 @@ fail() {
 
 echo "── init.sh"
 sh init.sh
-for secret in db_password master_key ssh_ca_key ldap_bind_password; do
+for secret in db_password master_key ssh_ca_key; do
   [ -f "secrets/$secret" ] || fail "init.sh did not create secrets/$secret"
 done
 [ "$(stat -c %a secrets)" = 700 ] || fail "secrets/ is not 0700"

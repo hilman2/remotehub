@@ -5,6 +5,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use remotehub_directory::check::{Reason, Step, check};
 use remotehub_directory::ldap::{LdapConfig, LdapDirectory};
 use remotehub_directory::{AuthError, Identity, IdentityProvider, Sid};
 use secrecy::SecretString;
@@ -16,12 +17,16 @@ fn lab_file(path: &str) -> PathBuf {
         .join(path)
 }
 
+fn lab_text(path: &str) -> String {
+    std::fs::read_to_string(lab_file(path)).expect("a file of the test lab")
+}
+
 fn config() -> LdapConfig {
     LdapConfig {
         url: std::env::var("REMOTEHUB_TEST_LDAP_URL")
             .expect("REMOTEHUB_TEST_LDAP_URL points to the test lab's domain controller"),
         starttls: false,
-        ca_file: Some(lab_file("dc/tls/ca.crt")),
+        ca_pem: Some(lab_text("dc/tls/ca.crt")),
         bind_dn: "svc-remotehub@remotehub.test".into(),
         bind_password: SecretString::from("Svc-Passw0rd!"),
         base_dn: "DC=remotehub,DC=test".into(),
@@ -185,9 +190,9 @@ async fn an_extra_user_filter_restricts_sign_in() {
 #[tokio::test]
 #[ignore = "needs the test lab"]
 async fn an_untrusted_certificate_makes_the_directory_unavailable() {
-    // The server certificate itself is no CA: the chain cannot be verified.
+    // Another server's certificate: neither a CA nor the DC's own.
     let untrusting = LdapDirectory::new(LdapConfig {
-        ca_file: Some(lab_file("dc/tls/dc.crt")),
+        ca_pem: Some(lab_text("desktop/tls/cert.pem")),
         ..config()
     })
     .unwrap();
@@ -196,6 +201,111 @@ async fn an_untrusted_certificate_makes_the_directory_unavailable() {
         .await
         .unwrap_err();
     assert!(matches!(error, AuthError::Unavailable(_)), "{error:?}");
+}
+
+#[tokio::test]
+#[ignore = "needs the test lab"]
+async fn the_domain_controllers_own_certificate_can_be_trusted_as_it_is() {
+    let pinned = LdapDirectory::new(LdapConfig {
+        ca_pem: Some(lab_text("dc/tls/dc.crt")),
+        ..config()
+    })
+    .unwrap();
+    let alice = pinned
+        .authenticate("alice", &SecretString::from("Alice-Passw0rd!"))
+        .await
+        .unwrap();
+    assert_eq!(alice.username, "alice");
+}
+
+#[tokio::test]
+#[ignore = "needs the test lab"]
+async fn a_check_names_the_step_that_fails() {
+    let failed = |config: LdapConfig| async move {
+        let failure = check(config).await.unwrap_err();
+        (failure.step, failure.reason)
+    };
+    let url = config().url;
+    let host = url.trim_start_matches("ldaps://").to_owned();
+    assert_eq!(
+        failed(LdapConfig {
+            url: "ldaps://nowhere.remotehub.test".into(),
+            ..config()
+        })
+        .await,
+        (Step::Resolve, Reason::NotFound)
+    );
+    assert_eq!(
+        failed(LdapConfig {
+            url: format!("ldaps://{host}:1"),
+            ..config()
+        })
+        .await,
+        (Step::Connect, Reason::Refused)
+    );
+    assert_eq!(
+        failed(LdapConfig {
+            bind_password: SecretString::from("wrong"),
+            ..config()
+        })
+        .await,
+        (Step::Bind, Reason::InvalidCredentials)
+    );
+    assert_eq!(
+        failed(LdapConfig {
+            base_dn: "OU=nowhere,DC=remotehub,DC=test".into(),
+            ..config()
+        })
+        .await,
+        (Step::Search, Reason::NoSuchBase)
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs the test lab"]
+async fn an_unknown_ca_comes_back_with_the_certificate_to_trust() {
+    // The system's roots do not know the lab's CA, and the DC presents only
+    // its own certificate.
+    let failure = check(LdapConfig {
+        ca_pem: None,
+        ..config()
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(
+        (failure.step, failure.reason),
+        (Step::Tls, Reason::UnknownCa)
+    );
+    let presented = failure.ca.expect("the certificate to trust");
+    assert!(!presented.authority);
+    assert_eq!(presented.subject, "CN=dc.remotehub.test");
+    assert_eq!(presented.fingerprint.len(), 32 * 3 - 1);
+
+    // Trusted as it is, the check passes and finds the lab's users.
+    let found = check(LdapConfig {
+        ca_pem: Some(presented.pem),
+        ..config()
+    })
+    .await
+    .unwrap();
+    assert!(found.users >= 5, "{found:?}");
+    assert!(!found.more);
+    assert_eq!(found.sample.len(), 3);
+}
+
+#[tokio::test]
+#[ignore = "needs the test lab"]
+async fn a_check_passes_with_start_tls_too() {
+    let url = config().url;
+    let host = url.trim_start_matches("ldaps://").to_owned();
+    let found = check(LdapConfig {
+        url: format!("ldap://{host}"),
+        starttls: true,
+        ..config()
+    })
+    .await
+    .unwrap();
+    assert!(found.users >= 5, "{found:?}");
 }
 
 #[tokio::test]

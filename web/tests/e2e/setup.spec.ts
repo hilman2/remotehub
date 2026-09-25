@@ -2,8 +2,8 @@ import { expect, test } from '@playwright/test';
 import { step, totp } from './totp';
 
 // The setup wizard of a fresh installation (#143). It runs before every other
-// test (playwright.config.ts): they rely on alice administering through
-// "RH Admins", which the end of this test grants.
+// test (playwright.config.ts): they rely on the lab's directory (#144) and on
+// alice administering through "RH Admins", which the wizard sets up here.
 //
 // The link comes from `remotehub setup-code` (E2E_SETUP_LINK); the CI makes
 // one for its fresh database. A database set up before needs none.
@@ -38,8 +38,32 @@ test('a fresh installation is set up in the browser', async ({ page }) => {
 	await page.getByLabel('Code from the app').fill(totp(secret, step()));
 	await page.getByRole('button', { name: 'Set up' }).click();
 
-	// Signed in, the administrator is back in the wizard.
+	// Signed in, the administrator is back in the wizard: first the lab's
+	// directory. Its domain controller presents only its own certificate,
+	// which the system does not know; trusted as it is, the check passes.
 	await expect(page).toHaveURL(wizard);
+	await expect(page.getByRole('heading', { name: 'Directory' })).toBeVisible();
+	await page.getByLabel('Server address').fill('ldaps://dc.remotehub.test');
+	await page.getByLabel('Service account', { exact: true }).fill('svc-remotehub@remotehub.test');
+	await page.getByLabel('Password of the service account').fill('Svc-Passw0rd!');
+	await page.getByLabel('Base DN').fill('DC=remotehub,DC=test');
+	await page.getByRole('button', { name: 'Test connection' }).click();
+	await expect(page.getByTestId('directory-failure')).toContainText(
+		'The certificate comes from an unknown CA.'
+	);
+	await expect(page.getByTestId('directory-fingerprint')).toHaveText(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+	await page.getByRole('button', { name: 'Trust this certificate' }).click();
+	await expect(page.getByTestId('directory-found')).toContainText('Connected:');
+	await page.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByTestId('directory-found')).toContainText('Saved');
+
+	// The directory's administrators: the group RH Admins.
+	await page.getByLabel('Search users and groups').fill('RH Admins');
+	await page.getByRole('button', { name: /RH Admins/ }).click();
+	await page.getByRole('button', { name: 'Add', exact: true }).click();
+	await expect(page.getByRole('list', { name: 'Administrators' })).toContainText('RH Admins');
+	await page.getByRole('button', { name: 'Continue' }).click();
+
 	await expect(page.getByRole('heading', { name: 'Break-glass account' })).toBeVisible();
 	await page.getByRole('button', { name: 'Create break-glass account' }).click();
 	await expect(page.getByTestId('break-glass-username')).toHaveText('emergency');
@@ -64,19 +88,6 @@ test('a fresh installation is set up in the browser', async ({ page }) => {
 	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
 	// Nothing was left out, so nothing reminds of it.
 	await expect(page.getByText('There is no break-glass account.')).toHaveCount(0);
-
-	// The directory's administrators: the group RH Admins.
-	const origin = { origin: new URL(page.url()).origin };
-	const found = (await (
-		await page.request.get('/api/directory/principals?q=RH%20Admins')
-	).json()) as { kind: string; sid: string; name: string }[];
-	const admins = found.find((principal) => principal.name === 'RH Admins');
-	expect(admins, 'the lab has the group RH Admins').toBeTruthy();
-	const granted = await page.request.put(`/api/roles/administrator/members/${admins!.sid}`, {
-		headers: origin,
-		data: { principal_kind: 'group', principal_name: 'RH Admins' }
-	});
-	expect(granted.status()).toBe(204);
 
 	// Setup is over for good: the link leads nowhere now.
 	await page.goto(setupLink.pathname + setupLink.hash);

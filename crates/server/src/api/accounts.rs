@@ -108,7 +108,7 @@ pub async fn methods(State(state): State<AppState>) -> Json<Methods> {
         None => Vec::new(),
     };
     Json(Methods {
-        directory: state.directory.is_some(),
+        directory: state.directory.get().is_some(),
         local: state.settings.kratos.is_some(),
         providers,
     })

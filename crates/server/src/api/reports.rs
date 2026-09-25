@@ -199,9 +199,10 @@ async fn directory_groups(
     user: Uuid,
     sid: Option<&str>,
 ) -> Result<(Vec<String>, &'static str), Problem> {
-    if let (Some(directory), Some(sid)) =
-        (&state.directory, sid.and_then(|s| s.parse::<Sid>().ok()))
-    {
+    if let (Some(directory), Some(sid)) = (
+        state.directory.get(),
+        sid.and_then(|s| s.parse::<Sid>().ok()),
+    ) {
         match directory.refresh(&sid).await {
             Ok(groups) => {
                 return Ok((

@@ -1643,7 +1643,7 @@ pub async fn search_principals(
     }
     let mut found = principal::search_own(&state.db, &query.q, 25).await?;
     // Without a directory, remotehub's own principals are all there is.
-    if let Some(directory) = state.directory.as_ref() {
+    if let Some(directory) = state.directory.get() {
         let listed = directory.search(&query.q, 25).await.map_err(|error| {
             tracing::warn!(%error, "directory search failed");
             Problem::new(ErrorCode::DirectoryUnavailable)

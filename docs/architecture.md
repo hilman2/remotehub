@@ -101,6 +101,12 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   prints the wizard's link with a one-time code (only its hash is stored); with it, the wizard creates a
   local account with the administrator role, who then goes through the other steps in their own session.
   Once complete, setup never opens again.
+- **Directory connection (`directory.rs`, `api/directory.rs`, #144):** stored in the table `directory`, the
+  service account's password sealed in `secret_fields`. The running client sits behind a swappable handle,
+  so a saved change applies to the next sign-in. Before saving, `remotehub_directory::check` goes through
+  the steps on a plain socket (name, connection, TLS) and then through the LDAP client (bind, search), and
+  names the one that fails. Trusted certificates are CA certificates, as roots, and server certificates,
+  trusted as they are (`crates/directory/src/trust.rs`).
 - **Second factor for directory accounts (`second_factor.rs`):** TOTP whose secret is sealed in the vault
   (owner = user). A user sets it up on the account page, or during sign-in when a rule in
   `second_factor_principals` names them or a group of theirs; the password is then sent again with the

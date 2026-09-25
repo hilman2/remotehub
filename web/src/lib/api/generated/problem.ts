@@ -44,6 +44,7 @@ export const ERROR_CODES = [
 	'setup_done',
 	'break_glass_exists',
 	'last_administrator',
+	'directory_check_failed',
 	'directory_unavailable',
 	'database_unavailable',
 	'internal'

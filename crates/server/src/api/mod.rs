@@ -6,6 +6,7 @@ mod audit;
 mod catalog;
 mod connect;
 mod connectors;
+mod directory;
 mod display;
 mod fields;
 mod groups;
@@ -90,6 +91,13 @@ pub fn router(state: AppState) -> Router<AppState> {
             "/second-factor-principals/{sid}",
             put(second_factor::require).delete(second_factor::waive),
         )
+        .route(
+            "/settings/directory",
+            get(directory::get)
+                .put(directory::save)
+                .delete(directory::remove),
+        )
+        .route("/settings/directory/check", post(directory::check))
         .route("/roles", get(roles::list))
         .route(
             "/roles/{role}/members/{sid}",

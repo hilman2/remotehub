@@ -11,7 +11,6 @@
 //!    groups, nested ones included, computed by the domain controller.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,17 +18,18 @@ use ldap3::{
     Ldap, LdapConnAsync, LdapConnSettings, LdapError, Scope, SearchEntry, SearchOptions,
     SearchResult,
 };
-use rustls::{ClientConfig, RootCertStore};
-use rustls_pki_types::CertificateDer;
-use rustls_pki_types::pem::PemObject;
+use rustls::ClientConfig;
 use secrecy::{ExposeSecret, SecretString};
 use uuid::Uuid;
 
+use crate::check::{Failure, Reason, Step};
 use crate::laps::{self, LapsError, LapsPassword};
+use crate::trust::{self, Verifier};
 use crate::{AuthError, Group, Identity, IdentityProvider, Principal, PrincipalKind, Sid};
 
 /// LDAP result codes.
 const SIZE_LIMIT_EXCEEDED: u32 = 4;
+const NO_SUCH_OBJECT: u32 = 32;
 const INVALID_CREDENTIALS: u32 = 49;
 
 /// `ACCOUNTDISABLE` in `userAccountControl`.
@@ -50,9 +50,9 @@ pub struct LdapConfig {
     /// `ldaps://dc.example.com` or, with `starttls`, `ldap://dc.example.com`.
     pub url: String,
     pub starttls: bool,
-    /// PEM file with the CA certificates that sign the domain controllers'
+    /// PEM with the CA certificates that sign the domain controllers'
     /// certificates; without it the system's roots are used.
-    pub ca_file: Option<PathBuf>,
+    pub ca_pem: Option<String>,
     /// Service account for lookups, as DN or UPN.
     pub bind_dn: String,
     pub bind_password: SecretString,
@@ -67,27 +67,22 @@ pub struct LdapConfig {
 
 pub struct LdapDirectory {
     config: LdapConfig,
-    tls: Option<Arc<ClientConfig>>,
+    tls: Arc<ClientConfig>,
 }
 
 impl LdapDirectory {
     pub fn new(config: LdapConfig) -> Result<Self, AuthError> {
-        let tls = config
-            .ca_file
-            .as_deref()
-            .map(tls_config)
-            .transpose()
+        let tls = Verifier::new(config.ca_pem.as_deref())
+            .and_then(trust::client_config)
             .map_err(AuthError::Directory)?;
         Ok(LdapDirectory { config, tls })
     }
 
     async fn connect(&self) -> Result<Ldap, AuthError> {
-        let mut settings = LdapConnSettings::new()
+        let settings = LdapConnSettings::new()
             .set_conn_timeout(self.config.timeout)
-            .set_starttls(self.config.starttls);
-        if let Some(tls) = &self.tls {
-            settings = settings.set_config(tls.clone());
-        }
+            .set_starttls(self.config.starttls)
+            .set_config(self.tls.clone());
         let (conn, ldap) = LdapConnAsync::with_settings(settings, &self.config.url)
             .await
             .map_err(|e| AuthError::Unavailable(e.to_string()))?;
@@ -108,6 +103,72 @@ impl LdapDirectory {
             .success()
             .map_err(|e| AuthError::Directory(format!("service account bind failed: {e}")))?;
         Ok(ldap)
+    }
+
+    /// The last steps of [`crate::check::check`] (#144): binds as the
+    /// service account, then asks for the users the filter lets sign in, up
+    /// to `limit`. Returns their names, and whether there are more.
+    pub(crate) async fn users(&self, limit: i32) -> Result<(Vec<String>, bool), Failure> {
+        let mut ldap = self
+            .connect()
+            .await
+            .map_err(|e| Failure::new(Step::Connect, Reason::Other, e))?;
+        let bound = ldap
+            .with_timeout(self.config.timeout)
+            .simple_bind(
+                &self.config.bind_dn,
+                self.config.bind_password.expose_secret(),
+            )
+            .await
+            .map_err(|e| Failure::new(Step::Bind, Reason::Other, e))?;
+        match bound.rc {
+            0 => {}
+            INVALID_CREDENTIALS => {
+                return Err(Failure::new(
+                    Step::Bind,
+                    Reason::InvalidCredentials,
+                    bound.text,
+                ));
+            }
+            rc => {
+                let detail = format!("code {rc}: {}", bound.text);
+                return Err(Failure::new(Step::Bind, Reason::Other, detail));
+            }
+        }
+        let filter = format!(
+            "(&(objectCategory=person)(objectClass=user){})",
+            self.config.user_filter.as_deref().unwrap_or_default()
+        );
+        let SearchResult(entries, result) = ldap
+            .with_timeout(self.config.timeout)
+            .with_search_options(SearchOptions::new().sizelimit(limit))
+            .search(
+                &self.config.base_dn,
+                Scope::Subtree,
+                &filter,
+                vec!["displayName", "sAMAccountName"],
+            )
+            .await
+            .map_err(|e| Failure::new(Step::Search, Reason::Other, e))?;
+        let _ = ldap.unbind().await;
+        match result.rc {
+            0 | SIZE_LIMIT_EXCEEDED => {}
+            NO_SUCH_OBJECT => {
+                return Err(Failure::new(Step::Search, Reason::NoSuchBase, result.text));
+            }
+            rc => {
+                let detail = format!("code {rc}: {}", result.text);
+                return Err(Failure::new(Step::Search, Reason::Other, detail));
+            }
+        }
+        let names = entries
+            .into_iter()
+            .filter_map(|entry| {
+                let entry = SearchEntry::construct(entry);
+                first_text(&entry, "displayName").or_else(|| first_text(&entry, "sAMAccountName"))
+            })
+            .collect();
+        Ok((names, result.rc == SIZE_LIMIT_EXCEEDED))
     }
 
     /// Security groups whose name contains `query`, for choosing grantees.
@@ -472,26 +533,6 @@ fn bind_failure(diagnostic: &str) -> AuthError {
     }
 }
 
-fn tls_config(ca_file: &Path) -> Result<Arc<ClientConfig>, String> {
-    let describe = |e: &dyn std::fmt::Display| format!("CA file {}: {e}", ca_file.display());
-    let mut roots = RootCertStore::empty();
-    for cert in CertificateDer::pem_file_iter(ca_file).map_err(|e| describe(&e))? {
-        roots
-            .add(cert.map_err(|e| describe(&e))?)
-            .map_err(|e| describe(&e))?;
-    }
-    if roots.is_empty() {
-        return Err(describe(&"no certificates found"));
-    }
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let config = ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
-        .map_err(|e| describe(&e))?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
-    Ok(Arc::new(config))
-}
-
 fn unavailable(error: LdapError) -> AuthError {
     AuthError::Unavailable(error.to_string())
 }
@@ -605,13 +646,5 @@ mod tests {
             bind_failure("something else"),
             AuthError::InvalidCredentials
         );
-    }
-
-    #[test]
-    fn reports_unusable_ca_files() {
-        assert!(tls_config(Path::new("/does/not/exist.pem")).is_err());
-        let empty = std::env::temp_dir().join("remotehub-empty-ca.pem");
-        std::fs::write(&empty, "").unwrap();
-        assert!(tls_config(&empty).unwrap_err().contains("no certificates"));
     }
 }

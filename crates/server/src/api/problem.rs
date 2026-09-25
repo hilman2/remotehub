@@ -83,6 +83,7 @@ error_codes! {
     SetupDone = ("setup_done", CONFLICT, "remotehub is set up already"),
     BreakGlassExists = ("break_glass_exists", CONFLICT, "A break-glass account exists already"),
     LastAdministrator = ("last_administrator", CONFLICT, "The last administrator keeps the role"),
+    DirectoryCheckFailed = ("directory_check_failed", UNPROCESSABLE_ENTITY, "The directory connection did not pass its check"),
     DirectoryUnavailable = ("directory_unavailable", SERVICE_UNAVAILABLE, "Directory unavailable"),
     DatabaseUnavailable = ("database_unavailable", SERVICE_UNAVAILABLE, "Database unavailable"),
     Internal = ("internal", INTERNAL_SERVER_ERROR, "Internal server error"),
