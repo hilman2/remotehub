@@ -3,6 +3,8 @@
 	import { untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { CREDENTIAL_KIND_LABELS } from './labels';
+	import FieldsEditor, { type EditedField } from '$lib/vault/FieldsEditor.svelte';
+	import IconPicker from '$lib/vault/IconPicker.svelte';
 	import SecretFields, { secretInput } from './SecretFields.svelte';
 
 	let {
@@ -26,6 +28,17 @@
 	let privateKey = $state('');
 	let passphrase = $state('');
 	let certificate = $state('');
+	let url = $state(start?.url ?? '');
+	let notes = $state(start?.notes ?? '');
+	let icon = $state(start?.icon ?? 0);
+	let fields = $state<EditedField[]>(
+		(start?.fields ?? []).map((field) => ({
+			name: field.name,
+			value: field.value ?? '',
+			protected: !!field.protected,
+			stored: !!field.protected
+		}))
+	);
 
 	function submit(event: SubmitEvent) {
 		event.preventDefault();
@@ -33,7 +46,16 @@
 			folder_id: start?.folder_id ?? folderId,
 			name,
 			username,
-			domain
+			domain,
+			url,
+			notes,
+			icon,
+			// A stored protected field left empty keeps its value.
+			fields: fields.map((field) =>
+				field.protected && field.stored && field.value === ''
+					? { name: field.name, protected: true }
+					: { name: field.name, protected: field.protected, value: field.value }
+			)
 		};
 		if (!start) input.kind = kind;
 		// Updating without new secrets keeps the stored ones.
@@ -93,6 +115,15 @@
 		bind:passphrase
 		bind:certificate
 	/>
+
+	<label class={label} for="credential-url">{m.field_url()}</label>
+	<input id="credential-url" class={field} maxlength="2000" spellcheck="false" bind:value={url} />
+	<label class={label} for="credential-notes">{m.field_notes()}</label>
+	<textarea id="credential-notes" class={field} rows="3" maxlength="10000" bind:value={notes}
+	></textarea>
+	<FieldsEditor id="credential" bind:fields />
+	<label class={label} for="credential-icon">{m.vault_icon()}</label>
+	<IconPicker id="credential-icon" bind:value={icon} />
 
 	<div class="mt-5 flex justify-end gap-2">
 		<button

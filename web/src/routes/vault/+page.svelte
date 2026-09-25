@@ -36,6 +36,12 @@
 		type StoredVault,
 		type UnlockKind
 	} from '$lib/vault/vault';
+	import FolderIcon from '@lucide/svelte/icons/folder';
+	import FolderPlus from '@lucide/svelte/icons/folder-plus';
+	import FieldsEditor, { type EditedField } from '$lib/vault/FieldsEditor.svelte';
+	import IconPicker from '$lib/vault/IconPicker.svelte';
+	import SharedEntries from '$lib/vault/SharedEntries.svelte';
+	import { FOLDER_ICON, icon } from '$lib/vault/icons';
 
 	type Stage = 'loading' | 'setup' | 'recovery' | 'locked' | 'open';
 
@@ -69,9 +75,41 @@
 	/** What the owner used after searching; sealed in the vault (#81). */
 	let picks = $state<Pick[]>([]);
 
-	/** Readable entries, best first; entries that do not open, last. */
+	/** The personal folder shown (#98); the top without one. */
+	let folder = $state<string | null>(null);
+	const folders = $derived(entries.filter((entry) => entry.content?.kind === 'folder'));
+	/** The folders from the top down to the one shown. */
+	const trail = $derived.by(() => {
+		const way: Entry[] = [];
+		let at = folders.find((f) => f.id === folder);
+		while (at && !way.includes(at)) {
+			way.unshift(at);
+			at = folders.find((f) => f.id === at?.content?.parent);
+		}
+		return way;
+	});
+	const subfolders = $derived(folders.filter((f) => (f.content?.parent ?? null) === folder));
+	/** Folders with their path, for choosing where an entry goes. */
+	const places = $derived(
+		folders
+			.map((f) => {
+				const names: string[] = [];
+				let at: Entry | undefined = f;
+				while (at && names.length < 20) {
+					names.unshift(at.content?.title ?? '');
+					at = folders.find((p) => p.id === at?.content?.parent);
+				}
+				return { id: f.id, path: names.join(' / ') };
+			})
+			.sort((a, b) => a.path.localeCompare(b.path, getLocale()))
+	);
+
+	/**
+	 * Readable entries, best first; entries that do not open, last. Without
+	 * a search, those of the folder shown; a search looks through all.
+	 */
 	const shown = $derived.by(() => {
-		const readable = entries.filter((entry) => entry.content);
+		const readable = entries.filter((entry) => entry.content && entry.content.kind !== 'folder');
 		if (queryKey(query)) {
 			return rank(
 				readable.map((entry) => ({
@@ -97,11 +135,46 @@
 			const at = order.indexOf(entry.id);
 			return at < 0 ? order.length : at;
 		};
+		const here = readable.filter((entry) => (entry.content?.parent ?? null) === folder);
 		return [
-			...[...readable].sort((a, b) => place(a) - place(b)),
-			...entries.filter((entry) => !entry.content)
+			...here.sort((a, b) => place(a) - place(b)),
+			...(folder === null ? entries.filter((entry) => !entry.content) : [])
 		];
 	});
+
+	let folderName = $state('');
+	let folderOpen = $state(false);
+
+	async function addFolder(event: SubmitEvent) {
+		event.preventDefault();
+		if (!key) return;
+		const result = await saveEntry(key, null, {
+			...EMPTY,
+			kind: 'folder',
+			parent: folder,
+			title: folderName.trim(),
+			icon: FOLDER_ICON
+		});
+		if (!result.ok) {
+			error = errorMessage(result.code);
+			return;
+		}
+		folderName = '';
+		folderOpen = false;
+		await load();
+	}
+
+	/** Only an empty folder goes. */
+	const empty = (id: string) => !entries.some((entry) => entry.content?.parent === id);
+
+	async function removeFolder(id: string) {
+		const parent = folders.find((f) => f.id === id)?.content?.parent ?? null;
+		await remove(id);
+		folder = parent;
+	}
+
+	/** The custom fields of the entry being edited. */
+	let editedFields = $state<EditedField[]>([]);
 
 	let editing = $state<{ id: string | null; content: EntryContent } | null>(null);
 	let editorOpen = $state(false);
@@ -206,7 +279,12 @@
 
 	function edit(entry: Entry | null) {
 		if (entry) used(entry);
-		editing = { id: entry?.id ?? null, content: { ...(entry?.content ?? EMPTY) } };
+		// Entries from before #98 have neither folder nor icon.
+		const content = { ...(entry?.content ?? { ...EMPTY, parent: folder }) };
+		content.parent ??= null;
+		content.icon ??= 0;
+		editing = { id: entry?.id ?? null, content };
+		editedFields = (entry?.content?.fields ?? []).map((field) => ({ ...field }));
 		error = null;
 		editorOpen = true;
 	}
@@ -214,7 +292,15 @@
 	async function save(event: SubmitEvent) {
 		event.preventDefault();
 		if (!key || !editing) return;
-		const result = await saveEntry(key, editing.id, editing.content);
+		const content: EntryContent = {
+			...editing.content,
+			fields: editedFields.map(({ name, value, protected: hidden }) => ({
+				name: name.trim(),
+				value,
+				protected: hidden
+			}))
+		};
+		const result = await saveEntry(key, editing.id, content);
 		if (!result.ok) {
 			error = errorMessage(result.code);
 			return;
@@ -424,12 +510,58 @@
 {:else if stage === 'open'}
 	<div class="mt-6 flex items-center gap-3">
 		<h2 class="text-lg font-semibold">{m.vault_entries()}</h2>
-		<button type="button" class="{button} ml-auto" onclick={() => edit(null)}>
+		<button type="button" class="{button} ml-auto" onclick={() => (folderOpen = true)}>
+			<FolderPlus size={16} aria-hidden="true" />
+			{m.vault_new_folder()}
+		</button>
+		<button type="button" class={button} onclick={() => edit(null)}>
 			<Plus size={16} aria-hidden="true" />
 			{m.vault_new_entry()}
 		</button>
 	</div>
 	{#if !editorOpen}{@render problem()}{/if}
+	<nav class="mt-3 flex flex-wrap items-center gap-1 text-sm" aria-label={m.vault_folders()}>
+		<button
+			type="button"
+			class="rounded-md px-2 py-1 hover:bg-surface-2"
+			aria-current={folder === null ? 'location' : undefined}
+			onclick={() => (folder = null)}
+		>
+			{m.vault_title()}
+		</button>
+		{#each trail as step (step.id)}
+			<span class="text-ink-3" aria-hidden="true">/</span>
+			<button
+				type="button"
+				class="rounded-md px-2 py-1 hover:bg-surface-2"
+				aria-current={folder === step.id ? 'location' : undefined}
+				onclick={() => (folder = step.id)}
+			>
+				{step.content?.title}
+			</button>
+		{/each}
+		{#if folder && empty(folder)}
+			<button
+				type="button"
+				class="ml-2 rounded-md px-2 py-1 text-xs text-ink-3 hover:bg-surface-2 hover:text-critical"
+				onclick={() => folder && removeFolder(folder)}
+			>
+				{m.vault_remove_folder()}
+			</button>
+		{/if}
+	</nav>
+	{#if subfolders.length > 0 && !queryKey(query)}
+		<ul class="mt-2 flex flex-wrap gap-2">
+			{#each subfolders as sub (sub.id)}
+				<li>
+					<button type="button" class={button} onclick={() => (folder = sub.id)}>
+						<FolderIcon size={16} class="text-ink-3" aria-hidden="true" />
+						{sub.content?.title}
+					</button>
+				</li>
+			{/each}
+		</ul>
+	{/if}
 	{#if entries.length === 0}
 		<p class="mt-3 text-sm text-ink-3">{m.vault_empty()}</p>
 	{:else}
@@ -450,6 +582,8 @@
 			{#each shown as entry (entry.id)}
 				<li class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
 					{#if entry.content}
+						{@const Icon = icon(entry.content.icon)}
+						<Icon size={16} class="shrink-0 text-warning" aria-hidden="true" />
 						<div class="min-w-0">
 							<p class="font-medium">{entry.content.title}</p>
 							<p class="truncate text-ink-2">
@@ -458,6 +592,16 @@
 							{#if revealed === entry.id}
 								<p class="mt-1 font-mono break-all">{entry.content.password}</p>
 							{/if}
+							{#each entry.content.fields ?? [] as field (field.name)}
+								<p class="mt-1 text-xs text-ink-2">
+									{field.name}:
+									{#if field.protected && revealed !== entry.id}
+										<span aria-hidden="true">••••••</span>
+									{:else}
+										<span class="font-mono break-all">{field.value}</span>
+									{/if}
+								</p>
+							{/each}
 						</div>
 						<div class="ml-auto flex flex-wrap gap-2">
 							<button
@@ -536,6 +680,10 @@
 	</div>
 {/if}
 
+{#if stage !== 'loading'}
+	<SharedEntries {query} />
+{/if}
+
 <Dialog bind:open={editorOpen} title={editing?.id ? m.catalog_edit() : m.vault_new_entry()}>
 	{#if editorOpen && editing}
 		<form onsubmit={save}>
@@ -567,6 +715,16 @@
 			<label class={label} for="entry-notes">{m.field_notes()}</label>
 			<textarea id="entry-notes" class={field} rows="3" bind:value={editing.content.notes}
 			></textarea>
+			<FieldsEditor id="entry" bind:fields={editedFields} />
+			<label class={label} for="entry-folder">{m.vault_folder()}</label>
+			<select id="entry-folder" class={field} bind:value={editing.content.parent}>
+				<option value={null}>{m.vault_title()}</option>
+				{#each places as place (place.id)}
+					<option value={place.id}>{place.path}</option>
+				{/each}
+			</select>
+			<label class={label} for="entry-icon">{m.vault_icon()}</label>
+			<IconPicker id="entry-icon" bind:value={editing.content.icon} />
 			<div class="mt-5 flex justify-end gap-2">
 				{#if editing.id}
 					<button
@@ -586,6 +744,23 @@
 				</button>
 				<button type="submit" class={primary}>{m.action_save()}</button>
 			</div>
+			{@render problem()}
+		</form>
+	{/if}
+</Dialog>
+
+<Dialog bind:open={folderOpen} title={m.vault_new_folder()}>
+	{#if folderOpen}
+		<form onsubmit={addFolder}>
+			<label class="block text-sm font-medium" for="vault-folder-name">{m.field_name()}</label>
+			<input
+				id="vault-folder-name"
+				class={field}
+				required
+				maxlength="200"
+				bind:value={folderName}
+			/>
+			<button type="submit" class="{primary} mt-5">{m.action_create()}</button>
 			{@render problem()}
 		</form>
 	{/if}

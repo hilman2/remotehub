@@ -96,6 +96,11 @@ export interface Credential {
 	key_algorithm: string | null;
 	key_fingerprint: string | null;
 	has_certificate: boolean;
+	url: string;
+	notes: string;
+	/** One of KeePass' standard icons (lib/vault/icons.ts). */
+	icon: number;
+	fields: CredentialField[];
 	role: Role;
 }
 
@@ -144,6 +149,18 @@ export interface CredentialInput {
 	private_key?: string;
 	passphrase?: string;
 	certificate?: string;
+	url?: string;
+	notes?: string;
+	icon?: number;
+	/** A protected field without `value` keeps the one it has. */
+	fields?: { name: string; protected?: boolean; value?: string }[];
+}
+
+/** A custom field of a credential (#98); protected ones come without value. */
+export interface CredentialField {
+	name: string;
+	protected?: boolean;
+	value?: string;
 }
 
 export interface GrantRow {

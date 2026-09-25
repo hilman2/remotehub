@@ -465,5 +465,21 @@
 	"reveal_copy": "Copy",
 	"reveal_copied": "Copied. It leaves the clipboard in {seconds} seconds.",
 	"reveal_copy_failed": "The browser did not let remotehub use the clipboard.",
-	"audit_credential_revealed": "Showed or copied a stored credential"
+	"audit_credential_revealed": "Showed or copied a stored credential",
+	"vault_icon": "Icon",
+	"vault_icon_number": "Icon {number}",
+	"vault_fields": "Further fields",
+	"vault_field_name": "Field name",
+	"vault_field_value": "Value",
+	"vault_field_protected": "Protected",
+	"vault_field_keep": "Leave empty to keep it",
+	"vault_field_add": "Add field",
+	"vault_field_remove": "Remove {name}",
+	"vault_folders": "Folders",
+	"vault_folder": "Folder",
+	"vault_new_folder": "New folder",
+	"vault_remove_folder": "Remove this empty folder",
+	"vault_shared": "Shared with me",
+	"vault_shared_hint": "Credentials of the folders you may see. With the right to reveal them, you show or copy them here too; each time is recorded.",
+	"vault_shared_none": "Nothing shared with you yet."
 }

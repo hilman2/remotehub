@@ -9,6 +9,8 @@ export interface Revealed {
 	private_key?: string;
 	passphrase?: string;
 	certificate?: string;
+	/** A credential's protected custom fields (#98). */
+	fields?: { name: string; value: string }[];
 }
 
 /** Why it is revealed; the audit log keeps it. */

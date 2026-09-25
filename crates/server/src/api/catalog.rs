@@ -17,6 +17,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
+use super::fields::{self, Field, FieldInput};
 use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
 use crate::audit::{self, Action, Actor, Entry};
@@ -188,6 +189,12 @@ struct CredentialRow {
     key_algorithm: Option<String>,
     key_fingerprint: Option<String>,
     has_certificate: bool,
+    url: String,
+    notes: String,
+    /// One of KeePass' standard icons.
+    icon: i16,
+    /// Custom fields; protected ones without their value.
+    fields: sqlx::types::Json<Vec<Field>>,
 }
 
 #[derive(Serialize)]
@@ -216,7 +223,7 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
     .await?;
     let credentials: Vec<CredentialRow> = sqlx::query_as(
         "SELECT id, folder_id, name, kind, username, domain, version, key_algorithm, key_fingerprint,
-                has_certificate
+                has_certificate, url, notes, icon, fields
          FROM credentials ORDER BY lower(name)",
     )
     .fetch_all(&state.db)
@@ -954,8 +961,100 @@ pub struct CredentialInput {
     username: String,
     #[serde(default)]
     domain: String,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    notes: String,
+    #[serde(default)]
+    icon: i16,
+    #[serde(default)]
+    fields: Vec<FieldInput>,
     #[serde(flatten)]
     secrets: SecretInput,
+}
+
+/// What a credential has next to its secrets (#98), checked.
+struct Details {
+    url: String,
+    notes: String,
+    icon: i16,
+    fields: fields::Checked,
+}
+
+fn details(input: &CredentialInput) -> Result<Details, Problem> {
+    let url = input.url.trim();
+    if url.chars().count() > 2000 || url.chars().any(char::is_control) {
+        return Err(invalid("url"));
+    }
+    let notes = input.notes.trim_end();
+    if notes.chars().count() > 10_000 || notes.chars().any(|c| c.is_control() && c != '\n') {
+        return Err(invalid("notes"));
+    }
+    if !(0..=68).contains(&input.icon) {
+        return Err(invalid("icon"));
+    }
+    Ok(Details {
+        url: url.to_owned(),
+        notes: notes.to_owned(),
+        icon: input.icon,
+        fields: fields::check(&input.fields)?,
+    })
+}
+
+/// The sealed fields a credential of `kind` has besides its custom ones.
+fn secret_names(kind: &str) -> &'static [&'static str] {
+    if kind == "ssh_key" {
+        &[PRIVATE_KEY_FIELD, PASSPHRASE_FIELD, CERTIFICATE_FIELD]
+    } else {
+        &[PASSWORD_FIELD]
+    }
+}
+
+/// Copies sealed fields of `from` to the new version `to`, for what a
+/// change keeps.
+async fn carry(
+    tx: &mut sqlx::PgConnection,
+    state: &AppState,
+    id: Uuid,
+    from: i32,
+    to: i32,
+    names: &[String],
+) -> Result<(), Problem> {
+    for name in names {
+        let value = secrets::load(&mut *tx, &state.vault, id, from, name)
+            .await
+            .map_err(secret_problem)?;
+        if let Some(value) = value {
+            secrets::store(&mut *tx, &state.vault, id, to, name, &value)
+                .await
+                .map_err(secret_problem)?;
+        }
+    }
+    Ok(())
+}
+
+/// Seals the protected fields with a new value into `version`.
+async fn seal_fields(
+    tx: &mut sqlx::PgConnection,
+    state: &AppState,
+    id: Uuid,
+    version: i32,
+    sealed: &[(String, SecretString)],
+) -> Result<(), Problem> {
+    for (name, value) in sealed {
+        let field = fields::secret_name(name);
+        secrets::store(
+            &mut *tx,
+            &state.vault,
+            id,
+            version,
+            &field,
+            value.expose_secret().as_bytes(),
+        )
+        .await
+        .map_err(secret_problem)?;
+    }
+    Ok(())
 }
 
 /// The secret fields a credential or a device's own credentials carry.
@@ -1108,6 +1207,11 @@ pub async fn create_credential(
             "password"
         })
     })?;
+    let details = details(&input)?;
+    // A new credential has no protected value to keep.
+    if !details.fields.kept.is_empty() {
+        return Err(invalid("fields"));
+    }
     let (subject, catalog) = context(&state, &session).await?;
     require(
         &catalog,
@@ -1120,8 +1224,9 @@ pub async fn create_credential(
     let mut tx = state.db.begin().await?;
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO credentials
-             (folder_id, name, username, domain, kind, key_algorithm, key_fingerprint, has_certificate)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+             (folder_id, name, username, domain, kind, key_algorithm, key_fingerprint, has_certificate,
+              url, notes, icon, fields)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id",
     )
     .bind(input.folder_id)
     .bind(&name)
@@ -1131,10 +1236,15 @@ pub async fn create_credential(
     .bind(algorithm)
     .bind(fingerprint)
     .bind(has_certificate)
+    .bind(&details.url)
+    .bind(&details.notes)
+    .bind(details.icon)
+    .bind(sqlx::types::Json(&details.fields.stored))
     .fetch_one(&mut *tx)
     .await
     .map_err(database)?;
     seal_version(&mut tx, &state, id, 1, &secrets).await?;
+    seal_fields(&mut tx, &state, id, 1, &details.fields.sealed).await?;
     let details = json!({
         "name": name, "username": username, "domain": domain, "kind": kind,
         "key_fingerprint": fingerprint, "has_certificate": has_certificate,
@@ -1175,18 +1285,28 @@ pub async fn update_credential(
             ObjectId::Folder(input.folder_id),
         )?;
     }
-    let kind: String = sqlx::query_scalar("SELECT kind FROM credentials WHERE id = $1")
-        .bind(id)
-        .fetch_one(&state.db)
-        .await?;
+    let (kind, before, stored): (String, i32, sqlx::types::Json<Vec<Field>>) =
+        sqlx::query_as("SELECT kind, version, fields FROM credentials WHERE id = $1")
+            .bind(id)
+            .fetch_one(&state.db)
+            .await?;
     if input.kind.as_deref().is_some_and(|k| k != kind) {
         return Err(invalid("kind"));
     }
     let secrets = new_secrets(&kind, &input.secrets)?;
+    let details = details(&input)?;
+    if !details.fields.keeps_only_what_was(&stored) {
+        return Err(invalid("fields"));
+    }
+    // Every secret belongs to a version: one that changes makes a new one,
+    // and what did not change is copied into it.
+    let fields_changed = details.fields.changes_secrets(&stored);
+    let changed = secrets.is_some() || fields_changed;
 
     let mut tx = state.db.begin().await?;
     let version: i32 = sqlx::query_scalar(
         "UPDATE credentials SET folder_id = $2, name = $3, username = $4, domain = $5,
+             url = $7, notes = $8, icon = $9, fields = $10,
              version = version + CASE WHEN $6 THEN 1 ELSE 0 END, updated_at = now()
          WHERE id = $1 RETURNING version",
     )
@@ -1195,10 +1315,27 @@ pub async fn update_credential(
     .bind(&name)
     .bind(&username)
     .bind(&domain)
-    .bind(secrets.is_some())
+    .bind(changed)
+    .bind(&details.url)
+    .bind(&details.notes)
+    .bind(details.icon)
+    .bind(sqlx::types::Json(&details.fields.stored))
     .fetch_one(&mut *tx)
     .await
     .map_err(database)?;
+    if changed {
+        let mut kept: Vec<String> = details
+            .fields
+            .kept
+            .iter()
+            .map(|name| fields::secret_name(name))
+            .collect();
+        if secrets.is_none() {
+            kept.extend(secret_names(&kind).iter().map(|name| (*name).to_owned()));
+        }
+        carry(&mut tx, &state, id, before, version, &kept).await?;
+        seal_fields(&mut tx, &state, id, version, &details.fields.sealed).await?;
+    }
     if let Some(secrets) = &secrets {
         let (algorithm, fingerprint, has_certificate) = secrets.key_info();
         sqlx::query(
@@ -1216,6 +1353,7 @@ pub async fn update_credential(
     let details = json!({
         "name": name, "username": username, "domain": domain,
         "folder_id": input.folder_id, "secret_changed": secrets.is_some(),
+        "fields_changed": fields_changed,
     });
     audit::record(
         &mut *tx,

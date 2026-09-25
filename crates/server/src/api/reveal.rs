@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use super::catalog::{body, context, invalid, require};
 use super::connect::stored_text;
+use super::fields::{Field, secret_name};
 use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
 use crate::AppState;
@@ -45,6 +46,15 @@ pub struct Revealed {
     passphrase: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     certificate: Option<String>,
+    /// The protected custom fields of a credential (#98), in order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    fields: Vec<RevealedField>,
+}
+
+#[derive(Serialize)]
+pub struct RevealedField {
+    name: String,
+    value: String,
 }
 
 /// What `owner`'s sealed `version` holds.
@@ -70,6 +80,7 @@ async fn open(
         private_key: None,
         passphrase: None,
         certificate: None,
+        fields: Vec::new(),
     };
     if kind == "ssh_key" {
         revealed.private_key = text("private_key").await?;
@@ -127,12 +138,23 @@ pub async fn credential(
     let purpose = purpose(&input)?;
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Reveal, ObjectId::Credential(id))?;
-    let (username, domain, version, kind): (String, String, i32, String) =
-        sqlx::query_as("SELECT username, domain, version, kind FROM credentials WHERE id = $1")
-            .bind(id)
-            .fetch_one(&state.db)
-            .await?;
-    let revealed = open(&state, id, version, &kind, username, domain).await?;
+    type Row = (String, String, i32, String, sqlx::types::Json<Vec<Field>>);
+    let (username, domain, version, kind, fields): Row = sqlx::query_as(
+        "SELECT username, domain, version, kind, fields FROM credentials WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await?;
+    let mut revealed = open(&state, id, version, &kind, username, domain).await?;
+    for field in fields.0.into_iter().filter(|f| f.protected) {
+        let value = stored_text(&state, id, version, &secret_name(&field.name)).await?;
+        revealed.fields.push(RevealedField {
+            name: field.name,
+            value: value
+                .map(|v| v.expose_secret().to_owned())
+                .unwrap_or_default(),
+        });
+    }
     record(&state, &session, ("credential", id), purpose, &address).await?;
     Ok(answer(revealed))
 }
