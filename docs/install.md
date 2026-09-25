@@ -1,77 +1,65 @@
 # Installing remotehub
 
-remotehub runs as four containers: the server, PostgreSQL, guacd, the engine for RDP and VNC, and the browser
-service, which opens web interfaces of devices. The ops package in [`deploy/ops`](../deploy/ops) starts them
-with Docker Compose. Every setting is described in the
-[configuration reference](configuration.md).
+remotehub runs as a handful of containers: the server, PostgreSQL, Kratos for local accounts, guacd, the
+engine for RDP and VNC, the browser service, which opens web interfaces of devices, and, on a host of its
+own, Caddy for HTTPS. The ops package in [`deploy/ops`](../deploy/ops) starts them with Docker Compose.
+Every setting is described in the [configuration reference](configuration.md).
 
-You need a Linux host with Docker Engine and the Compose plugin, a DNS name for remotehub and a TLS
-certificate for it. To let people sign in with Active Directory, you need a service account there that may
-read users and groups.
+You need a host with Debian 12 or 13 or Ubuntu 22.04 or 24.04 on x86_64, with 4 GB of memory and 20 GB of
+disk, and a DNS name for remotehub. To let people sign in with Active Directory, you need a service account
+there that may read users and groups.
 
 ## Install
 
-Download the ops package `remotehub-ops-X.Y.Z.tar.gz` of the
-[release](https://github.com/hilman2/remotehub/releases) you want, unpack it on the host (it holds the
-directory `remotehub`) and prepare it as root:
+On the host, as root:
 
 ```bash
-sudo tar -xzf remotehub-ops-0.1.0.tar.gz -C /opt
-cd /opt/remotehub
-sudo sh init.sh
+curl -fsSL https://github.com/hilman2/remotehub/releases/latest/download/install.sh | sudo sh
 ```
 
-`init.sh` copies `.env.example` to `.env` and creates the secrets (see below). Then set
-`REMOTEHUB_PUBLIC_URL` and `REMOTEHUB_HOST` in `.env`: the address people will open, with `https://`, and
-its host name alone.
+It asks for the name people will open remotehub under, e.g. `remotehub.example.com`, and ends with a link
+to the setup wizard (see [First sign-in](#first-sign-in)). On its way, it:
 
-Start it:
+- installs Docker and its Compose plugin if they are missing;
+- downloads the ops package of the release and checks it against the release's `SHA256SUMS`;
+- puts it into `/opt/remotehub`, writes `.env` and creates the secrets (see [Secrets](#secrets));
+- sets up HTTPS as the next two sections describe, and starts everything.
 
-```bash
-sudo docker compose up -d
-sudo docker compose ps
-```
+It logs to `/var/log/remotehub-install.log`. Running it again on an installed host changes nothing and shows
+the link again, as long as setup is not done; it never upgrades (see [Upgrade](#upgrade)).
 
-After a few seconds all three services are up, and remotehub reports `healthy`. It listens on
-`127.0.0.1:8080`; set up the reverse proxy next.
+For an install without questions: `--domain NAME`, `--version X.Y.Z` for another release than the latest,
+and `--mode caddy` or `--mode external` to choose what the next two sections describe.
 
-## Secrets
+## HTTPS on a host of its own
 
-`init.sh` creates these files in `secrets/` once and never overwrites them:
+If nothing listens on ports 80 and 443, the installer turns on Caddy of the ops package
+(`COMPOSE_PROFILES=caddy` in `.env`) and opens both ports in `ufw` or `firewalld` if one of them is active.
+Caddy gets a certificate from Let's Encrypt if the internet reaches the host under its name. Otherwise, which
+is the usual case for an internal tool, it signs one with a CA of its own, named after the host. Browsers
+warn about that CA until the clients trust it.
 
-| File | Holds | Owner, mode |
-|---|---|---|
-| `master_key` | The key that encrypts every stored credential. | 65532, 0400 |
-| `db_password` | The database password, read by PostgreSQL and remotehub. | 65532:999, 0440 |
-| `ssh_ca_key` | The key of remotehub's SSH certificate authority. | 65532, 0400 |
-| `courier_token` | The token with which Kratos hands its mails to remotehub. | 65532, 0400 |
-| `kratos.yml` | Database and secrets of Kratos, which keeps the local accounts, with the courier token. | 10000, 0400 |
+Caddy keeps its certificates and its CA's key in `caddy/data` (see [Back up and restore](#back-up-and-restore)).
 
-remotehub runs as user 65532, PostgreSQL as 999 and Kratos as 10000, so the files belong to them; `secrets/`
-itself is open to root only. Keep these owners and modes when you edit a file, e.g. with `sudo tee secrets/kratos.yml`.
+## Next to a reverse proxy of your own
 
-Without `master_key`, the credentials in the database cannot be read by anyone. Keep a copy of it apart from
-the database backups, or let the organisation recovery key hold it (see [Back up and restore](#back-up-and-restore)).
-Keep a copy of `ssh_ca_key` too: a new one means every device must trust the new public key.
+If port 80 or 443 is taken, the installer attaches remotehub to the program on it and says what it did:
 
-An installation from 0.1.0 has no `ssh_ca_key` and no `kratos.yml` yet; running `sudo sh init.sh` again
-creates them and keeps the other files.
+| On the host | What the installer does |
+|---|---|
+| Caddy | writes `/etc/caddy/remotehub.caddy`, adds an `import` of it to the Caddyfile, checks and reloads |
+| nginx | writes `/etc/nginx/conf.d/remotehub.conf`, with the Let's Encrypt certificate of the name if there is one, otherwise a self-signed one; checks and reloads |
+| Traefik in Docker, with its Docker provider | puts remotehub on Traefik's network with router labels, in `compose.override.yml` |
 
-## Reverse proxy
+If the check fails, it puts the proxy's configuration back. For anything else, it prints what the proxy
+needs. remotehub listens on a free port on `127.0.0.1` (`REMOTEHUB_PORT` in `.env`), speaks plain HTTP
+there, and needs from the proxy:
 
-remotehub speaks plain HTTP on `127.0.0.1:8080`. A reverse proxy on the host serves it under
-`REMOTEHUB_PUBLIC_URL` with TLS. It must pass WebSockets, which carry the terminal and the remote desktops,
-and keep them open for hours.
+- WebSockets passed on, which carry the terminal and the remote desktops;
+- connections kept open for hours;
+- the client named in `X-Forwarded-For`.
 
-With Caddy, which gets the certificate itself:
-
-```
-remotehub.example.com {
-	reverse_proxy 127.0.0.1:8080
-}
-```
-
-With nginx:
+With nginx, for example:
 
 ```nginx
 server {
@@ -101,37 +89,58 @@ map $http_upgrade $connection_upgrade {
 remotehub refuses changes from pages under any origin other than `REMOTEHUB_PUBLIC_URL`, so people must open
 exactly that address, not another name of the same host.
 
-The proxy names the client in `X-Forwarded-For`; Caddy does that by itself, nginx with the line above.
-remotehub believes that header only from the gateway of its Docker network, which is how a proxy on the host
-reaches it. The network uses `10.213.213.0/24`; guacd and the browser service cannot reach devices in that
-range. If your network uses
-it, set another range in `.env` before the first start:
+remotehub believes `X-Forwarded-For` only from Caddy of the package and from the gateway of its Docker
+network, which is how a proxy on the host reaches it. The network uses `10.213.213.0/24`; guacd and the
+browser service cannot reach devices in that range. If your network uses it, set another range in `.env`
+before the first start, Caddy's address within it:
 
 ```
 REMOTEHUB_SUBNET=10.99.99.0/24
 REMOTEHUB_GATEWAY=10.99.99.1
+REMOTEHUB_CADDY_ADDRESS=10.99.99.254
 ```
 
 A proxy elsewhere than on this host goes into `REMOTEHUB_TRUSTED_PROXIES` in `compose.yml` instead.
 
+## Secrets
+
+The installer creates these files in `secrets/` once and never overwrites them:
+
+| File | Holds | Owner, mode |
+|---|---|---|
+| `master_key` | The key that encrypts every stored credential. | 65532, 0400 |
+| `db_password` | The database password, read by PostgreSQL and remotehub. | 65532:999, 0440 |
+| `ssh_ca_key` | The key of remotehub's SSH certificate authority. | 65532, 0400 |
+| `courier_token` | The token with which Kratos hands its mails to remotehub. | 65532, 0400 |
+| `kratos.yml` | Database and secrets of Kratos, which keeps the local accounts, with the courier token. | 10000, 0400 |
+
+remotehub runs as user 65532, PostgreSQL as 999 and Kratos as 10000, so the files belong to them; `secrets/`
+itself is open to root only. Keep these owners and modes when you edit a file, e.g. with `sudo tee secrets/kratos.yml`.
+
+Without `master_key`, the credentials in the database cannot be read by anyone. Keep a copy of it apart from
+the database backups, or let the organisation recovery key hold it (see [Back up and restore](#back-up-and-restore)).
+Keep a copy of `ssh_ca_key` too: a new one means every device must trust the new public key.
+
 ## First sign-in
 
-A fresh installation waits for its setup. Print the link to the setup wizard:
+A fresh installation waits for its setup. Open the link the installer printed. The wizard creates the first
+administrator, a local account with a password and an authenticator app: remotehub asks for its code at
+every sign-in. Then, if you want, it connects Active Directory (see
+[Connect Active Directory](#connect-active-directory)) and gives a group of it the administrator role, and
+it sets the mail server (see [Send mail](#send-mail)). Last, it creates a break-glass account for the day the
+directory or Kratos is unreachable, and the organisation recovery key (see
+[Recover personal vaults](#recover-personal-vaults)). Each comes on a page of its own to print; keep them
+offline, in different places. The break-glass account signs in at `/sign-in/break-glass`.
+
+The link works until the wizard has created the administrator. A new one, which the old one stops working
+with:
 
 ```bash
+cd /opt/remotehub
 sudo docker compose exec remotehub remotehub setup-code
 ```
 
-Open the link. The wizard creates the first administrator, a local account with a password and an
-authenticator app: remotehub asks for its code at every sign-in. Then it connects Active Directory (see
-[Connect Active Directory](#connect-active-directory)) and gives a group of it the administrator role, if
-you want. Last, it creates a break-glass account for the day the directory or Kratos is unreachable, and the
-organisation recovery key (see [Recover personal vaults](#recover-personal-vaults)). Each comes on a page of
-its own to print; keep them offline, in different places. The break-glass account signs in at
-`/sign-in/break-glass`.
-
-The link works until the wizard has created the administrator. Running `setup-code` again makes a new link,
-and the old one stops working. More break-glass accounts come from `remotehub break-glass create NAME`.
+More break-glass accounts come from `remotehub break-glass create NAME`.
 
 ## Connect Active Directory
 
@@ -344,7 +353,8 @@ with remotehub: [ADR 0008](adr/0008-site-connectors.md).
 
 Back up both databases regularly: `remotehub`, and `kratos` with the local accounts, their password hashes
 and the keys of their authenticator apps. Back up `secrets/master_key` and `secrets/kratos.yml` once, apart
-from them:
+from them, and with Caddy of the package `caddy/data`, which holds its CA's key: a new CA means every client
+must trust it anew.
 
 ```bash
 sudo docker compose exec -T db pg_dump -U remotehub -Fc remotehub > remotehub-$(date +%F).dump

@@ -32,7 +32,7 @@ Everything goes through the GitHub workflow of the public repository `hilman2/re
    - There are no Actions workflows; self-hosted runners were rejected (tenderhub #106).
    - **PRs from forks:** read the diff before running `lokal.sh --pr N` — the CI mounts the Docker socket.
 3. **Close the issue after merging** ("Closes #N" does it; otherwise `gh issue close N --comment "Done in #PR."`).
-4. **Delivery only as a release.** The version lives in the workspace `Cargo.toml` and in `deploy/ops/.env.example` (`REMOTEHUB_VERSION`); both are bumped in their own PR. Then, on the merged `main` with a green `lokal`: `bash scripts/ci/release.sh X.Y.Z` (`--dry-run` builds and tries without publishing). It pushes both images to GHCR and creates the GitHub release with the ops package; it needs `docker login ghcr.io` with a token that may write packages.
+4. **Delivery only as a release.** The version lives in the workspace `Cargo.toml` and in `deploy/ops/.env.example` (`REMOTEHUB_VERSION`); both are bumped in their own PR. Then, on the merged `main` with a green `lokal`: `bash scripts/ci/release.sh X.Y.Z` (`--dry-run` builds and tries without publishing). It pushes the images to GHCR and creates the GitHub release with the ops package, `install.sh` and `SHA256SUMS`; it needs `docker login ghcr.io` with a token that may write packages.
 
 In Git Bash, Claude sessions lack the Unix PATH: `gh` is at `/c/Program Files/GitHub CLI/gh.exe`, and `lokal.sh` needs it on the PATH: `export PATH="$PATH:/c/Program Files/GitHub CLI"`.
 
@@ -103,7 +103,7 @@ bash scripts/ci/lokal.sh --help        # all options
 
 The local CI needs Docker, `gh` and Git Bash. Only one run of this repository at a time (lock `.git/ci-lokal/sperre`); other repositories never wait for it. Logs are under `.git/ci-lokal/protokolle/`.
 
-- **Jobs:** `base` (always, seconds), `code`, which checks Rust (fmt, clippy, tests, then the lab tests) and the web UI (svelte-check, lint, vitest, build) in parallel, and `image`, which builds the production images and tries them with the ops package (`scripts/ci/image-check.sh`) when `IMAGE_INPUTS` change and in full runs.
+- **Jobs:** `base` (always, seconds), `code`, which checks Rust (fmt, clippy, tests, then the lab tests) and the web UI (svelte-check, lint, vitest, build) in parallel, and `image`, which builds the production images and tries them with the ops package (`scripts/ci/image-check.sh`) and with the installer on three kinds of host (`scripts/ci/install-check.sh`: a host of its own, next to Caddy, next to nginx, each a Debian container on Docker-in-Docker) when `IMAGE_INPUTS` change and in full runs.
 - **Nothing is checked twice:** a commit with the same file state (Git tree) as one already checked green — e.g. a PR's merge commit — takes over that result without running.
 - **Only what changed is compiled:** Rust builds from the fixed path `/src` (volume `remotehub-ci-src`), synced by content, so cargo rebuilds only the crates whose files changed.
 - **Only what a change can affect runs:** the files changed since the merge base with `main` decide (`RUST_INPUTS`, `WEB_INPUTS`, `LAB_INPUTS` in `lokal.sh`). A commit on `main` itself, a change under `scripts/ci/` or `CI_FULL=1 bash scripts/ci/lokal.sh` runs everything.

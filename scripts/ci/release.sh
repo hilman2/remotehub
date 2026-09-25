@@ -82,6 +82,15 @@ ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" "$IMAGE" "$GUAC
 ops="${CI_ABLAGE}/remotehub-ops-${version}.tar.gz"
 git archive --format=tar.gz --prefix=remotehub/ -o "$ops" "${CI_SHA}:deploy/ops"
 echo "ops package: ${ops}"
+# install.sh (#142) fetches the package under a name without the version,
+# from the latest release or a given one, and checks it against SHA256SUMS.
+assets="${CI_ABLAGE}/assets-${version}"
+rm -rf "$assets"
+mkdir -p "$assets"
+cp "$ops" "${assets}/remotehub-ops-${version}.tar.gz"
+cp "$ops" "${assets}/remotehub-ops.tar.gz"
+git show "${CI_SHA}:deploy/ops/install.sh" >"${assets}/install.sh"
+(cd "$assets" && sha256sum remotehub-ops-"${version}".tar.gz remotehub-ops.tar.gz install.sh >SHA256SUMS)
 
 if [ "$dry_run" = 1 ]; then
   echo "✓ dry run: ${IMAGE}:${version}, ${GUACD_IMAGE}:${version} and ${BROWSER_IMAGE}:${version} built and tried, nothing published"
@@ -92,9 +101,10 @@ echo "── Publish"
 docker push -q "${IMAGE}:${version}"
 docker push -q "${GUACD_IMAGE}:${version}"
 docker push -q "${BROWSER_IMAGE}:${version}"
-notes="Images: \`${IMAGE}:${version}\`, \`${GUACD_IMAGE}:${version}\`, \`${BROWSER_IMAGE}:${version}\`.
+notes="Install on a Debian or Ubuntu host: \`curl -fsSL https://github.com/${CI_GITHUB}/releases/download/${tag}/install.sh | sudo sh -s -- --version ${version}\`
+Images: \`${IMAGE}:${version}\`, \`${GUACD_IMAGE}:${version}\`, \`${BROWSER_IMAGE}:${version}\`.
 Install: [docs/install.md](https://github.com/${CI_GITHUB}/blob/${tag}/docs/install.md), upgrade: [docs/install.md#upgrade](https://github.com/${CI_GITHUB}/blob/${tag}/docs/install.md#upgrade)."
-gh release create "$tag" "$ops" --target "$CI_SHA" --title "remotehub ${version}" \
+gh release create "$tag" "${assets}"/* --target "$CI_SHA" --title "remotehub ${version}" \
   --notes "$notes" --generate-notes
 
 # GHCR makes a new package private; installations pull without signing in.

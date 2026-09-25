@@ -301,10 +301,13 @@ English is the base locale, German the second; more can follow (ADR 0002).
 - **Operations:** three images on GHCR, `ghcr.io/hilman2/remotehub` (`deploy/Dockerfile`: the binary and the
   built UI on distroless, user 65532, read-only), `ghcr.io/hilman2/remotehub-guacd` (`deploy/guacd`) and
   `ghcr.io/hilman2/remotehub-browser` (`deploy/browser`: Chromium, Xvnc and the agent, user 10001,
-  read-only). The ops package `deploy/ops` runs them with PostgreSQL: `compose.yml`, `init.sh` for `.env` and the secrets
-  as files. PostgreSQL sits on an internal network that only remotehub reaches. Installing, backup and
-  upgrades: [`docs/install.md`](install.md). The CI job `image` tries both images with the package
-  (`scripts/ci/image-check.sh`); releases via `scripts/ci/release.sh`.
+  read-only). The ops package `deploy/ops` runs them with PostgreSQL, Kratos and, on a host of its own,
+  Caddy (profile `caddy`): `compose.yml`, `init.sh` for `.env` and the secrets as files. PostgreSQL sits on
+  an internal network that only remotehub reaches. `install.sh` (#142) sets it all up with one command and
+  attaches remotehub to a reverse proxy already on the host. Installing, backup and upgrades:
+  [`docs/install.md`](install.md). The CI job `image` tries the images with the package
+  (`scripts/ci/image-check.sh`) and the installer (`scripts/ci/install-check.sh`); releases via
+  `scripts/ci/release.sh`.
 
 ## 8. Milestones
 
