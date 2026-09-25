@@ -78,7 +78,7 @@ job_base() {
 
     echo "── Compose (development, ops package)"
     docker compose -f deploy/compose.dev.yml --profile workbench config --quiet
-    REMOTEHUB_VERSION=0 REMOTEHUB_PUBLIC_URL=https://x \
+    REMOTEHUB_VERSION=0 REMOTEHUB_PUBLIC_URL=https://x REMOTEHUB_HOST=x \
       docker compose -f deploy/ops/compose.yml config --quiet --no-path-resolution
 
     echo "── Rust version"
