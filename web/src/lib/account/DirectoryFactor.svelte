@@ -70,12 +70,13 @@
 
 <section class="flex max-w-3xl flex-col gap-3 rounded-card border border-line bg-surface p-6">
 	<h2 class="text-lg font-semibold">{m.account_totp()}</h2>
-	{#if status?.enrolled}
+	{#if status?.app}
 		<p class="flex items-center gap-2 text-sm">
 			<CircleCheck size={16} class="text-ok" aria-hidden="true" />
 			{m.account_totp_active()}
 		</p>
-		{#if status.required}
+		<!-- With a rule, the app goes only while a security key stays (#129). -->
+		{#if status.required && status.keys.length === 0}
 			<p class="text-sm text-ink-2">{m.factor_required_here()}</p>
 		{:else}
 			<form class="flex flex-wrap items-end gap-3" onsubmit={remove}>

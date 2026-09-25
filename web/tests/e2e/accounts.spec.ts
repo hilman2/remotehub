@@ -341,3 +341,53 @@ test('a passkey takes the password’s place and a security key the app’s', as
 	await keys.getByRole('button', { name: 'Remove Desk key' }).click();
 	await expect(keys.getByRole('button', { name: /^Remove / })).toHaveCount(0);
 });
+
+test('a directory account signs in with a security key remotehub keeps', async ({
+	page,
+	browser
+}) => {
+	// A key an earlier run left behind would lock bob out of the other tests.
+	const admins = await browser.newContext();
+	const admin = await admins.newPage();
+	await typeDirectory(admin, 'alice', 'Alice-Passw0rd!');
+	await expect(admin.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
+	await admin.evaluate(async () => {
+		const users = (await (await fetch('/api/users')).json()) as {
+			id: string;
+			username: string;
+		}[];
+		const bob = users.find((user) => user.username === 'bob');
+		if (bob) await fetch(`/api/users/${bob.id}/second-factor`, { method: 'DELETE' });
+	});
+	await admins.close();
+
+	await typeDirectory(page, 'bob', 'Bob-Passw0rd!');
+	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
+	const cdp = await page.context().newCDPSession(page);
+	await cdp.send('WebAuthn.enable');
+	await cdp.send('WebAuthn.addVirtualAuthenticator', {
+		options: {
+			protocol: 'ctap2',
+			transport: 'usb',
+			hasResidentKey: false,
+			hasUserVerification: false,
+			automaticPresenceSimulation: true
+		}
+	});
+	await page.getByRole('link', { name: /Bob Helpdesk/ }).click();
+	const keys = page.getByRole('region', { name: 'Security keys' });
+	await keys.getByLabel('Name of the key').fill('Bob’s key');
+	await keys.getByRole('button', { name: 'Add a security key' }).click();
+	await expect(keys.getByRole('button', { name: 'Remove Bob’s key' })).toBeVisible();
+
+	// The password, then the key: no app was ever set up.
+	await signOut(page);
+	await typeDirectory(page, 'bob', 'Bob-Passw0rd!');
+	await expect(page.getByLabel('Code', { exact: true })).toHaveCount(0);
+	await page.getByRole('button', { name: 'Use a security key or passkey' }).click();
+	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
+
+	await page.getByRole('link', { name: /Bob Helpdesk/ }).click();
+	await keys.getByRole('button', { name: 'Remove Bob’s key' }).click();
+	await expect(keys.getByRole('button', { name: /^Remove / })).toHaveCount(0);
+});

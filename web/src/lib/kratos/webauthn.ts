@@ -2,7 +2,8 @@
  * The WebAuthn ceremonies for Kratos' `passkey` and `webauthn` methods
  * (#112), run by remotehub itself instead of Kratos' script. Kratos hands
  * the options as JSON in a node's value, with binary fields in base64url,
- * and takes the credential back in the same form.
+ * and takes the credential back in the same form. remotehub's own keys of
+ * directory users (#129) use the same form.
  */
 
 const decode = (text: string): Uint8Array<ArrayBuffer> =>
@@ -23,14 +24,10 @@ export const webauthnAvailable = () =>
 type Descriptor = { id: string } & Record<string, unknown>;
 const descriptors = (list?: Descriptor[]) => list?.map((d) => ({ ...d, id: decode(d.id) }));
 
-/**
- * Creates a credential with the options of a node (`{ publicKey }`) and
- * returns it as Kratos takes it. Throws if the person cancels or the
- * authenticator refuses.
- */
-export async function createCredential(options: string): Promise<string> {
+/** Runs `navigator.credentials.create()` with options in the JSON form. */
+async function create(options: string): Promise<PublicKeyCredential> {
 	const { publicKey } = JSON.parse(options);
-	const credential = (await navigator.credentials.create({
+	return (await navigator.credentials.create({
 		publicKey: {
 			...publicKey,
 			challenge: decode(publicKey.challenge),
@@ -38,6 +35,15 @@ export async function createCredential(options: string): Promise<string> {
 			excludeCredentials: descriptors(publicKey.excludeCredentials)
 		}
 	})) as PublicKeyCredential;
+}
+
+/**
+ * Creates a credential with the options of a node (`{ publicKey }`) and
+ * returns it as Kratos takes it. Throws if the person cancels or the
+ * authenticator refuses.
+ */
+export async function createCredential(options: string): Promise<string> {
+	const credential = await create(options);
 	const response = credential.response as AuthenticatorAttestationResponse;
 	return JSON.stringify({
 		id: credential.id,
@@ -48,6 +54,26 @@ export async function createCredential(options: string): Promise<string> {
 			clientDataJSON: encode(response.clientDataJSON)
 		}
 	});
+}
+
+/**
+ * Creates a security key for remotehub's own check of directory users'
+ * keys (#129, crates/server/src/webauthn.rs): with the public key and the
+ * authenticator data the browser read from the attestation, which the
+ * server takes instead of parsing CBOR.
+ */
+export async function createKey(options: string): Promise<unknown> {
+	const credential = await create(options);
+	const response = credential.response as AuthenticatorAttestationResponse;
+	return {
+		rawId: encode(credential.rawId),
+		response: {
+			clientDataJSON: encode(response.clientDataJSON),
+			authenticatorData: encode(response.getAuthenticatorData()),
+			publicKey: encode(response.getPublicKey()),
+			publicKeyAlgorithm: response.getPublicKeyAlgorithm()
+		}
+	};
 }
 
 /** Signs a node's challenge (`{ publicKey }`) with a credential; see `createCredential`. */

@@ -19,6 +19,7 @@ pub mod second_factor;
 pub mod secrets;
 pub mod session;
 pub mod totp;
+pub mod webauthn;
 
 use std::path::Path;
 use std::sync::Arc;

@@ -212,8 +212,9 @@ GitHub, anyone with an account there could join. Nobody can register with a pass
 
 ## Second factor for directory accounts
 
-Directory accounts sign in with their password only, unless they set up an authenticator app under
-*My account*. To make it a condition, add users or groups under *Settings → Second factor for directory
+Directory accounts sign in with their password only, unless they set up an authenticator app or a security
+key under *My account*. A passkey (Touch ID, Face ID, Windows Hello) counts as a security key; either one
+does as the second factor. To make it a condition, add users or groups under *Settings → Second factor for directory
 accounts*: they set up the app at their next sign-in. After a lost phone, an administrator removes the
 app under *Users*, and the person sets up a new one.
 

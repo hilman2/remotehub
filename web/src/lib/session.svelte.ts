@@ -35,14 +35,24 @@ export async function loadSession(): Promise<void> {
 }
 
 /**
- * Signs in with the directory. `second` carries a code of the authenticator
- * app once the server asked for one, and the key it offered when the app is
- * set up now (#107).
+ * The second step of a directory sign-in: a code of the app, the key the
+ * server offered when the app is set up now (#107), or a security key's
+ * answer to the server's challenge (#129).
+ */
+export interface DirectoryFactor {
+	code?: string;
+	totp_secret?: string;
+	security_key?: { challenge_id: string; credential: unknown };
+}
+
+/**
+ * Signs in with the directory. `second` carries the second step once the
+ * server asked for it.
  */
 export async function signIn(
 	username: string,
 	password: string,
-	second: { code?: string; totp_secret?: string } = {}
+	second: DirectoryFactor = {}
 ): Promise<ApiResult<User>> {
 	const result = await api<User>('POST', '/api/session', { username, password, ...second });
 	if (result.ok) session.user = result.data;
