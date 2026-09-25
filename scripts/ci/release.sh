@@ -80,7 +80,10 @@ ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" "$IMAGE" "$GUAC
   "$version" --pull
 
 ops="${CI_ABLAGE}/remotehub-ops-${version}.tar.gz"
-git archive --format=tar.gz --prefix=remotehub/ -o "$ops" "${CI_SHA}:deploy/ops"
+# LF line endings whatever Git for Windows' core.autocrlf says, as the CI
+# unpacks its commits: a shell script with CRLF does not run (#161).
+git -c core.autocrlf=false -c core.eol=lf archive --format=tar.gz --prefix=remotehub/ -o "$ops" \
+  "${CI_SHA}:deploy/ops"
 echo "ops package: ${ops}"
 # install.sh (#142) fetches the package under a name without the version,
 # from the latest release or a given one, and checks it against SHA256SUMS.
