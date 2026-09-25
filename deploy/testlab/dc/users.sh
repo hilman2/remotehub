@@ -7,6 +7,8 @@
 #                  member of "RH Operators" (nested)
 #   carol          disabled                               Carol-Passw0rd!
 #   dave           no groups besides Domain Users         Dave-Passw0rd!
+#   erin           no groups; only the e2e test of        Erin-Passw0rd!
+#                  security keys signs in as her (#140)
 #
 # Computers with a Windows LAPS password (msLAPS-Password) that works on the
 # lab target of the same name: desktop-target (RDP) and ssh-target (SSH),
@@ -25,6 +27,7 @@ user alice 'Alice-Passw0rd!' Alice Admin
 user bob 'Bob-Passw0rd!' Bob Helpdesk
 user carol 'Carol-Passw0rd!' Carol Disabled
 user dave 'Dave-Passw0rd!' Dave Nogroups
+user erin 'Erin-Passw0rd!' Erin Keys
 
 samba-tool group add "RH Admins"
 samba-tool group add "RH Operators"
