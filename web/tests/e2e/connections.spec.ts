@@ -161,6 +161,68 @@ test('a stored password is shown and copied, and the audit log knows', async ({
 	}
 });
 
+test('the vault keeps folders, fields and icons, and shows what is shared', async ({ page }) => {
+	await signIn(page);
+	// A shared credential with a protected field, as the devices page makes it.
+	const shared = `Shared router ${run}`;
+	await page.evaluate(
+		async ({ shared }) => {
+			const post = (uri: string, body: unknown) =>
+				fetch(uri, {
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify(body)
+				}).then((r) => r.json());
+			const folder = await post('/api/folders', { parent_id: null, name: `${shared} folder` });
+			await post('/api/credentials', {
+				folder_id: folder.id,
+				name: shared,
+				username: 'admin',
+				password: 'Shared-Pass!',
+				url: 'https://router.lan',
+				icon: 3,
+				fields: [{ name: 'PUK', protected: true, value: '8765' }]
+			});
+		},
+		{ shared }
+	);
+
+	await freshVault(page, 'long enough passphrase');
+	const dialog = page.getByRole('dialog');
+	await page.getByRole('button', { name: 'New folder' }).click();
+	await dialog.getByLabel('Name').fill('Bank');
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await page.getByRole('button', { name: 'Bank', exact: true }).click();
+
+	await page.getByRole('button', { name: 'New entry' }).click();
+	await dialog.getByLabel('Title').fill('Online banking');
+	await dialog.getByLabel('Password').fill('Bank-Pass!');
+	await dialog.getByRole('button', { name: 'Add field' }).click();
+	await dialog.getByLabel('Field name').fill('PIN');
+	await dialog.getByLabel('Value').fill('1234');
+	await dialog.getByLabel('Protected').check();
+	await dialog.getByRole('radio', { name: 'Icon 37' }).click();
+	await dialog.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText('Online banking')).toBeVisible();
+	await expect(page.getByText('PIN: ••••••')).toBeVisible();
+	await page.getByRole('button', { name: 'Show', exact: true }).click();
+	await expect(page.getByText('1234')).toBeVisible();
+
+	// It lies in its folder: the top does not show it.
+	await page
+		.getByRole('navigation', { name: 'Folders' })
+		.getByRole('button', { name: 'My vault' })
+		.click();
+	await expect(page.getByText('Online banking')).toHaveCount(0);
+
+	// The shared credential, with its protected field on request.
+	const entry = page.getByTestId('shared-entry').filter({ hasText: shared });
+	await entry.getByRole('button', { name: new RegExp(shared) }).click();
+	await expect(entry).toContainText('https://router.lan');
+	await entry.getByRole('button', { name: 'Show', exact: true }).click();
+	await expect(entry.getByTestId('revealed-field')).toHaveText('8765');
+});
+
 test('an SSH key protected by a passphrase signs in', async ({ page }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');

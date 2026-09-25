@@ -108,6 +108,12 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - **Permissions:** a folder tree holds devices and credentials. A grant gives a group or a user a role
   on a folder or an entry: `list < connect < reveal < edit < manage`. Grants are inherited downwards and
   only allow. `authorize()` is the single decision point and is tested table-driven.
+- **KeePass fields (`api/fields.rs`):** credentials carry URL, notes, one of KeePass' 69 standard icons
+  (by number; the UI draws a Lucide icon for each) and custom fields. Plain fields are stored with the
+  credential; protected ones are sealed as `field:<name>` with the credential's version. A change of a
+  protected field makes a new version, into which the unchanged sealed values are copied. Personal vault
+  entries carry the same inside their browser-sealed content, and personal folders are entries of kind
+  `folder`.
 - **Reveal (`api/reveal.rs`):** with `reveal`, a stored credential or a device's own credentials are shown
   or copied on their page. Each time is audited (`credential.revealed`, with `show` or `copy`) before the
   value leaves the server, and the answer is `no-store`. The UI hides a shown value and clears a copied

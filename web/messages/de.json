@@ -476,5 +476,12 @@
 	"vault_field_protected": "Geschützt",
 	"vault_field_keep": "Leer lassen, um ihn zu behalten",
 	"vault_field_add": "Feld hinzufügen",
-	"vault_field_remove": "{name} entfernen"
+	"vault_field_remove": "{name} entfernen",
+	"vault_folders": "Ordner",
+	"vault_folder": "Ordner",
+	"vault_new_folder": "Neuer Ordner",
+	"vault_remove_folder": "Diesen leeren Ordner entfernen",
+	"vault_shared": "Mit mir geteilt",
+	"vault_shared_hint": "Zugangsdaten der sichtbaren Ordner. Mit dem Recht zum Anzeigen lassen sie sich auch hier anzeigen oder kopieren; jedes Mal wird protokolliert.",
+	"vault_shared_none": "Noch nichts geteilt."
 }

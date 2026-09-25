@@ -46,11 +46,19 @@ export interface StoredVault {
 const SEARCH_ID = 'search';
 
 export interface EntryContent {
+	/** A folder of the personal vault (#98); an entry otherwise. */
+	kind?: 'folder';
+	/** The folder it lies in; the top without one. */
+	parent?: string | null;
 	title: string;
 	username: string;
 	password: string;
 	url: string;
 	notes: string;
+	/** One of KeePass' standard icons (icons.ts). */
+	icon?: number;
+	/** Custom fields; protected ones are shown only on request. */
+	fields?: { name: string; value: string; protected: boolean }[];
 }
 
 /** An entry as read; `content` is null if it would not open with this key. */
