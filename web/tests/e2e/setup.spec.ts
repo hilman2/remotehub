@@ -51,7 +51,9 @@ test('a fresh installation is set up in the browser', async ({ page }) => {
 	await expect(page.getByTestId('directory-failure')).toContainText(
 		'The certificate comes from an unknown CA.'
 	);
-	await expect(page.getByTestId('directory-fingerprint')).toHaveText(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+	await expect(page.getByTestId('directory-fingerprint')).toHaveText(
+		/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/
+	);
 	await page.getByRole('button', { name: 'Trust this certificate' }).click();
 	await expect(page.getByTestId('directory-found')).toContainText('Connected:');
 	await page.getByRole('button', { name: 'Save' }).click();
