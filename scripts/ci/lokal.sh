@@ -29,6 +29,8 @@ KRATOS_IMAGE="oryd/kratos:v26.2.0"
 RUST_INPUTS=(crates/ migrations/ Cargo.toml Cargo.lock rust-toolchain.toml deploy/dev/rust.Dockerfile)
 WEB_INPUTS=(web/ deploy/dev/web.Dockerfile)
 LAB_INPUTS=("${RUST_INPUTS[@]}" deploy/testlab/ deploy/guacd/ deploy/browser/)
+# The end-to-end tests check the UI most; CI_E2E=1 forces them.
+E2E_INPUTS=(web/src/ web/tests/e2e/ web/playwright.config.ts)
 # The production images build a release binary; they are tried when they or
 # the ops package change, and in full runs (every commit on main, releases).
 IMAGE_INPUTS=(deploy/Dockerfile .dockerignore deploy/ops/ deploy/guacd/ deploy/browser/)
@@ -184,6 +186,19 @@ part_rust() { # tools lab(0|1)
       cargo nextest run --workspace --locked --no-tests=warn --run-ignored only
     '
   fi
+}
+
+# The server binary for the end-to-end tests, with the lab, when no Rust
+# input changed and Rust itself need not be checked.
+part_server() { # tools
+  local lab_pid
+  start_lab "$1" &
+  lab_pid=$!
+  cargo_run "$1" '
+    echo "── cargo build (the server for the end-to-end tests)"
+    cargo build --locked -p remotehub-server --bin remotehub
+  '
+  wait "$lab_pid"
 }
 
 # Starts the lab (images from the commit under test; the build cache keeps
@@ -352,20 +367,25 @@ in_background() {
   printf -v "${name}_pid" "%s" "$!"
 }
 
-# Rust (with the lab) and web in parallel, each with its own log; then, in
-# full runs (or with CI_E2E=1), the end-to-end tests with what both built.
+# Rust (with the lab) and web in parallel, each with its own log; then the
+# end-to-end tests with what both built: in full runs, for changes under
+# E2E_INPUTS, or with CI_E2E=1. They need the lab and the server binary, so
+# without a Rust change the lab starts and the binary is built alone.
 # Failed parts are printed last so the summary of gemeinsam.sh shows them.
 job_code() {
-  local tools logs rust=0 web=0 lab=0 rust_pid="" web_pid="" e2e_pid="" rust_rc=0 web_rc=0 e2e_rc=0
+  local tools logs rust=0 web=0 lab=0 e2e=0 rust_pid="" web_pid="" e2e_pid="" rust_rc=0 web_rc=0 e2e_rc=0
   tools="$(ci_image scripts/ci/tools.Dockerfile)"
   logs="$(mktemp -d)"
   if needed "${RUST_INPUTS[@]}"; then rust=1; fi
   if needed "${LAB_INPUTS[@]}"; then lab=1; rust=1; fi
   if needed "${WEB_INPUTS[@]}"; then web=1; fi
+  if [ "${CI_E2E:-0}" = 1 ] || needed "${E2E_INPUTS[@]}"; then e2e=1; lab=1; web=1; fi
 
   if [ "$rust" = 1 ]; then
     ci_dienst db -e POSTGRES_USER=ci -e POSTGRES_PASSWORD=ci -e POSTGRES_DB=ci "$POSTGRES_IMAGE"
     in_background rust part_rust "$tools" "$lab"
+  elif [ "$e2e" = 1 ]; then
+    in_background rust part_server "$tools"
   else
     echo "skipped: nothing under ${RUST_INPUTS[*]} deploy/testlab/ changed" >"${logs}/rust.log"
   fi
@@ -378,15 +398,13 @@ job_code() {
   if [ -n "$rust_pid" ]; then wait "$rust_pid" || rust_rc=$?; fi
   if [ -n "$web_pid" ]; then wait "$web_pid" || web_rc=$?; fi
 
-  # Full runs (and changes under scripts/ci/ or to the tests themselves)
-  # include them; CI_E2E=1 forces them.
-  local full=0
-  if [ "${CI_E2E:-0}" = 1 ] || needed web/tests/e2e/ web/playwright.config.ts; then full=1; fi
-  if [ "$full" = 1 ] && [ "$lab" = 1 ] && [ "$web" = 1 ] && [ "$rust_rc" = 0 ] && [ "$web_rc" = 0 ]; then
+  if [ "$e2e" = 1 ] && [ "$rust_rc" = 0 ] && [ "$web_rc" = 0 ]; then
     in_background e2e part_e2e "$tools"
     wait "$e2e_pid" || e2e_rc=$?
+  elif [ "$e2e" = 1 ]; then
+    echo "skipped: the end-to-end tests wait for Rust and web to pass" >"${logs}/e2e.log"
   else
-    echo "skipped: end-to-end tests run in full runs after Rust and web passed (CI_E2E=1 forces them)" >"${logs}/e2e.log"
+    echo "skipped: nothing under ${E2E_INPUTS[*]} changed (CI_E2E=1 forces them)" >"${logs}/e2e.log"
   fi
 
   # Successful parts first, failed parts last.
