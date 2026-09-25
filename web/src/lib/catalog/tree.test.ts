@@ -25,6 +25,7 @@ function device(id: string, name: string, host: string): Device {
 
 const tree: Tree = {
 	may_create_top_level: true,
+	open: [],
 	folders: [
 		{ id: 'l', parent_id: 's', name: 'Linux', role: 'edit' },
 		{ id: 's', parent_id: null, name: 'Servers', role: 'connect' },

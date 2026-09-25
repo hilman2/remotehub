@@ -10,6 +10,13 @@ export type ApiResult<T> =
 
 export const NETWORK_ERROR = 'network';
 
+/**
+ * A fetch that finishes even when the page goes right after: for small
+ * writes of preferences that a reload or a closed tab must not lose. Pass it
+ * as `fetcher` to `api`.
+ */
+export const lasting: typeof fetch = (input, init) => fetch(input, { ...init, keepalive: true });
+
 export async function api<T>(
 	method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
 	path: string,

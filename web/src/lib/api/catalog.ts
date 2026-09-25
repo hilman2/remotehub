@@ -1,5 +1,5 @@
 /** Folders, devices, credentials and grants (crates/server/src/api/catalog.rs). */
-import { api } from './client';
+import { api, lasting } from './client';
 import type { KeyboardLayout } from './generated/keyboard';
 
 export { KEYBOARD_LAYOUTS, type KeyboardLayout } from './generated/keyboard';
@@ -87,6 +87,8 @@ export interface Tree {
 	devices: Device[];
 	credentials: Credential[];
 	may_create_top_level: boolean;
+	/** Folders this user has open in the tree; all others are closed. */
+	open: string[];
 }
 
 export interface DeviceInput {
@@ -156,6 +158,9 @@ export const updateDevice = (id: string, input: DeviceInput) =>
 export const deleteDevice = (id: string) => api('DELETE', `/api/devices/${id}`);
 /** Forgets the pinned host key; the next connection pins the key presented then. */
 export const resetHostKey = (id: string) => api('DELETE', `/api/devices/${id}/host-key`);
+/** Opens or closes a folder in this user's tree; the server keeps it. */
+export const setFolderOpen = (id: string, open: boolean) =>
+	api('PUT', `/api/folders/${id}/open`, { open }, lasting);
 
 export const createCredential = (input: CredentialInput) =>
 	api<{ id: string }>('POST', '/api/credentials', input);

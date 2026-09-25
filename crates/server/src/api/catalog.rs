@@ -120,6 +120,9 @@ pub struct Tree {
     devices: Vec<TreeDevice>,
     credentials: Vec<TreeCredential>,
     may_create_top_level: bool,
+    /// The visible folders this user has open in the tree; the rest are
+    /// closed.
+    open: Vec<Uuid>,
 }
 
 #[derive(Serialize)]
@@ -206,8 +209,18 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
     )
     .fetch_all(&state.db)
     .await?;
+    let open: Vec<Uuid> =
+        sqlx::query_scalar("SELECT folder_id FROM open_folders WHERE user_id = $1")
+            .bind(session.user_id)
+            .fetch_all(&state.db)
+            .await?;
+    let sees = |id: &Uuid| {
+        visible.roles.contains_key(&ObjectId::Folder(*id)) || visible.path_only.contains(id)
+    };
+    let open = open.into_iter().filter(sees).collect();
 
     Ok(Json(Tree {
+        open,
         folders: folders
             .into_iter()
             .filter_map(|(id, parent_id, name)| {
@@ -247,6 +260,38 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
 }
 
 // ── Folders ─────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct FolderOpen {
+    open: bool,
+}
+
+/// `PUT /api/folders/{id}/open`: opens or closes a folder in the caller's
+/// tree (#83). A preference of this user only, not audited.
+pub async fn set_folder_open(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<Uuid>,
+    input: Result<Json<FolderOpen>, JsonRejection>,
+) -> Result<StatusCode, Problem> {
+    let input = body(input)?;
+    let (subject, catalog) = context(&state, &session).await?;
+    let visible = catalog.visible(&subject);
+    if !visible.roles.contains_key(&ObjectId::Folder(id)) && !visible.path_only.contains(&id) {
+        return Err(Problem::new(ErrorCode::NotFound));
+    }
+    let query = if input.open {
+        "INSERT INTO open_folders (user_id, folder_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+    } else {
+        "DELETE FROM open_folders WHERE user_id = $1 AND folder_id = $2"
+    };
+    sqlx::query(query)
+        .bind(session.user_id)
+        .bind(id)
+        .execute(&state.db)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
 
 #[derive(Deserialize)]
 pub struct NewFolder {
