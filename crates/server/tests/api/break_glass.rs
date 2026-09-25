@@ -218,3 +218,39 @@ async fn a_reset_ends_open_sessions(pool: PgPool) {
         StatusCode::UNAUTHORIZED
     );
 }
+
+/// A block (#104) holds for break-glass accounts too, and for a session that
+/// was open when it was set.
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_blocked_account_cannot_sign_in(pool: PgPool) {
+    let state: AppState = state(pool.clone());
+    let issued = break_glass::create(&pool, &state.vault, "emergency")
+        .await
+        .unwrap();
+    let app = app(state.clone(), None);
+    let sign_in = |at: u64| {
+        let body = json!({
+            "username": "emergency",
+            "password": issued.password.as_str(),
+            "code": code(&issued.totp_secret, at)
+        });
+        json("POST", "/api/session/break-glass", body, Some(ORIGIN))
+    };
+    let token = send(&app, sign_in(now())).await.session_token().unwrap();
+
+    sqlx::query("UPDATE users SET blocked_at = now() WHERE username = 'emergency'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        send(&app, get("/api/session", Some(&token))).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    // The next code, since each one signs in once.
+    let refused = send(&app, sign_in(now() + 30)).await;
+    assert_eq!(
+        (refused.status, refused.code().as_str()),
+        (StatusCode::FORBIDDEN, "account_disabled")
+    );
+    assert!(refused.session_token().is_none());
+}

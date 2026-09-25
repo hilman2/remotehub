@@ -91,7 +91,6 @@ fn unavailable(error: KratosError) -> Problem {
 #[derive(sqlx::FromRow)]
 struct Target {
     id: Uuid,
-    kind: String,
     username: String,
     identity_id: Option<Uuid>,
 }
@@ -99,15 +98,13 @@ struct Target {
 impl Target {
     /// The Kratos identity of a local account; anything else has none.
     fn identity(&self) -> Result<Uuid, Problem> {
-        self.identity_id
-            .filter(|_| self.kind == "local")
-            .ok_or_else(|| invalid("kind"))
+        self.identity_id.ok_or_else(|| invalid("kind"))
     }
 }
 
 async fn target(state: &AppState, id: Uuid) -> Result<Target, Problem> {
     sqlx::query_as(
-        "SELECT id, kind, username, identity_id FROM users WHERE id = $1 AND kind <> 'deleted'",
+        "SELECT id, username, identity_id FROM users WHERE id = $1 AND kind <> 'deleted'",
     )
     .bind(id)
     .fetch_optional(&state.db)
