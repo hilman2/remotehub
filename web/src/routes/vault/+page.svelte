@@ -13,6 +13,7 @@
 	import Dialog from '$lib/components/Dialog.svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { session } from '$lib/session.svelte';
+	import { unlocked } from '$lib/vault/unlocked.svelte';
 	import {
 		addPasskey,
 		deleteEntry,
@@ -48,8 +49,9 @@
 
 	let stage = $state<Stage>('loading');
 	let vault = $state<StoredVault | null>(null);
-	// The vault key: in memory only, gone when the page is.
-	let key: CryptoKey | null = null;
+	// The vault key: in memory only, kept in `unlocked` while the page is
+	// loaded, so it is still open after a visit to another page.
+	let key: CryptoKey | null = unlocked.key;
 	let entries = $state<Entry[]>([]);
 	let error = $state<string | null>(null);
 	let busy = $state(false);
@@ -113,8 +115,10 @@
 			return;
 		}
 		vault = result.data;
-		if (key) entries = await readEntries(key, vault);
-		else stage = vault.unlocks.length === 0 ? 'setup' : 'locked';
+		if (key) {
+			[entries, picks] = await Promise.all([readEntries(key, vault), readPicks(key, vault)]);
+			if (stage === 'loading') stage = 'open';
+		} else stage = vault.unlocks.length === 0 ? 'setup' : 'locked';
 	}
 
 	$effect(() => {
@@ -139,18 +143,18 @@
 			error = errorMessage(result.code ?? 'internal');
 			return;
 		}
-		key = result.key;
+		key = unlocked.key = result.key;
 		shownRecovery = result.recovery;
 		passphrase = passphraseAgain = '';
 		stage = 'recovery';
 	}
 
-	async function opened(unlocked: CryptoKey | null) {
-		if (!unlocked || !vault) {
+	async function opened(opening: CryptoKey | null) {
+		if (!opening || !vault) {
 			error = m.vault_wrong();
 			return;
 		}
-		key = unlocked;
+		key = unlocked.key = opening;
 		error = null;
 		passphrase = recoveryText = '';
 		[entries, picks] = await Promise.all([readEntries(key, vault), readPicks(key, vault)]);
@@ -169,11 +173,11 @@
 		event.preventDefault();
 		if (!vault) return;
 		busy = true;
-		const unlocked = useRecovery
+		const opening = useRecovery
 			? await unlockWithRecovery(vault, recoveryText)
 			: await unlockWithPassphrase(vault, passphrase);
 		busy = false;
-		await opened(unlocked);
+		await opened(opening);
 	}
 
 	async function unlockPasskey() {
@@ -186,7 +190,7 @@
 	}
 
 	function lock() {
-		key = null;
+		key = unlocked.key = null;
 		entries = [];
 		picks = [];
 		query = '';
@@ -292,7 +296,7 @@
 			return;
 		}
 		resetOpen = false;
-		key = null;
+		key = unlocked.key = null;
 		entries = [];
 		stage = 'setup';
 		await load();

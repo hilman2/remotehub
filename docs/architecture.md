@@ -114,7 +114,10 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   data) is stored wrapped (AES-KW) once per way to unlock: a passkey's WebAuthn PRF output or the recovery
   key through HKDF, the passphrase through PBKDF2-SHA-256 (600 000 iterations). The server keeps
   ciphertext and wrapped keys for their owner only (`api/personal.rs`); nobody, the operator included, can
-  reset the passphrase. Such entries cannot be injected into connections.
+  reset the passphrase. The server cannot inject such entries into connections; the browser can: while
+  the vault is unlocked (the key stays in memory until it is locked, the user signs out or the page
+  reloads), a device that asks for credentials offers its entries, and the chosen one is sent as if
+  typed.
 - **Search** (`web/src/lib/search/rank.ts`) runs in the browser: parts of words in names, hosts,
   descriptions and paths, ranked by match and by what the user picked for the same or a similar query
   before. Picks from the device list are stored per user on the server (`search_picks`); picks in the

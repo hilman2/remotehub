@@ -16,6 +16,9 @@
 	import { m } from '$lib/paraglide/messages';
 	import TerminalView from '$lib/terminal/TerminalView.svelte';
 	import type { Credentials, ServerEvent } from '$lib/terminal/connection';
+	import { resolve } from '$app/paths';
+	import { unlocked } from '$lib/vault/unlocked.svelte';
+	import { loadVault, readEntries, type EntryContent } from '$lib/vault/vault';
 	import { shown } from './status.svelte';
 	import type { Phase } from './tabs.svelte';
 
@@ -107,6 +110,39 @@
 	$effect(() => {
 		onphase?.(phase);
 	});
+
+	/**
+	 * Entries of the unlocked personal vault that have a password (#92). The
+	 * browser opens them and sends the chosen one as if it were typed: the
+	 * server never reads the vault.
+	 */
+	let fromVault = $state<EntryContent[] | null>(null);
+
+	$effect(() => {
+		const key = unlocked.key;
+		if (!needsCredentials || !key) {
+			fromVault = null;
+			return;
+		}
+		let current = true;
+		(async () => {
+			const stored = await loadVault();
+			if (!stored.ok || !current) return;
+			const entries = await readEntries(key, stored.data);
+			if (!current) return;
+			fromVault = entries.flatMap((entry) => (entry.content?.password ? [entry.content] : []));
+		})();
+		return () => {
+			current = false;
+		};
+	});
+
+	function useEntry(index: string) {
+		const entry = fromVault?.[Number(index)];
+		if (!index || !entry) return;
+		username = entry.username;
+		password = entry.password;
+	}
 
 	// The footer tells about this session while it is the one on screen.
 	const owner = shown.claim();
@@ -211,6 +247,27 @@
 			<p class="mt-1 text-sm text-ink-2" class:mt-5={needsPurpose}>
 				{m.terminal_credentials_hint()}
 			</p>
+			{#if fromVault && fromVault.length > 0}
+				<label class="mt-4 block text-sm font-medium" for="vault-entry-{device.id}">
+					{m.vault_use_entry()}
+				</label>
+				<select
+					id="vault-entry-{device.id}"
+					class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
+					onchange={(event) => useEntry(event.currentTarget.value)}
+				>
+					<option value="">{m.vault_choose_entry()}</option>
+					{#each fromVault as entry, index (index)}
+						<option value={String(index)}>
+							{entry.username ? `${entry.title} · ${entry.username}` : entry.title}
+						</option>
+					{/each}
+				</select>
+			{:else if !unlocked.key}
+				<a class="mt-2 inline-block text-xs text-ink-2 underline" href={resolve('/vault')}>
+					{m.vault_unlock_to_use()}
+				</a>
+			{/if}
 			<!-- VNC servers mostly know only a password. -->
 			<label class="mt-4 block text-sm font-medium" for="target-username-{device.id}">
 				{device.protocol === 'vnc' ? m.credentials_username_optional() : m.field_username()}
