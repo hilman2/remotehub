@@ -419,10 +419,11 @@ test('chosen users state a purpose, and the device journal keeps it', async ({ p
 
 	// From now on bob states a purpose before connecting.
 	await page.getByRole('link', { name: 'Settings' }).click();
-	const rules = page.getByRole('list', { name: 'Purpose before connecting' });
-	await page.getByLabel('Search users and groups').fill('Bob');
-	await page.getByRole('button', { name: /Bob Helpdesk/ }).click();
-	await page.getByRole('button', { name: 'Add', exact: true }).click();
+	const section = page.getByRole('region', { name: 'Purpose before connecting' });
+	const rules = section.getByRole('list', { name: 'Purpose before connecting' });
+	await section.getByLabel('Search users and groups').fill('Bob');
+	await section.getByRole('button', { name: /Bob Helpdesk/ }).click();
+	await section.getByRole('button', { name: 'Add', exact: true }).click();
 	await expect(rules).toContainText('Bob Helpdesk');
 
 	const bobs = await browser.newContext();

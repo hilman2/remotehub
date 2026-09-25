@@ -7,6 +7,7 @@
 	import { PROTOCOLS } from '$lib/api/catalog';
 	import { errorMessage } from '$lib/api/errors';
 	import ProtocolChip from '$lib/catalog/ProtocolChip.svelte';
+	import AuthenticatorSetup from '$lib/components/AuthenticatorSetup.svelte';
 	import Logo from '$lib/components/Logo.svelte';
 	import {
 		endSession,
@@ -37,6 +38,9 @@
 	let code = $state('');
 	let useRecovery = $state(false);
 	let texts = $state<UiText[]>([]);
+	// Directory accounts (#107): a code of their app, or setting one up with
+	// the key the server offers. The password is sent again with it.
+	let directoryFactor = $state<'code' | { secret: string; uri: string } | null>(null);
 
 	$effect(() => {
 		loadMethods().then((result) => {
@@ -62,6 +66,7 @@
 		error = null;
 		texts = [];
 		second = null;
+		directoryFactor = null;
 		try {
 			localStorage.setItem(WAY_KEY, next);
 		} catch {
@@ -75,11 +80,7 @@
 		error = null;
 		texts = [];
 		if (way === 'directory') {
-			const result = await signIn(username, password);
-			password = '';
-			busy = false;
-			if (result.ok) await goto(resolve('/'));
-			else error = errorMessage(result.code);
+			await signInDirectory();
 			return;
 		}
 		// Typed credentials count, not a session someone left in this browser.
@@ -96,6 +97,36 @@
 		});
 		password = '';
 		await follow(result);
+	}
+
+	/** Signs in with the directory, with a code of the app if there is one. */
+	async function signInDirectory(factor: { code?: string; totp_secret?: string } = {}) {
+		busy = true;
+		error = null;
+		const result = await signIn(username, password, factor);
+		busy = false;
+		if (result.ok) {
+			password = '';
+			await goto(resolve('/'));
+		} else if (result.code === 'second_factor_required') {
+			directoryFactor = 'code';
+		} else if (result.code === 'second_factor_setup_required') {
+			directoryFactor = { secret: String(result.params.secret), uri: String(result.params.uri) };
+		} else {
+			error = errorMessage(result.code);
+			// A wrong code may be typed again; anything else starts over.
+			if (result.code !== 'second_factor_invalid') {
+				password = '';
+				directoryFactor = null;
+			}
+		}
+	}
+
+	async function submitDirectoryCode(event: SubmitEvent) {
+		event.preventDefault();
+		const typed = code.trim();
+		code = '';
+		await signInDirectory({ code: typed });
 	}
 
 	/** Goes on from what Kratos answered. */
@@ -186,7 +217,7 @@
 			</div>
 			<h1 class="text-3xl font-semibold">{m.sign_in_title()}</h1>
 
-			{#if methods.directory && methods.local && !second}
+			{#if methods.directory && methods.local && !second && !directoryFactor}
 				<div class="flex gap-1 rounded-xl bg-sunken p-1" role="group" aria-label={m.sign_in_way()}>
 					<button
 						type="button"
@@ -248,6 +279,50 @@
 						{useRecovery ? m.sign_in_use_totp() : m.sign_in_use_recovery()}
 					</button>
 				</form>
+			{:else if directoryFactor === 'code'}
+				<form class="flex flex-col gap-5" onsubmit={submitDirectoryCode}>
+					<p class="text-sm text-ink-2">{m.sign_in_second_hint()}</p>
+					<div class="flex flex-col gap-2">
+						<label class="text-sm font-medium" for="directory-code">{m.sign_in_code()}</label>
+						<input
+							id="directory-code"
+							class="{field} font-mono tracking-widest"
+							autocomplete="one-time-code"
+							inputmode="numeric"
+							required
+							bind:value={code}
+						/>
+					</div>
+					{#if error}
+						<p class="flex items-start gap-2 text-sm" role="alert">
+							<CircleAlert size={16} class="mt-0.5 shrink-0 text-critical" aria-hidden="true" />
+							{error}
+						</p>
+					{/if}
+					<button
+						type="submit"
+						disabled={busy}
+						class="inline-flex h-13 w-full items-center justify-center gap-2 rounded-xl bg-accent font-display text-lg font-semibold text-accent-ink hover:brightness-110 disabled:opacity-60"
+					>
+						<LogIn size={18} aria-hidden="true" />
+						{busy ? m.sign_in_busy() : m.sign_in_confirm()}
+					</button>
+				</form>
+			{:else if directoryFactor}
+				{@const offer = directoryFactor}
+				<p class="text-sm font-medium">{m.factor_setup_required()}</p>
+				<AuthenticatorSetup
+					secret={offer.secret}
+					uri={offer.uri}
+					{busy}
+					onconfirm={(typed) => signInDirectory({ code: typed, totp_secret: offer.secret })}
+				/>
+				{#if error}
+					<p class="flex items-start gap-2 text-sm" role="alert">
+						<CircleAlert size={16} class="mt-0.5 shrink-0 text-critical" aria-hidden="true" />
+						{error}
+					</p>
+				{/if}
 			{:else}
 				<form class="flex flex-col gap-5" onsubmit={submit}>
 					<div class="flex flex-col gap-2">

@@ -15,6 +15,7 @@ pub mod problem;
 mod requests;
 mod roles;
 mod search;
+mod second_factor;
 pub mod session;
 mod terminal;
 mod users;
@@ -53,6 +54,19 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route(
             "/groups/{id}/members/{sid}",
             put(groups::add_member).delete(groups::remove_member),
+        )
+        .route(
+            "/account/second-factor",
+            get(second_factor::status)
+                .put(second_factor::enroll)
+                .delete(second_factor::remove),
+        )
+        .route("/account/second-factor/offer", post(second_factor::offer))
+        .route("/users/{id}/second-factor", delete(second_factor::reset))
+        .route("/second-factor-principals", get(second_factor::rules))
+        .route(
+            "/second-factor-principals/{sid}",
+            put(second_factor::require).delete(second_factor::waive),
         )
         .route("/roles", get(roles::list))
         .route(

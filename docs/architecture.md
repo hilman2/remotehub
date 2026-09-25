@@ -86,6 +86,11 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   and security officer (approves vault recoveries), given to users and groups in `role_assignments`. The
   session lookup reads them with the groups. `REMOTEHUB_ADMIN_GROUPS` and `REMOTEHUB_ADMIN_ACCOUNTS` stay
   the administrators an installation starts with, and break-glass accounts are administrators.
+- **Second factor for directory accounts (`second_factor.rs`):** TOTP whose secret is sealed in the vault
+  (owner = user). A user sets it up on the account page, or during sign-in when a rule in
+  `second_factor_principals` names them or a group of theirs; the password is then sent again with the
+  code. Each code works once, and wrong codes count against the sign-in limit. Local accounts get their
+  second factor from Kratos.
 - **Sessions:** server-side in PostgreSQL; cookie HttpOnly, Secure, SameSite=Strict; CSRF protection.
 - **Directory changes reach sessions (`refresh.rs`):** every five minutes and before every connection,
   the service account reads a directory user's groups and `userAccountControl`/`accountExpires` again, by

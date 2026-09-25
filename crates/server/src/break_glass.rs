@@ -16,19 +16,16 @@ use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use data_encoding::BASE32_NOPAD;
-use hmac::{Hmac, KeyInit, Mac};
 use remotehub_vault::DynVault;
 use secrecy::{ExposeSecret, SecretString};
-use sha1::Sha1;
 use sqlx::PgPool;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::secrets::{self, SecretError};
+use crate::totp;
 
 const TOTP_FIELD: &str = "totp";
-const TOTP_PERIOD: u64 = 30;
-const TOTP_DIGITS: u32 = 6;
 /// Alphabet for generated passwords: no look-alikes (0/O, 1/l/I).
 const PASSWORD_ALPHABET: &[u8] = b"abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789-_.!";
 const PASSWORD_LENGTH: usize = 24;
@@ -100,63 +97,15 @@ fn password_matches(password: &str, hash: &str) -> bool {
     })
 }
 
-/// RFC 6238 code for a time step (HMAC-SHA1, 6 digits).
-fn totp_code(secret: &[u8], step: u64) -> String {
-    let mut mac = Hmac::<Sha1>::new_from_slice(secret).expect("HMAC takes any key length");
-    mac.update(&step.to_be_bytes());
-    let digest = mac.finalize().into_bytes();
-    let offset = usize::from(digest[digest.len() - 1] & 0x0f);
-    let value = u32::from_be_bytes([
-        digest[offset] & 0x7f,
-        digest[offset + 1],
-        digest[offset + 2],
-        digest[offset + 3],
-    ]) % 10u32.pow(TOTP_DIGITS);
-    format!("{value:0width$}", width = TOTP_DIGITS as usize)
-}
-
-/// The time step a code belongs to, allowing one step of clock drift each way.
-fn totp_step(secret: &[u8], code: &str, unix_seconds: u64) -> Option<u64> {
-    let now = unix_seconds / TOTP_PERIOD;
-    [now, now.saturating_sub(1), now + 1]
-        .into_iter()
-        .find(|step| {
-            let expected = totp_code(secret, *step);
-            // Constant-time comparison of equal-length ASCII codes.
-            expected.len() == code.len()
-                && expected
-                    .bytes()
-                    .zip(code.bytes())
-                    .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-                    == 0
-        })
-}
-
-fn unix_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("the clock is after 1970")
-        .as_secs()
-}
-
 fn issue(username: &str, password: Zeroizing<String>, secret: &[u8]) -> Issued {
-    let encoded = Zeroizing::new(BASE32_NOPAD.encode(secret));
-    let uri = Zeroizing::new(format!(
-        "otpauth://totp/remotehub:{username}?secret={}&issuer=remotehub&algorithm=SHA1&digits={TOTP_DIGITS}&period={TOTP_PERIOD}",
-        encoded.as_str()
-    ));
+    let encoded = totp::encode(secret);
+    let uri = totp::uri(username, &encoded);
     Issued {
         username: username.to_owned(),
         password,
         totp_secret: encoded,
         totp_uri: uri,
     }
-}
-
-fn random_totp_secret() -> Zeroizing<[u8; 20]> {
-    let mut secret = Zeroizing::new([0u8; 20]);
-    getrandom::fill(secret.as_mut_slice()).expect("the operating system provides randomness");
-    secret
 }
 
 pub async fn create(
@@ -168,7 +117,7 @@ pub async fn create(
         return Err(BreakGlassError::InvalidName);
     }
     let password = random_password();
-    let secret = random_totp_secret();
+    let secret = totp::random_secret();
     let hash = hash_password(&password)?;
 
     let mut tx = db.begin().await?;
@@ -201,7 +150,7 @@ pub async fn reset(
         .await?
         .ok_or_else(|| BreakGlassError::Unknown(username.to_owned()))?;
     let password = random_password();
-    let secret = random_totp_secret();
+    let secret = totp::random_secret();
     let hash = hash_password(&password)?;
 
     let mut tx = db.begin().await?;
@@ -303,7 +252,7 @@ pub async fn authenticate(
     password: &SecretString,
     code: &str,
 ) -> Result<Option<Account>, BreakGlassError> {
-    authenticate_at(db, vault, username, password, code, unix_now()).await
+    authenticate_at(db, vault, username, password, code, totp::unix_now()).await
 }
 
 pub async fn authenticate_at(
@@ -333,7 +282,7 @@ pub async fn authenticate_at(
     let secret = secrets::load(db, vault, user_id, totp_version, TOTP_FIELD)
         .await?
         .ok_or(SecretError::Vault(remotehub_vault::VaultError::Open))?;
-    let Some(step) = totp_step(&secret, code.trim(), unix_seconds) else {
+    let Some(step) = totp::step(&secret, code.trim(), unix_seconds) else {
         return Ok(None);
     };
     // Each code works once: the step must be newer than the last one used.
@@ -361,7 +310,7 @@ static DUMMY_HASH: LazyLock<String> =
 /// authenticator app would show it.
 pub fn code_at(secret_base32: &str, unix_seconds: u64) -> Option<String> {
     let secret = Zeroizing::new(BASE32_NOPAD.decode(secret_base32.as_bytes()).ok()?);
-    Some(totp_code(&secret, unix_seconds / TOTP_PERIOD))
+    Some(totp::code(&secret, unix_seconds / totp::PERIOD))
 }
 
 #[cfg(test)]
@@ -369,32 +318,6 @@ mod tests {
     use super::*;
 
     /// RFC 6238, appendix B (SHA-1, 8 digits there; the last 6 digits here).
-    #[test]
-    fn totp_matches_the_rfc_test_vectors() {
-        let secret = b"12345678901234567890";
-        for (time, expected) in [
-            (59u64, "287082"),
-            (1_111_111_109, "081804"),
-            (1_234_567_890, "005924"),
-            (2_000_000_000, "279037"),
-        ] {
-            assert_eq!(totp_code(secret, time / TOTP_PERIOD), expected, "{time}");
-        }
-    }
-
-    #[test]
-    fn codes_are_accepted_one_step_around_now() {
-        let secret = b"12345678901234567890";
-        let now = 1_234_567_890;
-        let current = totp_code(secret, now / 30);
-        assert_eq!(totp_step(secret, &current, now), Some(now / 30));
-        let previous = totp_code(secret, now / 30 - 1);
-        assert_eq!(totp_step(secret, &previous, now), Some(now / 30 - 1));
-        let old = totp_code(secret, now / 30 - 2);
-        assert_eq!(totp_step(secret, &old, now), None);
-        assert_eq!(totp_step(secret, "12345", now), None);
-    }
-
     #[test]
     fn passwords_are_long_and_hashed_with_argon2id() {
         let password = random_password();

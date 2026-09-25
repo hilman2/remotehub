@@ -34,6 +34,7 @@ export const ERROR_CODES = [
 	'accounts_unavailable',
 	'second_factor_required',
 	'second_factor_setup_required',
+	'second_factor_invalid',
 	'directory_unavailable',
 	'database_unavailable',
 	'internal'

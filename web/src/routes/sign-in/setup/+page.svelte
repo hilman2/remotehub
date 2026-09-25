@@ -31,9 +31,12 @@
 	let texts = $state<UiText[]>([]);
 	let error = $state<string | null>(null);
 
+	// Read once: leaving for the devices page changes `page.state`, and a
+	// new flow started then would send the browser back to the sign-in.
+	const settingsFlow = page.state.settingsFlow;
+
 	$effect(() => {
-		const id = page.state.settingsFlow;
-		(id ? loadFlow('settings', id) : startFlow('settings')).then(follow);
+		(settingsFlow ? loadFlow('settings', settingsFlow) : startFlow('settings')).then(follow);
 	});
 
 	async function follow(result: FlowResult) {

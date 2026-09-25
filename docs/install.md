@@ -160,6 +160,13 @@ through remotehub. Its settings are in `kratos/kratos.yml`; database and secrets
   removes the second factor, and the person sets up a new one with the code.
 - **Backups:** Kratos' database sits next to remotehub's; see [Back up and restore](#back-up-and-restore).
 
+## Second factor for directory accounts
+
+Directory accounts sign in with their password only, unless they set up an authenticator app under
+*My account*. To make it a condition, add users or groups under *Settings → Second factor for directory
+accounts*: they set up the app at their next sign-in. After a lost phone, an administrator removes the
+app under *Users*, and the person sets up a new one.
+
 ## Sign in to SSH devices without stored passwords
 
 A device set to sign in with "A certificate from remotehub" needs no credential. At every connection

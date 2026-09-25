@@ -81,6 +81,11 @@ audit_actions! {
     RoleAssigned = "role.assigned",
     RoleRevoked = "role.revoked",
     SessionsEndedByDirectory = "session.ended_by_directory",
+    SecondFactorEnrolled = "second_factor.enrolled",
+    SecondFactorRemoved = "second_factor.removed",
+    SecondFactorReset = "second_factor.reset",
+    SecondFactorRequired = "second_factor.required",
+    SecondFactorWaived = "second_factor.waived",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).
