@@ -5,8 +5,9 @@ service, which opens web interfaces of devices. The ops package in [`deploy/ops`
 with Docker Compose. Every setting is described in the
 [configuration reference](configuration.md).
 
-You need a Linux host with Docker Engine and the Compose plugin, a DNS name for remotehub, a TLS certificate
-for it, and a service account in Active Directory that may read users and groups.
+You need a Linux host with Docker Engine and the Compose plugin, a DNS name for remotehub and a TLS
+certificate for it. To let people sign in with Active Directory, you need a service account there that may
+read users and groups.
 
 ## Install
 
@@ -20,14 +21,9 @@ cd /opt/remotehub
 sudo sh init.sh
 ```
 
-`init.sh` copies `.env.example` to `.env` and creates the secrets (see below). Then edit `.env`:
-
-- `REMOTEHUB_PUBLIC_URL`: the address people will open, with `https://`.
-- `REMOTEHUB_LDAP_URL`, `REMOTEHUB_LDAP_BIND_DN`, `REMOTEHUB_LDAP_BASE_DN`: your directory.
-
-Put the service account's password into `secrets/ldap_bind_password`. If the directory's certificate comes
-from your own CA, save that CA as `certs/ldap-ca.crt` and add `REMOTEHUB_LDAP_CA_FILE=/run/certs/ldap-ca.crt`
-to `.env`.
+`init.sh` copies `.env.example` to `.env` and creates the secrets (see below). Then set
+`REMOTEHUB_PUBLIC_URL` and `REMOTEHUB_HOST` in `.env`: the address people will open, with `https://`, and
+its host name alone.
 
 Start it:
 
@@ -48,11 +44,10 @@ After a few seconds all three services are up, and remotehub reports `healthy`. 
 | `master_key` | The key that encrypts every stored credential. | 65532, 0400 |
 | `db_password` | The database password, read by PostgreSQL and remotehub. | 65532:999, 0440 |
 | `ssh_ca_key` | The key of remotehub's SSH certificate authority. | 65532, 0400 |
-| `ldap_bind_password` | The directory service account's password. Empty until you fill it in. | 65532, 0400 |
 | `kratos.yml` | Database and secrets of Kratos, which keeps the local accounts; the SMTP server goes here too. | 10000, 0400 |
 
 remotehub runs as user 65532, PostgreSQL as 999 and Kratos as 10000, so the files belong to them; `secrets/`
-itself is open to root only. Keep these owners and modes when you edit a file, e.g. with `sudo tee secrets/ldap_bind_password`.
+itself is open to root only. Keep these owners and modes when you edit a file, e.g. with `sudo tee secrets/kratos.yml`.
 
 Without `master_key`, the credentials in the database cannot be read by anyone. Keep a copy of it apart from
 the database backups, or let the organisation recovery key hold it (see [Back up and restore](#back-up-and-restore)).
@@ -127,16 +122,34 @@ sudo docker compose exec remotehub remotehub setup-code
 ```
 
 Open the link. The wizard creates the first administrator, a local account with a password and an
-authenticator app: remotehub asks for its code at every sign-in. Then it creates a break-glass account for
-the day the directory or Kratos is unreachable, and the organisation recovery key (see
-[Recover personal vaults](#recover-personal-vaults)). Each comes on a page of its own to print; keep them
-offline, in different places. The break-glass account signs in at `/sign-in/break-glass`.
+authenticator app: remotehub asks for its code at every sign-in. Then it connects Active Directory (see
+[Connect Active Directory](#connect-active-directory)) and gives a group of it the administrator role, if
+you want. Last, it creates a break-glass account for the day the directory or Kratos is unreachable, and the
+organisation recovery key (see [Recover personal vaults](#recover-personal-vaults)). Each comes on a page of
+its own to print; keep them offline, in different places. The break-glass account signs in at
+`/sign-in/break-glass`.
 
 The link works until the wizard has created the administrator. Running `setup-code` again makes a new link,
-and the old one stops working.
+and the old one stops working. More break-glass accounts come from `remotehub break-glass create NAME`.
 
-To let members of a directory group administer remotehub, give the group the administrator role under
-*Users*. More break-glass accounts come from `remotehub break-glass create NAME`.
+## Connect Active Directory
+
+The wizard's directory step and *Settings → Directory* take the domain controller's address
+(`ldaps://dc.example.com`, or `ldap://` with StartTLS under *More settings*), the service account, its
+password and the base DN below which users are found. "Test connection" goes through the steps a sign-in
+takes and names the one that fails: finding the server, connecting, TLS, signing in as the service account,
+searching. Saving runs the same check and stores only what passes. The next sign-in uses it; nothing needs
+a restart.
+
+If the domain controller's certificate comes from a CA the system does not know, the check shows the
+certificate the server presented, with its fingerprint. Compare the fingerprint, then trust it. Many
+domain controllers send only their own certificate: trusted as it is, it counts until the controller gets a
+new one. To cover renewals, paste your CA's certificate into *Trusted certificates* instead.
+
+The password is stored encrypted like a vault entry and never shown again; leave the field empty to keep
+it. A new address or base DN signs out every directory user, and so does removing the connection.
+
+Under *Settings → Administrators*, give directory groups the administrator role.
 
 ## Local accounts
 

@@ -16,6 +16,7 @@ export interface SetupStatus {
 /** The wizard's steps, numbered as the server counts them. */
 export const STEP = {
 	administrator: 1,
+	directory: 2,
 	breakGlass: 4,
 	recoveryKey: 5,
 	done: 6

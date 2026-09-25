@@ -124,7 +124,7 @@ pub async fn sign_in(
 
     let directory = state
         .directory
-        .as_ref()
+        .get()
         .ok_or(Problem::new(ErrorCode::DirectoryUnavailable))?;
     let identity = match directory.authenticate(&username, &password).await {
         Ok(identity) => identity,

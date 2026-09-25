@@ -28,15 +28,6 @@ services:
       REMOTEHUB_GUACD: guacd:4822
       REMOTEHUB_BROWSER: browser:4823
       REMOTEHUB_LOG_FORMAT: ${REMOTEHUB_LOG_FORMAT:-text}
-      REMOTEHUB_LDAP_URL: ${REMOTEHUB_LDAP_URL:-}
-      REMOTEHUB_LDAP_STARTTLS: ${REMOTEHUB_LDAP_STARTTLS:-false}
-      REMOTEHUB_LDAP_BIND_DN: ${REMOTEHUB_LDAP_BIND_DN:-}
-      REMOTEHUB_LDAP_BIND_PASSWORD_FILE: /run/secrets/ldap_bind_password
-      REMOTEHUB_LDAP_BASE_DN: ${REMOTEHUB_LDAP_BASE_DN:-}
-      REMOTEHUB_LDAP_USER_FILTER: ${REMOTEHUB_LDAP_USER_FILTER:-}
-      # The CA of the directory's certificate, if it is not a public one:
-      # put it at certs/ldap-ca.crt and set this to /run/certs/ldap-ca.crt.
-      REMOTEHUB_LDAP_CA_FILE: ${REMOTEHUB_LDAP_CA_FILE:-}
       REMOTEHUB_OWN_ACCOUNT_CONNECTIONS: ${REMOTEHUB_OWN_ACCOUNT_CONNECTIONS:-true}
       # Local accounts (ADR 0010): Kratos below.
       REMOTEHUB_KRATOS_URL: http://kratos:4433
@@ -47,9 +38,7 @@ services:
       # The reverse proxy on this host reaches remotehub through the gateway
       # of the network below; it names the client in X-Forwarded-For.
       REMOTEHUB_TRUSTED_PROXIES: ${REMOTEHUB_GATEWAY:-10.213.213.1}
-    secrets: [db_password, master_key, ssh_ca_key, ldap_bind_password]
-    volumes:
-      - ./certs:/run/certs:ro
+    secrets: [db_password, master_key, ssh_ca_key]
     ports:
       - "127.0.0.1:${REMOTEHUB_PORT:-8080}:8080"
     networks: [default, database]
@@ -194,7 +183,5 @@ secrets:
     file: ./secrets/master_key
   ssh_ca_key:
     file: ./secrets/ssh_ca_key
-  ldap_bind_password:
-    file: ./secrets/ldap_bind_password
   kratos:
     file: ./secrets/kratos.yml

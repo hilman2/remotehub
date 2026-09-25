@@ -30,7 +30,7 @@ const ROUND: Duration = Duration::from_secs(60);
 /// Asks the directory about the user with `sid` and applies the answer to
 /// all their sessions. Returns whether they may keep them.
 pub async fn user(state: &AppState, user_id: Uuid, sid: &str) -> Result<bool, sqlx::Error> {
-    let (Some(directory), Ok(parsed)) = (state.directory.as_ref(), sid.parse::<Sid>()) else {
+    let (Some(directory), Ok(parsed)) = (state.directory.get(), sid.parse::<Sid>()) else {
         return Ok(true);
     };
     let reason = match directory.refresh(&parsed).await {

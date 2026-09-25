@@ -12,6 +12,7 @@ mod audit;
 mod break_glass;
 mod catalog;
 mod connectors;
+mod directory;
 mod display;
 mod generated;
 mod groups;

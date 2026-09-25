@@ -3,7 +3,8 @@
 remotehub reads its settings from environment variables. Every variable `REMOTEHUB_X` can also be given as
 `REMOTEHUB_X_FILE`, the path of a file holding the value; the file wins if both are set. An empty value
 counts as unset. The ops package (`deploy/ops`) sets them in `compose.yml` from `.env` and from the files
-in `secrets/`; see [Installing remotehub](install.md).
+in `secrets/`; see [Installing remotehub](install.md). The directory connection is no variable: it is set in
+the setup wizard and under *Settings → Directory*.
 
 ## Server
 
@@ -38,21 +39,6 @@ the next version and restarting makes it the current key.
 |---|---|---|
 | `REMOTEHUB_SESSION_IDLE_MINUTES` | `30` | A session ends after this long without a request. At most the maximum below. |
 | `REMOTEHUB_SESSION_MAX_HOURS` | `12` | A session ends this long after sign-in. |
-
-## Directory (Active Directory over LDAP)
-
-Without `REMOTEHUB_LDAP_URL`, only break-glass accounts can sign in.
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `REMOTEHUB_LDAP_URL` | – | `ldaps://host[:port]`, or `ldap://host[:port]` with StartTLS. |
-| `REMOTEHUB_LDAP_STARTTLS` | `false` | Upgrade an `ldap://` connection with StartTLS. `ldap://` without it is refused. |
-| `REMOTEHUB_LDAP_CA_FILE` | system CAs | PEM file with the CA of the directory's certificate. |
-| `REMOTEHUB_LDAP_BIND_DN` | required with a URL | Service account for searches, e.g. `svc-remotehub@example.com`. |
-| `REMOTEHUB_LDAP_BIND_PASSWORD` | required with a URL | Its password. |
-| `REMOTEHUB_LDAP_BASE_DN` | required with a URL | Where users are searched, e.g. `DC=example,DC=com`. |
-| `REMOTEHUB_LDAP_USER_FILTER` | – | An LDAP filter that users must match as well, e.g. `(memberOf=CN=remotehub users,OU=Groups,DC=example,DC=com)`. |
-| `REMOTEHUB_LDAP_TIMEOUT_SECONDS` | `10` | Time limit for each directory request. |
 
 ## Local accounts (Ory Kratos)
 

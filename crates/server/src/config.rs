@@ -2,8 +2,8 @@
 //!
 //! Every setting `REMOTEHUB_X` can also be given as `REMOTEHUB_X_FILE`, the
 //! path of a file holding the value (Docker secrets). Secrets such as the
-//! database URL and the LDAP password belong in files in production; the
-//! file wins if both are set.
+//! database URL belong in files in production; the file wins if both are
+//! set. The directory is not configured here but on the settings page (#144).
 
 use std::fmt;
 use std::net::SocketAddr;
@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
-use remotehub_directory::ldap::LdapConfig;
 use remotehub_gateway::guacamole::KEYBOARD_LAYOUTS;
 use secrecy::SecretString;
 use thiserror::Error;
@@ -40,8 +39,6 @@ pub struct Config {
     /// Requests that change state must come from it.
     pub public_origin: String,
     pub session: SessionConfig,
-    /// Active Directory; without it only break-glass accounts can sign in.
-    pub ldap: Option<LdapConfig>,
     /// File with the vault's master keys (a Docker secret), never an
     /// environment variable.
     pub master_key_file: PathBuf,
@@ -146,41 +143,6 @@ impl Config {
             max: Duration::from_secs(max_hours * 3600),
         };
 
-        let ldap = match setting("REMOTEHUB_LDAP_URL")? {
-            None => None,
-            Some(url) => {
-                if !(url.starts_with("ldaps://") || url.starts_with("ldap://")) {
-                    return Err(invalid("REMOTEHUB_LDAP_URL", &url));
-                }
-                let timeout: u64 = parse_or(
-                    "REMOTEHUB_LDAP_TIMEOUT_SECONDS",
-                    setting("REMOTEHUB_LDAP_TIMEOUT_SECONDS")?,
-                    10,
-                )?;
-                Some(LdapConfig {
-                    starttls: parse_or(
-                        "REMOTEHUB_LDAP_STARTTLS",
-                        setting("REMOTEHUB_LDAP_STARTTLS")?,
-                        false,
-                    )?,
-                    url,
-                    ca_file: setting("REMOTEHUB_LDAP_CA_FILE")?.map(PathBuf::from),
-                    bind_dn: required("REMOTEHUB_LDAP_BIND_DN")?,
-                    bind_password: SecretString::from(required("REMOTEHUB_LDAP_BIND_PASSWORD")?),
-                    base_dn: required("REMOTEHUB_LDAP_BASE_DN")?,
-                    user_filter: setting("REMOTEHUB_LDAP_USER_FILTER")?,
-                    timeout: Duration::from_secs(timeout.max(1)),
-                })
-            }
-        };
-        if let Some(ldap) = &ldap
-            && ldap.url.starts_with("ldap://")
-            && !ldap.starttls
-        {
-            // Passwords never travel unencrypted.
-            return Err(invalid("REMOTEHUB_LDAP_STARTTLS", "false with ldap://"));
-        }
-
         // Only as a path: the key itself must never sit in the environment.
         let master_key_file = PathBuf::from(
             lookup("REMOTEHUB_MASTER_KEY_FILE")
@@ -256,7 +218,6 @@ impl Config {
             log_json,
             public_origin,
             session,
-            ldap,
             master_key_file,
             ssh_ca_key_file,
             own_account_connections,
@@ -346,7 +307,6 @@ impl fmt::Debug for Config {
             .field("log_json", &self.log_json)
             .field("public_origin", &self.public_origin)
             .field("session", &self.session)
-            .field("ldap", &self.ldap.as_ref().map(|l| &l.url))
             .field("master_key_file", &self.master_key_file)
             .field("ssh_ca_key_file", &self.ssh_ca_key_file)
             .field("guacd", &self.guacd)
@@ -362,8 +322,6 @@ impl fmt::Debug for Config {
 mod tests {
     use std::collections::HashMap;
     use std::io::Write;
-
-    use secrecy::ExposeSecret;
 
     use super::*;
 
@@ -398,7 +356,6 @@ mod tests {
         assert_eq!(config.public_origin, "https://remotehub.example.com");
         assert_eq!(config.session.idle, Duration::from_secs(30 * 60));
         assert_eq!(config.session.max, Duration::from_secs(12 * 3600));
-        assert!(config.ldap.is_none());
         assert_eq!(config.guacd, "guacd:4822");
         assert_eq!(config.browser, "browser:4823");
         assert_eq!(config.rdp_keyboard_layout, "en-us-qwerty");
@@ -538,40 +495,6 @@ mod tests {
                 "{name}={value}"
             );
         }
-    }
-
-    #[test]
-    fn reads_the_ldap_settings_and_insists_on_encryption() {
-        let ldap = [
-            ("REMOTEHUB_LDAP_URL", "ldaps://dc.example.com"),
-            ("REMOTEHUB_LDAP_BIND_DN", "svc@example.com"),
-            ("REMOTEHUB_LDAP_BIND_PASSWORD", "s3cret"),
-            ("REMOTEHUB_LDAP_BASE_DN", "DC=example,DC=com"),
-        ];
-        let config = Config::from_lookup(lookup(&ldap)).unwrap();
-        let settings = config.ldap.as_ref().unwrap();
-        assert_eq!(settings.url, "ldaps://dc.example.com");
-        assert_eq!(settings.bind_password.expose_secret(), "s3cret");
-        assert!(!settings.starttls);
-        assert_eq!(settings.timeout, Duration::from_secs(10));
-        assert!(!format!("{config:?}").contains("s3cret"));
-
-        let mut plain = ldap.to_vec();
-        plain[0] = ("REMOTEHUB_LDAP_URL", "ldap://dc.example.com");
-        assert!(Config::from_lookup(lookup(&plain)).is_err());
-        plain.push(("REMOTEHUB_LDAP_STARTTLS", "true"));
-        assert!(
-            Config::from_lookup(lookup(&plain))
-                .unwrap()
-                .ldap
-                .unwrap()
-                .starttls
-        );
-
-        assert_eq!(
-            Config::from_lookup(lookup(&ldap[..3])).unwrap_err(),
-            ConfigError::Missing("REMOTEHUB_LDAP_BASE_DN")
-        );
     }
 
     #[test]

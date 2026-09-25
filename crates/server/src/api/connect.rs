@@ -414,7 +414,7 @@ pub async fn credentials(
         "laps" => {
             let directory = state
                 .directory
-                .as_ref()
+                .get()
                 .ok_or(Problem::new(ErrorCode::DirectoryUnavailable))?;
             let laps = directory
                 .laps_password(&target.host)

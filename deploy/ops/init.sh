@@ -1,6 +1,6 @@
 #!/bin/sh
 # Prepares a new installation next to compose.yml: .env from .env.example,
-# the secrets in secrets/ and certs/ for a directory CA (docs/install.md).
+# and the secrets in secrets/ (docs/install.md).
 # Run it once as root, where docker compose will run. It never overwrites a
 # file.
 set -eu
@@ -25,7 +25,7 @@ if [ "$(id -u)" != 0 ]; then
   echo "Run init.sh as root: the secrets must belong to the containers' users." >&2
   exit 1
 fi
-mkdir -p secrets certs
+mkdir -p secrets
 chmod 700 secrets
 umask 077
 
@@ -67,11 +67,10 @@ EOF
 new_secret db_password 65532:999 440 random_password
 new_secret master_key 65532:65532 400 docker run --rm "$image" generate-key
 new_secret ssh_ca_key 65532:65532 400 docker run --rm "$image" generate-ssh-ca
-new_secret ldap_bind_password 65532:65532 400 true
 new_secret kratos.yml 10000:10000 400 kratos_config
 
 echo
-echo "Next: set REMOTEHUB_PUBLIC_URL and the directory in .env, put the LDAP"
-echo "bind password into secrets/ldap_bind_password, then: docker compose up -d"
+echo "Next: set REMOTEHUB_PUBLIC_URL in .env, then: docker compose up -d"
+echo "and open the link of: docker compose exec remotehub remotehub setup-code"
 echo "Back up secrets/master_key apart from the database: without it the"
 echo "vault cannot be read."

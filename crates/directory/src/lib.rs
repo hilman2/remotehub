@@ -5,9 +5,11 @@
 //! including nested ones. The first implementation is [`ldap::LdapDirectory`]
 //! for Active Directory; Entra ID (OIDC) follows in M4.
 
+pub mod check;
 pub mod laps;
 pub mod ldap;
 mod sid;
+mod trust;
 
 use std::future::Future;
 

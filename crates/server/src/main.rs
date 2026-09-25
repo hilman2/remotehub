@@ -6,12 +6,10 @@ use std::time::Duration;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use remotehub_directory::ldap::LdapDirectory;
 use remotehub_gateway::ssh_ca::SshCa;
 use remotehub_i18n::{self as i18n, Locale, Message};
 use remotehub_server::api::health;
 use remotehub_server::audit::{Action, Actor, Entry};
-use remotehub_server::auth::Authenticator;
 use remotehub_server::config::{self, Config};
 use remotehub_server::connector_agent::{self, AgentSettings};
 use remotehub_server::{
@@ -158,19 +156,23 @@ async fn serve() -> anyhow::Result<()> {
         Err(error) => tracing::error!(%error, "cannot keep the master keys for the recovery key"),
     }
 
-    let ldap = match config.ldap {
-        Some(ldap) => {
-            tracing::info!(url = %ldap.url, base = %ldap.base_dn, "signing in against LDAP");
-            Some(Arc::new(
-                LdapDirectory::new(ldap).context("invalid LDAP settings")?,
-            ))
+    // The directory as the settings page stored it (#144). A stored one that
+    // cannot be opened is logged, and the server starts without it: the
+    // settings page is where it gets repaired.
+    let directory = match remotehub_server::directory::open(&pool, &vault).await {
+        Ok(Some(directory)) => {
+            tracing::info!("signing in against the stored directory");
+            Some(directory)
         }
-        None => {
-            tracing::warn!("no directory configured: only break-glass accounts can sign in");
+        Ok(None) => {
+            tracing::info!("no directory set up: local and break-glass accounts sign in");
+            None
+        }
+        Err(error) => {
+            tracing::error!(%error, "cannot open the stored directory");
             None
         }
     };
-    let directory = ldap.map(|ldap| ldap as Arc<dyn Authenticator>);
 
     let settings = Settings {
         public_origin: config.public_origin,

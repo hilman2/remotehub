@@ -351,11 +351,6 @@ part_e2e() { # tools
     -e REMOTEHUB_MASTER_KEY_FILE="${CI_SRC}/deploy/dev/master.key" \
     -e REMOTEHUB_SSH_CA_KEY_FILE="${CI_SRC}/deploy/testlab/ssh/remotehub_ca" \
     -e REMOTEHUB_WEB_DIR="${CI_SRC}/web/build" \
-    -e REMOTEHUB_LDAP_URL=ldaps://dc.remotehub.test \
-    -e REMOTEHUB_LDAP_CA_FILE="${CI_SRC}/deploy/testlab/dc/tls/ca.crt" \
-    -e REMOTEHUB_LDAP_BIND_DN=svc-remotehub@remotehub.test \
-    -e 'REMOTEHUB_LDAP_BIND_PASSWORD=Svc-Passw0rd!' \
-    -e REMOTEHUB_LDAP_BASE_DN=DC=remotehub,DC=test \
     -e REMOTEHUB_KRATOS_URL=http://kratos:4433 \
     -e REMOTEHUB_KRATOS_ADMIN_URL=http://kratos:4434 \
     "$1" /ci-target/debug/remotehub
