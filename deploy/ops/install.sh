@@ -62,6 +62,7 @@ check_host() {
     *) die "remotehub installs on Debian 12 or 13 and Ubuntu 22.04 or 24.04, not on ${PRETTY_NAME:-this system}" ;;
   esac
   [ "$(uname -m)" = x86_64 ] || die "remotehub's images exist for x86_64 only, not for $(uname -m)"
+  command -v curl >/dev/null 2>&1 || die "curl is missing"
   memory=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
   [ "$memory" -ge 3800 ] || warn "only ${memory} MB of memory; remotehub wants 4 GB, the browser service alone up to 3 GB"
   space=$(df -Pm / | awk 'NR == 2 { print $4 }')
@@ -71,7 +72,6 @@ check_host() {
 install_docker() {
   if ! command -v docker >/dev/null 2>&1; then
     say "Installing Docker from Docker's repository …"
-    command -v curl >/dev/null 2>&1 || die "curl is missing"
     curl -fsSL https://get.docker.com | sh >>"$log" 2>&1 || die "installing Docker failed; see $log"
   fi
   docker compose version >/dev/null 2>&1 || die "the Docker Compose plugin is missing (docker-compose-plugin)"
@@ -303,6 +303,22 @@ start_stack() {
     die "remotehub did not start; see $log and: docker compose -f $dir/compose.yml logs"
 }
 
+# Waits until Caddy of the package serves remotehub over HTTPS, so that the
+# link works once it is shown. Caddy tries Let's Encrypt first, which fails
+# for a host the internet does not reach, and then takes its own CA.
+wait_for_https() {
+  say "Waiting for Caddy's certificate …"
+  tries=0
+  until curl -skf --resolve "$domain:443:127.0.0.1" "https://$domain/api/health" >/dev/null 2>&1; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 90 ]; then
+      warn "Caddy does not serve https://$domain yet; see: docker compose -f $dir/compose.yml logs caddy"
+      return
+    fi
+    sleep 2
+  done
+}
+
 show_link() {
   cd "$dir"
   if link=$(docker compose exec -T remotehub remotehub setup-code 2>/dev/null | grep -o 'https\{0,1\}://[^ ]*/setup#code=[A-Za-z0-9_-]*'); then
@@ -362,6 +378,7 @@ start_stack
 
 if [ "$mode" = caddy ]; then
   open_firewall
+  wait_for_https
   say "Caddy serves https://$domain: with Let's Encrypt if the internet reaches this host, otherwise with a CA of its own."
 else
   port=$(sed -n 's/^REMOTEHUB_PORT=//p' .env | tail -n 1)
