@@ -102,7 +102,7 @@ services:
 
   kratos-migrate:
     image: oryd/kratos:v26.2.0
-    command: -c /etc/config/kratos/kratos.yml -c /run/secrets/kratos migrate sql up -e --yes
+    command: -c /etc/config/kratos/kratos.yml -c /run/secrets/kratos.yml migrate sql up -e --yes
     environment: &kratos-env
       SQA_OPT_OUT: "true"
       SERVE_PUBLIC_BASE_URL: ${REMOTEHUB_PUBLIC_URL}/api/auth/
@@ -115,7 +115,10 @@ services:
       SELFSERVICE_FLOWS_LOGOUT_AFTER_DEFAULT_BROWSER_RETURN_URL: ${REMOTEHUB_PUBLIC_URL}/sign-in
     volumes:
       - ./kratos:/etc/config/kratos:ro
-    secrets: [kratos]
+    # Kratos tells a configuration's format by its file name.
+    secrets: &kratos-secret
+      - source: kratos
+        target: kratos.yml
     networks: [database]
     depends_on:
       kratos-db:
@@ -126,13 +129,13 @@ services:
     image: oryd/kratos:v26.2.0
     # The courier sends the codes of a forgotten password; it needs the SMTP
     # server in secrets/kratos.yml (docs/install.md#local-accounts).
-    command: serve -c /etc/config/kratos/kratos.yml -c /run/secrets/kratos --watch-courier
+    command: serve -c /etc/config/kratos/kratos.yml -c /run/secrets/kratos.yml --watch-courier
     environment: *kratos-env
     tmpfs:
       - /tmp
     volumes:
       - ./kratos:/etc/config/kratos:ro
-    secrets: [kratos]
+    secrets: *kratos-secret
     networks: [default, database]
     depends_on:
       kratos-migrate:
