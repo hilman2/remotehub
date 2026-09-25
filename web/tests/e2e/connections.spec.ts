@@ -247,6 +247,58 @@ test('a device signs in with credentials of its own', async ({ page }) => {
 	await expect(page.locator('.xterm-rows:visible')).toContainText('own key says tester');
 });
 
+test('a group of remotehub’s own passes a permission on to its members', async ({
+	page,
+	browser
+}) => {
+	await signIn(page);
+	const dialog = page.getByRole('dialog');
+	const group = `E2E team ${run}`;
+	await page.getByRole('link', { name: 'Users' }).click();
+	await page.getByRole('button', { name: 'New group' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(group);
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	const row = page.getByTestId('group-row').filter({ hasText: group });
+	await row.getByRole('button', { name: `Actions for ${group}` }).click();
+	await page.getByRole('menuitem', { name: 'Members' }).click();
+	await dialog.getByLabel('Search users and groups').fill('Bob');
+	await dialog.getByRole('button', { name: /Bob Helpdesk/ }).click();
+	await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+	await expect(dialog.getByRole('listitem').filter({ hasText: 'Bob Helpdesk' })).toBeVisible();
+	await page.keyboard.press('Escape');
+	await expect(row).toContainText('Bob Helpdesk');
+
+	// The group may see a new device.
+	await page.getByRole('link', { name: 'Devices' }).click();
+	const folder = `E2E team folder ${run}`;
+	await newFolder(page, folder);
+	const name = `lab ssh team ${run}`;
+	await page.getByRole('tree').getByRole('button', { name: folder, exact: true }).click();
+	await page.getByRole('button', { name: 'New device' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(name);
+	await dialog.getByLabel('Host name or IP address').fill(sshHost);
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await page.getByRole('button', { name: 'Settings' }).click();
+	await page.getByRole('menuitem', { name: 'Permissions' }).click();
+	await dialog.getByLabel('Search users and groups').fill(group);
+	await dialog.getByRole('button', { name: group }).click();
+	await dialog.locator('select').selectOption({ label: 'See' });
+	await dialog.getByRole('button', { name: 'Grant' }).click();
+	await expect(dialog.getByText(group)).toBeVisible();
+
+	// bob sees it through the group.
+	const bobs = await browser.newContext();
+	const bob = await bobs.newPage();
+	await signIn(bob, 'bob', 'Bob-Passw0rd!');
+	await bob.getByRole('searchbox').fill(name);
+	await expect(
+		bob
+			.getByRole('list', { name: 'Search results' })
+			.getByRole('button', { name: `${name} ${sshHost}` })
+	).toBeVisible();
+	await bobs.close();
+});
+
 test('access asked for just in time is approved by someone else', async ({ page, browser }) => {
 	// alice sets up a device that bob may only see.
 	await signIn(page);

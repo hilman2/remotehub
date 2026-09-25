@@ -45,7 +45,12 @@ export const AUDIT_ACTIONS = [
 	'account.deleted',
 	'user.blocked',
 	'user.unblocked',
-	'user.sessions_ended'
+	'user.sessions_ended',
+	'group.created',
+	'group.updated',
+	'group.deleted',
+	'group.member_added',
+	'group.member_removed'
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

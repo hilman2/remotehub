@@ -151,6 +151,7 @@ pub async fn sign_in(
         upn: None,
         groups: Vec::new(),
         identity_id: Some(found.identity.id),
+        memberships: Vec::new(),
     };
     let me = Me::of(&session, &state.settings);
     Ok((AppendHeaders([session::set_cookie(&token)]), Json(me)))

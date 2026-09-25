@@ -9,7 +9,6 @@ use axum::Json;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use remotehub_directory::{Principal, Sid};
 use remotehub_gateway::guacamole::KEYBOARD_LAYOUTS;
 use remotehub_gateway::ssh::{KeyError, SshKey};
 use remotehub_model::{Catalog, ObjectId, Role, Subject};
@@ -21,6 +20,7 @@ use uuid::Uuid;
 use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
 use crate::audit::{self, Action, Actor, Entry};
+use crate::principal::{self, Principal, PrincipalId};
 use crate::session::Session;
 use crate::{AppState, catalog, secrets};
 
@@ -1375,13 +1375,16 @@ pub async fn add_grant(
     if !matches!(input.principal_kind.as_str(), "user" | "group") {
         return Err(invalid("principal_kind"));
     }
-    let sid: Sid = input
+    let sid: PrincipalId = input
         .principal_sid
         .parse()
         .map_err(|_| invalid("principal_sid"))?;
     let principal_name = name(&input.principal_name, "principal_name")?;
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Manage, target)?;
+    if !sid.check(&state.db, &input.principal_kind).await? {
+        return Err(invalid("principal_sid"));
+    }
 
     let (folder, device, credential) = match target {
         ObjectId::Folder(id) => (Some(id), None, None),
@@ -1400,14 +1403,14 @@ pub async fn add_grant(
     .bind(device)
     .bind(credential)
     .bind(&input.principal_kind)
-    .bind(sid.as_str())
+    .bind(sid.to_string())
     .bind(&principal_name)
     .bind(role.as_str())
     .bind(session.user_id)
     .execute(&mut *tx)
     .await?;
     let details = json!({
-        "principal_kind": input.principal_kind, "principal_sid": sid,
+        "principal_kind": input.principal_kind, "principal_sid": sid.to_string(),
         "principal_name": principal_name, "role": role,
     });
     audit::record(
@@ -1481,13 +1484,14 @@ pub async fn search_principals(
     if !manages_something {
         return Err(Problem::new(ErrorCode::Forbidden));
     }
-    let directory = state
-        .directory
-        .as_ref()
-        .ok_or(Problem::new(ErrorCode::DirectoryUnavailable))?;
-    let found = directory.search(&query.q, 25).await.map_err(|error| {
-        tracing::warn!(%error, "directory search failed");
-        Problem::new(ErrorCode::DirectoryUnavailable)
-    })?;
+    let mut found = principal::search_own(&state.db, &query.q, 25).await?;
+    // Without a directory, remotehub's own principals are all there is.
+    if let Some(directory) = state.directory.as_ref() {
+        let listed = directory.search(&query.q, 25).await.map_err(|error| {
+            tracing::warn!(%error, "directory search failed");
+            Problem::new(ErrorCode::DirectoryUnavailable)
+        })?;
+        found.extend(listed.into_iter().map(Principal::from));
+    }
     Ok(Json(found))
 }

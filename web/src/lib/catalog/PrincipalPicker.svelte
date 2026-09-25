@@ -12,11 +12,14 @@
 	let {
 		id,
 		chosen = $bindable(null),
-		onerror
+		onerror,
+		accepts = () => true
 	}: {
 		id: string;
 		chosen?: Principal | null;
 		onerror: (message: string) => void;
+		/** Which of the found principals may be chosen here. */
+		accepts?: (principal: Principal) => boolean;
 	} = $props();
 
 	let query = $state('');
@@ -30,7 +33,7 @@
 		}
 		const timer = setTimeout(async () => {
 			const result = await searchPrincipals(q);
-			found = result.ok ? result.data : [];
+			found = result.ok ? result.data.filter(accepts) : [];
 			if (!result.ok) onerror(errorMessage(result.code));
 		}, 250);
 		return () => clearTimeout(timer);

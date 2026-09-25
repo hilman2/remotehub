@@ -73,6 +73,11 @@ audit_actions! {
     UserBlocked = "user.blocked",
     UserUnblocked = "user.unblocked",
     UserSessionsEnded = "user.sessions_ended",
+    GroupCreated = "group.created",
+    GroupUpdated = "group.updated",
+    GroupDeleted = "group.deleted",
+    GroupMemberAdded = "group.member_added",
+    GroupMemberRemoved = "group.member_removed",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).

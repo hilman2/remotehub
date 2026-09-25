@@ -11,6 +11,7 @@ pub mod connector_agent;
 pub mod connectors;
 pub mod db;
 pub mod kratos;
+pub mod principal;
 pub mod proxy;
 pub mod secrets;
 pub mod session;

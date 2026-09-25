@@ -12,7 +12,6 @@ use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use remotehub_directory::Sid;
 use remotehub_model::{ObjectId, Role};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -23,6 +22,7 @@ use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
 use crate::AppState;
 use crate::audit::{self, Action, Actor, Entry};
+use crate::principal::PrincipalId;
 use crate::session::Session;
 
 /// Entries one request returns, newest first.
@@ -160,9 +160,12 @@ pub async fn require_purpose(
 ) -> Result<StatusCode, Problem> {
     require_admin(&state, &session)?;
     let input = body(input)?;
-    let sid: Sid = sid.parse().map_err(|_| invalid("principal_sid"))?;
+    let sid: PrincipalId = sid.parse().map_err(|_| invalid("principal_sid"))?;
     if !matches!(input.principal_kind.as_str(), "user" | "group") {
         return Err(invalid("principal_kind"));
+    }
+    if !sid.check(&state.db, &input.principal_kind).await? {
+        return Err(invalid("principal_sid"));
     }
     let principal_name = name(&input.principal_name, "principal_name")?;
     let mut tx = state.db.begin().await?;
@@ -170,7 +173,7 @@ pub async fn require_purpose(
         "INSERT INTO purpose_principals (principal_sid, principal_kind, principal_name, created_by)
          VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
     )
-    .bind(sid.as_str())
+    .bind(sid.to_string())
     .bind(&input.principal_kind)
     .bind(&principal_name)
     .bind(session.user_id)
@@ -179,7 +182,7 @@ pub async fn require_purpose(
     .rows_affected();
     if added == 1 {
         let details = json!({
-            "principal_kind": input.principal_kind, "principal_sid": sid,
+            "principal_kind": input.principal_kind, "principal_sid": sid.to_string(),
             "principal_name": principal_name,
         });
         audit::record(

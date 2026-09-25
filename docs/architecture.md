@@ -76,7 +76,12 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   app (required), recovery codes, invitations. Browsers reach it through remotehub under `/api/auth/`;
   `POST /api/session/local` turns its session into remotehub's (`api/accounts.rs`).
 - **Identifiers:** users and groups are stored by `objectSid`/`objectGUID` (Entra object IDs later), never
-  by name, so renames do not change permissions. Local accounts are `local:<Kratos identity>`.
+  by name, so renames do not change permissions. Local accounts are `local:<Kratos identity>`, groups of
+  remotehub's own `group:<id>` (`crate::principal`).
+- **Groups of remotehub's own (`/users`, `api/groups.rs`):** for installations without a directory and for
+  teams it does not know. Members are directory users, directory groups and local accounts; groups do not
+  nest. The session lookup adds a user's groups at every request, so a change holds at once. Deleting a
+  group removes its grants and purpose rules.
 - **Sessions:** server-side in PostgreSQL; cookie HttpOnly, Secure, SameSite=Strict; CSRF protection.
 - **User management (`/users`, `api/users.rs`):** administrators invite local accounts, block and unblock
   anyone, end sessions, issue a new sign-in code and delete local accounts. A block is `users.blocked_at`:
@@ -87,7 +92,7 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   only via `remotehub break-glass …`, which prints password and TOTP secret once. The TOTP secret is sealed
   in the vault. They sign in at `/sign-in/break-glass`, work when AD is down, are administrators, and every
   attempt is audited with `break_glass: true`; the UI shows a red banner during such a session.
-- **Permissions:** a folder tree holds devices and credentials. A grant gives an AD group or a user a role
+- **Permissions:** a folder tree holds devices and credentials. A grant gives a group or a user a role
   on a folder or an entry: `list < connect < reveal < edit < manage`. Grants are inherited downwards and
   only allow. `authorize()` is the single decision point and is tested table-driven.
 - **Just-in-time access:** someone who sees an object asks for `connect` or `reveal` on it for up to a day,
