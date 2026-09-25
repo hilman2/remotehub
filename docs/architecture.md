@@ -87,6 +87,10 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   session lookup reads them with the groups. `REMOTEHUB_ADMIN_GROUPS` and `REMOTEHUB_ADMIN_ACCOUNTS` stay
   the administrators an installation starts with, and break-glass accounts are administrators.
 - **Sessions:** server-side in PostgreSQL; cookie HttpOnly, Secure, SameSite=Strict; CSRF protection.
+- **Directory changes reach sessions (`refresh.rs`):** every five minutes and before every connection,
+  the service account reads a directory user's groups and `userAccountControl`/`accountExpires` again, by
+  SID. New groups replace those of all their sessions; a disabled, expired or vanished account loses its
+  sessions (`session.ended_by_directory`). An unreachable directory changes nothing.
 - **User management (`/users`, `api/users.rs`):** administrators invite local accounts, block and unblock
   anyone, end sessions, issue a new sign-in code and delete local accounts. A block is `users.blocked_at`:
   it ends the user's sessions, the session lookup ignores them, and every sign-in path refuses them. For a

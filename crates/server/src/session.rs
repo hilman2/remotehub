@@ -31,6 +31,9 @@ pub const LOGIN_KEY_COOKIE: &str = "__Host-remotehub-login-key";
 /// The signed-in user of a request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
 pub struct Session {
+    /// Its key in the database, to read it again.
+    #[serde(skip)]
+    pub token_hash: Vec<u8>,
     #[serde(skip)]
     pub user_id: Uuid,
     pub username: String,
@@ -205,8 +208,36 @@ pub async fn lookup(
     idle: Duration,
 ) -> Result<Option<Session>, sqlx::Error> {
     let token_hash = hash(token);
-    let session: Option<Session> = sqlx::query_as(
-        "SELECT s.user_id, s.groups, u.username, u.display_name, u.kind, u.sid, u.upn,
+    let Some(session) = by_hash(db, &token_hash, idle).await? else {
+        return Ok(None);
+    };
+    // Keeps the session alive; at most one write per minute and session.
+    sqlx::query(
+        "UPDATE sessions SET last_seen_at = now()
+         WHERE token_hash = $1 AND last_seen_at < now() - interval '1 minute'",
+    )
+    .bind(token_hash.as_slice())
+    .execute(db)
+    .await?;
+    Ok(Some(session))
+}
+
+/// The same session read again, e.g. after its groups changed (#108).
+pub async fn reload(
+    db: &PgPool,
+    session: &Session,
+    idle: Duration,
+) -> Result<Option<Session>, sqlx::Error> {
+    by_hash(db, &session.token_hash, idle).await
+}
+
+async fn by_hash(
+    db: &PgPool,
+    token_hash: &[u8],
+    idle: Duration,
+) -> Result<Option<Session>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT s.token_hash, s.user_id, s.groups, u.username, u.display_name, u.kind, u.sid, u.upn,
                 u.identity_id, own.memberships,
                 ARRAY(SELECT DISTINCT r.role FROM role_assignments r
                       WHERE r.principal_sid = ANY (s.groups || own.memberships)
@@ -224,22 +255,10 @@ pub async fn lookup(
            AND s.expires_at > now()
            AND s.last_seen_at > now() - make_interval(secs => $2)",
     )
-    .bind(token_hash.as_slice())
+    .bind(token_hash)
     .bind(idle.as_secs_f64())
     .fetch_optional(db)
-    .await?;
-    let Some(session) = session else {
-        return Ok(None);
-    };
-    // Keeps the session alive; at most one write per minute and session.
-    sqlx::query(
-        "UPDATE sessions SET last_seen_at = now()
-         WHERE token_hash = $1 AND last_seen_at < now() - interval '1 minute'",
-    )
-    .bind(token_hash.as_slice())
-    .execute(db)
-    .await?;
-    Ok(Some(session))
+    .await
 }
 
 pub async fn delete<'e>(db: impl PgExecutor<'e>, token: &str) -> Result<(), sqlx::Error> {

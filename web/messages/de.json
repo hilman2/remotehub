@@ -441,5 +441,6 @@
 	"role_security_officer": "Sicherheitsbeauftragter",
 	"role_security_officer_hint": "Genehmigt die Wiederherstellung von Tresoren.",
 	"audit_role_assigned": "Rolle vergeben",
-	"audit_role_revoked": "Rolle entzogen"
+	"audit_role_revoked": "Rolle entzogen",
+	"audit_session_ended_by_directory": "Das Verzeichnis hat die Sitzungen eines Benutzers beendet"
 }

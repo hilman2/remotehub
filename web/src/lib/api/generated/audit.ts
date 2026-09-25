@@ -52,7 +52,8 @@ export const AUDIT_ACTIONS = [
 	'group.member_added',
 	'group.member_removed',
 	'role.assigned',
-	'role.revoked'
+	'role.revoked',
+	'session.ended_by_directory'
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

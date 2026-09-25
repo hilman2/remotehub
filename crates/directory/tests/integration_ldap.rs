@@ -112,6 +112,44 @@ async fn disabled_accounts_are_reported() {
 
 #[tokio::test]
 #[ignore = "needs the test lab"]
+async fn a_refresh_reads_groups_and_state_without_a_password() {
+    let bob = sign_in("bob", "Bob-Passw0rd!").await.unwrap();
+    assert_eq!(directory().refresh(&bob.sid).await.unwrap(), bob.groups);
+
+    let carol = directory()
+        .search_users("carol", 5)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|p| p.detail.as_deref().is_some_and(|d| d.starts_with("carol")))
+        .expect("carol is in the lab")
+        .sid;
+    assert_eq!(
+        directory().refresh(&carol).await.unwrap_err(),
+        AuthError::AccountDisabled
+    );
+
+    let nobody: Sid = "S-1-5-21-1-2-3-999999".parse().unwrap();
+    assert_eq!(
+        directory().refresh(&nobody).await.unwrap_err(),
+        AuthError::InvalidCredentials
+    );
+    // Outside the user filter counts as gone.
+    let only_admins = LdapDirectory::new(LdapConfig {
+        user_filter: Some(
+            "(memberOf:1.2.840.113556.1.4.1941:=CN=RH Admins,CN=Users,DC=remotehub,DC=test)".into(),
+        ),
+        ..config()
+    })
+    .unwrap();
+    assert_eq!(
+        only_admins.refresh(&bob.sid).await.unwrap_err(),
+        AuthError::InvalidCredentials
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs the test lab"]
 async fn users_without_groups_only_have_builtin_ones() {
     let dave = sign_in("dave", "Dave-Passw0rd!").await.unwrap();
     for group in ["RH Admins", "RH Operators", "Helpdesk"] {

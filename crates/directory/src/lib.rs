@@ -98,6 +98,12 @@ pub trait IdentityProvider: Send + Sync {
         limit: i32,
     ) -> impl Future<Output = Result<Vec<Principal>, AuthError>> + Send;
 
+    /// The groups of the user with `sid` now (#108), read without their
+    /// password. Fails with `AccountDisabled` or `AccountExpired` if the
+    /// account may no longer sign in, and with `InvalidCredentials` if it is
+    /// gone or no longer matches the user filter.
+    fn refresh(&self, sid: &Sid) -> impl Future<Output = Result<Vec<Sid>, AuthError>> + Send;
+
     /// The LAPS password of the computer that `host` names, read now.
     fn laps_password(
         &self,

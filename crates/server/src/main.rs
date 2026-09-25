@@ -173,6 +173,7 @@ async fn serve() -> anyhow::Result<()> {
     };
     let state = AppState::new(pool.clone(), directory, settings, vault);
     tokio::spawn(purge_sessions(pool, config.session.idle));
+    tokio::spawn(remotehub_server::refresh::run(state.clone()));
 
     let app = app(state, config.web_dir.as_deref());
     let listener = tokio::net::TcpListener::bind(config.listen)

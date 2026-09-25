@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use remotehub_directory::laps::{LapsError, LapsPassword};
-use remotehub_directory::{AuthError, Identity, IdentityProvider, Principal};
+use remotehub_directory::{AuthError, Identity, IdentityProvider, Principal, Sid};
 use secrecy::SecretString;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -27,6 +27,8 @@ pub trait Authenticator: Send + Sync {
         query: &'a str,
         limit: i32,
     ) -> BoxFuture<'a, Result<Vec<Principal>, AuthError>>;
+
+    fn refresh<'a>(&'a self, sid: &'a Sid) -> BoxFuture<'a, Result<Vec<Sid>, AuthError>>;
 
     fn laps_password<'a>(&'a self, host: &'a str)
     -> BoxFuture<'a, Result<LapsPassword, LapsError>>;
@@ -47,6 +49,10 @@ impl<T: IdentityProvider> Authenticator for T {
         limit: i32,
     ) -> BoxFuture<'a, Result<Vec<Principal>, AuthError>> {
         Box::pin(IdentityProvider::search(self, query, limit))
+    }
+
+    fn refresh<'a>(&'a self, sid: &'a Sid) -> BoxFuture<'a, Result<Vec<Sid>, AuthError>> {
+        Box::pin(IdentityProvider::refresh(self, sid))
     }
 
     fn laps_password<'a>(
