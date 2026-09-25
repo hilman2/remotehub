@@ -18,6 +18,7 @@ mod groups;
 mod http;
 mod journal;
 mod personal;
+mod refresh;
 mod requests;
 mod roles;
 mod search;

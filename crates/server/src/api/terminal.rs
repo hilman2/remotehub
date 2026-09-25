@@ -33,9 +33,9 @@ use super::connect::{
 };
 use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
-use crate::AppState;
 use crate::audit::{self, Action};
 use crate::session::Session;
+use crate::{AppState, refresh};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const START_TIMEOUT: Duration = Duration::from_secs(120);
@@ -65,6 +65,7 @@ pub async fn terminal(
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Problem> {
     connect::same_origin(&headers, &state)?;
+    let session = refresh::before_connecting(&state, session).await?;
     let target = connect::target(&state, &session, id, &["ssh"]).await?;
     // The own account's password needs the key cookie, which only this
     // request carries.

@@ -38,6 +38,20 @@ impl Sid {
         Ok(Sid(sid))
     }
 
+    /// The binary form, as `objectSid` holds it; the inverse of
+    /// [`Sid::from_bytes`].
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut parts = self.0.split('-').skip(2);
+        let authority: u64 = parts.next().and_then(|a| a.parse().ok()).unwrap_or(0);
+        let subs: Vec<u32> = parts.filter_map(|s| s.parse().ok()).collect();
+        let mut bytes = vec![1, subs.len() as u8];
+        bytes.extend_from_slice(&authority.to_be_bytes()[2..]);
+        for sub in subs {
+            bytes.extend_from_slice(&sub.to_le_bytes());
+        }
+        bytes
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -111,6 +125,14 @@ mod tests {
                 .as_str(),
             "S-1-5-11"
         );
+    }
+
+    #[test]
+    fn writes_the_binary_form_back() {
+        let sid = Sid::from_bytes(&DOMAIN_ADMINS).unwrap();
+        assert_eq!(sid.to_bytes(), DOMAIN_ADMINS);
+        let short: Sid = "S-1-5-11".parse().unwrap();
+        assert_eq!(short.to_bytes(), [1, 1, 0, 0, 0, 0, 0, 5, 11, 0, 0, 0]);
     }
 
     #[test]

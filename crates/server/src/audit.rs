@@ -80,6 +80,7 @@ audit_actions! {
     GroupMemberRemoved = "group.member_removed",
     RoleAssigned = "role.assigned",
     RoleRevoked = "role.revoked",
+    SessionsEndedByDirectory = "session.ended_by_directory",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).
