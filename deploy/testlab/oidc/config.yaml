@@ -1,0 +1,34 @@
+# An OpenID Connect provider for the test lab (#109), standing in for Entra ID,
+# Google or GitHub. Kratos knows it as the provider `lab`. The client secret
+# and the passwords are public on purpose: they open nothing but this lab.
+issuer: http://oidc:5556/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  skipApprovalScreen: true
+
+staticClients:
+  - id: remotehub
+    name: remotehub
+    secret: lab-oidc-secret
+    redirectURIs:
+      # Development (deploy/compose.dev.yml) and the local CI (scripts/ci/lokal.sh).
+      - http://localhost:5180/api/auth/self-service/methods/oidc/callback/lab
+      - http://localhost:8080/api/auth/self-service/methods/oidc/callback/lab
+
+enablePasswordDB: true
+staticPasswords:
+  # Password "password" for both (bcrypt, cost 10).
+  - email: linda@remotehub.test
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: linda
+    userID: 4f2f7a52-1c1e-4b7a-9d53-0d7c1c2b6a01
+  - email: stranger@remotehub.test
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: stranger
+    userID: 9b1d3c64-7e2f-4a0b-8c5d-2e6f1a3b4c02

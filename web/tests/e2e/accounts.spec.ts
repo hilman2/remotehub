@@ -251,3 +251,54 @@ test('a Kratos session left in the browser never signs in whoever types', async 
 	await signInLocal(page, second, password, secret);
 	await expect(page.getByRole('link', { name: /Second Person/ })).toBeVisible();
 });
+
+/**
+ * Signs in at the lab's OpenID Connect provider (deploy/testlab/oidc), where
+ * the browser was sent.
+ */
+async function atProvider(page: Page, user: 'linda' | 'stranger') {
+	await expect(page).toHaveURL(/\/dex\//);
+	await page.locator('#login').fill(`${user}@remotehub.test`);
+	await page.locator('#password').fill('password');
+	await page.locator('#submit-login').click();
+}
+
+test('an account linked to a provider signs in with it and its second factor', async ({ page }) => {
+	// An earlier run that stopped half-way keeps linda linked to its account.
+	const listed = await fetch(`${kratosAdmin}/admin/identities?page_size=500`);
+	for (const identity of (await listed.json()) as { id: string; traits: { name?: string } }[]) {
+		if (identity.traits.name === 'Linda Linked') {
+			await fetch(`${kratosAdmin}/admin/identities/${identity.id}`, { method: 'DELETE' });
+		}
+	}
+	const email = address('linked');
+	const password = `Linked-Passw0rd-${run}`;
+	const secret = await onboard(page, email, password, 'Linda Linked');
+
+	await page.getByRole('link', { name: /Linda Linked/ }).click();
+	await page.getByRole('button', { name: 'Link Lab' }).click();
+	await atProvider(page, 'linda');
+	await expect(page.getByText('Lab is linked')).toBeVisible();
+
+	// The provider takes the password's place; the app's code is still asked.
+	await signOut(page);
+	await page.getByRole('button', { name: 'Sign in with Lab' }).click();
+	await atProvider(page, 'linda');
+	await page.getByLabel('Code', { exact: true }).fill(totp(secret, step() + 1));
+	await page.getByRole('button', { name: 'Confirm' }).click();
+	await expect(page.getByRole('link', { name: /Linda Linked/ })).toBeVisible();
+
+	// Removed, it is free for the next run.
+	await page.getByRole('link', { name: /Linda Linked/ }).click();
+	await page.getByRole('button', { name: 'Remove Lab' }).click();
+	await expect(page.getByRole('button', { name: 'Link Lab' })).toBeVisible();
+});
+
+test('someone the provider knows and remotehub does not stays out', async ({ page }) => {
+	await page.goto('/sign-in');
+	await page.getByRole('button', { name: 'Sign in with Lab' }).click();
+	await atProvider(page, 'stranger');
+	await expect(page.getByText(/No account is linked to this sign-in/)).toBeVisible();
+	const me = await page.evaluate(async () => (await fetch('/api/session')).status);
+	expect(me).toBe(401);
+});

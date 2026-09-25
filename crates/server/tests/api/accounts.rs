@@ -147,8 +147,26 @@ async fn stand_in() -> (String, Calls) {
             "/self-service/login",
             post(|| async { (StatusCode::BAD_REQUEST, axum::Json(json!({ "ui": {} }))) }),
         )
+        .route(
+            "/self-service/login/api",
+            get(|| async {
+                axum::Json(json!({ "ui": { "nodes": [
+                    { "group": "oidc", "attributes": { "name": "provider", "value": "entra" },
+                      "meta": { "label": { "context": { "provider": "Microsoft" } } } },
+                ] } }))
+            }),
+        )
         .route("/health/alive", get(|| async { "ok" }))
         .route("/admin/{*path}", any(admin))
+        // Registration answers as if open, under any spelling of its path:
+        // remotehub must not let a browser get there.
+        .fallback(|uri: axum::http::Uri| async move {
+            if uri.path().contains("registration") {
+                (StatusCode::OK, axum::Json(json!({ "ui": {} })))
+            } else {
+                (StatusCode::NOT_FOUND, axum::Json(json!({})))
+            }
+        })
         .with_state(calls.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address: SocketAddr = listener.local_addr().unwrap();
@@ -271,7 +289,13 @@ async fn the_proxy_passes_only_the_self_service_flows(pool: PgPool) {
             .unwrap()
             .starts_with("csrf_token_abc=")
     );
-    for hidden in ["/api/auth/health/alive", "/api/auth/admin/sessions/x"] {
+    for hidden in [
+        "/api/auth/health/alive",
+        "/api/auth/admin/sessions/x",
+        // Registration takes a password; accounts come from invitations.
+        "/api/auth/self-service/registration/browser",
+        "/api/auth/self-service//registration/browser",
+    ] {
         assert_eq!(
             send(&app, get_request(hidden, None)).await.status,
             StatusCode::NOT_FOUND,
@@ -287,13 +311,16 @@ async fn the_proxy_passes_only_the_self_service_flows(pool: PgPool) {
         send(&plain, get_request("/api/session/methods", None))
             .await
             .json(),
-        json!({ "directory": false, "local": false })
+        json!({ "directory": false, "local": false, "providers": [] })
     );
     assert_eq!(
         send(&app, get_request("/api/session/methods", None))
             .await
             .json(),
-        json!({ "directory": true, "local": true })
+        json!({
+            "directory": true, "local": true,
+            "providers": [{ "id": "entra", "label": "Microsoft" }],
+        })
     );
 }
 

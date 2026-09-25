@@ -1,8 +1,9 @@
 <script lang="ts">
 	/**
-	 * A local account's own settings (#103): password, authenticator app and
-	 * recovery codes, through a Kratos settings flow. Changing them needs a
-	 * recent sign-in; Kratos sends older sessions to sign in again.
+	 * A local account's own settings (#103): password, authenticator app,
+	 * recovery codes and linked providers (#109), through a Kratos settings
+	 * flow. Changing them needs a recent sign-in; Kratos sends older sessions
+	 * to sign in again.
 	 */
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import { goto } from '$app/navigation';
@@ -10,9 +11,11 @@
 	import { resolve } from '$app/paths';
 	import { errorMessage } from '$lib/api/errors';
 	import {
+		loadFlow,
 		messages,
 		node,
 		offers,
+		providers,
 		startFlow,
 		submitFlow,
 		type Flow,
@@ -35,8 +38,27 @@
 	const codes = $derived(flow ? node(flow, 'lookup_secret_codes')?.attributes.text : undefined);
 
 	$effect(() => {
-		if (local) startFlow('settings').then(follow);
+		if (!local) return;
+		// Back from a provider (#109), Kratos names the flow with its outcome.
+		const id = new URLSearchParams(location.search).get('flow');
+		(id ? loadFlow('settings', id) : startFlow('settings')).then(follow);
 	});
+
+	const linked = $derived(flow ? providers(flow, 'unlink') : []);
+	const linkable = $derived(flow ? providers(flow, 'link') : []);
+
+	/** Links a provider: the browser leaves for it and comes back here. */
+	async function link(provider: string) {
+		if (!flow) return;
+		busy = true;
+		error = null;
+		const result = await submitFlow(flow, { method: 'oidc', link: provider });
+		if (result.kind === 'redirect') {
+			location.assign(result.to.href);
+			return;
+		}
+		await follow(result);
+	}
 
 	async function follow(result: FlowResult) {
 		busy = false;
@@ -151,5 +173,40 @@
 				</button>
 			{/if}
 		</section>
+
+		{#if linked.length + linkable.length > 0}
+			<section class={card} aria-labelledby="account-providers">
+				<h2 id="account-providers" class="text-lg font-semibold">{m.account_providers()}</h2>
+				<p class="text-sm text-ink-2">{m.account_providers_hint()}</p>
+				<ul class="flex flex-col gap-2">
+					{#each linked as provider (provider.id)}
+						<li class="flex flex-wrap items-center gap-3 text-sm">
+							<CircleCheck size={16} class="text-ok" aria-hidden="true" />
+							{m.account_provider_linked({ provider: provider.label })}
+							<button
+								type="button"
+								class={button}
+								disabled={busy}
+								onclick={() => change({ method: 'oidc', unlink: provider.id })}
+							>
+								{m.account_provider_unlink({ provider: provider.label })}
+							</button>
+						</li>
+					{/each}
+					{#each linkable as provider (provider.id)}
+						<li>
+							<button
+								type="button"
+								class={button}
+								disabled={busy}
+								onclick={() => link(provider.id)}
+							>
+								{m.account_provider_link({ provider: provider.label })}
+							</button>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
 	</div>
 {/if}

@@ -25,12 +25,24 @@ export interface UiNode {
 		text?: UiText;
 	};
 	messages: UiText[];
+	/** Its label; for a provider's button, `context.provider` names it. */
+	meta?: { label?: UiText };
+}
+
+/** An OpenID Connect provider as a flow offers it (#109). */
+export interface Provider {
+	/** Its `id` in Kratos' configuration. */
+	id: string;
+	/** Its `label` there, e.g. "Microsoft". */
+	label: string;
 }
 
 export interface Flow {
 	id: string;
 	/** Settings flows: `success` once a change is saved. */
 	state?: string;
+	/** Login flows: `aal2` asks for the second factor. */
+	requested_aal?: string;
 	ui: { action: string; nodes: UiNode[]; messages?: UiText[] };
 }
 
@@ -124,6 +136,20 @@ export function value(flow: Flow, name: string): unknown {
 export const offers = (flow: Flow, name: string) =>
 	flow.ui.nodes.some((node) => node.attributes.name === name);
 
+/**
+ * The providers behind the flow's `oidc` buttons named `name`: `link` and
+ * `unlink` in a settings flow.
+ */
+export function providers(flow: Flow, name: 'link' | 'unlink'): Provider[] {
+	return flow.ui.nodes
+		.filter((n) => n.group === 'oidc' && n.attributes.name === name)
+		.map((n) => {
+			const id = String(n.attributes.value);
+			const label = n.meta?.label?.context?.provider;
+			return { id, label: typeof label === 'string' ? label : id };
+		});
+}
+
 /** A node by its `id` attribute (texts and images). */
 export const node = (flow: Flow, id: string) => flow.ui.nodes.find((n) => n.attributes.id === id);
 
@@ -142,6 +168,10 @@ export const flowId = (to: URL) => to.searchParams.get('flow');
  */
 export function kratosText(text: UiText): string {
 	switch (text.id) {
+		// Someone came back from a provider whose account is linked to
+		// nobody: registration is closed (#109).
+		case 4000001:
+			return m.kratos_provider_not_linked();
 		case 4000006:
 			return m.error_invalid_credentials();
 		case 4000008:

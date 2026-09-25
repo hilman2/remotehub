@@ -13,8 +13,8 @@ use axum::http::{HeaderMap, HeaderName, Method, Request, Response, StatusCode, h
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -121,6 +121,35 @@ pub struct Invitation {
     pub expires_at: String,
 }
 
+/// An OpenID Connect provider as the sign-in page offers it (#109).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Provider {
+    /// The provider's `id` in Kratos' configuration.
+    pub id: String,
+    /// Its `label` there, e.g. "Microsoft"; the id without one.
+    pub label: String,
+}
+
+/// The providers a login flow's `oidc` nodes name.
+fn providers(flow: &serde_json::Value) -> Vec<Provider> {
+    let nodes = flow["ui"]["nodes"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    nodes
+        .iter()
+        .filter(|node| node["group"] == "oidc" && node["attributes"]["name"] == "provider")
+        .filter_map(|node| {
+            let id = node["attributes"]["value"].as_str()?.to_owned();
+            let label = node["meta"]["label"]["context"]["provider"]
+                .as_str()
+                .unwrap_or(&id)
+                .to_owned();
+            Some(Provider { id, label })
+        })
+        .collect()
+}
+
 /// What the identity schema (`deploy/ops/kratos/identity.schema.json`) keeps.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Traits {
@@ -200,6 +229,23 @@ impl Kratos {
             StatusCode::FORBIDDEN => Ok(Whoami::SecondFactorPending),
             status => Err(unexpected(status, answer).await),
         }
+    }
+
+    /// The OpenID Connect providers Kratos offers for signing in (#109), in
+    /// the order of its configuration. Read from a login flow for apps, which
+    /// needs no cookies, so it answers the same whatever the browser holds.
+    pub async fn providers(&self) -> Result<Vec<Provider>, KratosError> {
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(format!("{}/self-service/login/api", self.public_url))
+            .header(header::ACCEPT, "application/json")
+            .body(Body::empty())
+            .map_err(|error| KratosError::Unreachable(error.to_string()))?;
+        let answer = self.send(request).await?;
+        if !answer.status().is_success() {
+            return Err(unexpected(answer.status(), answer).await);
+        }
+        Ok(providers(&json::<serde_json::Value>(answer).await?))
     }
 
     /// Creates an account for `email` and a one-time code that lets its
@@ -386,5 +432,40 @@ async fn unexpected(status: StatusCode, answer: Response<hyper::body::Incoming>)
         status,
         // Kratos' error JSON, cut short: enough for the log, never a secret.
         body: String::from_utf8_lossy(&body).chars().take(300).collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn reads_the_providers_from_a_login_flow() {
+        // As Kratos v26.2 answers GET /self-service/login/api.
+        let flow = json!({ "ui": { "nodes": [
+            { "group": "default", "attributes": { "name": "identifier", "value": "" } },
+            { "group": "password", "attributes": { "name": "method", "value": "password" } },
+            { "group": "oidc", "attributes": { "name": "provider", "value": "lab" },
+              "meta": { "label": { "id": 1010002, "text": "Sign in with Lab",
+                                   "context": { "provider": "Lab", "provider_id": "lab" } } } },
+            { "group": "oidc", "attributes": { "name": "provider", "value": "github" },
+              "meta": {} },
+        ] } });
+        assert_eq!(
+            providers(&flow),
+            [
+                Provider {
+                    id: "lab".into(),
+                    label: "Lab".into()
+                },
+                Provider {
+                    id: "github".into(),
+                    label: "github".into()
+                },
+            ]
+        );
+        assert_eq!(providers(&json!({})), []);
     }
 }

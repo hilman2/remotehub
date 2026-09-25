@@ -20,11 +20,17 @@ use super::session::{ClientAddress, Me};
 use crate::AppState;
 use crate::audit::{self, Action, Actor, Entry};
 use crate::auth::PER_ADDRESS;
-use crate::kratos::{Kratos, KratosError, KratosSession, Whoami};
+use crate::kratos::{Kratos, KratosError, KratosSession, Provider, Whoami};
 use crate::session;
 
 /// The public API paths a browser needs; everything else stays hidden.
 const PUBLIC_PATHS: [&str; 2] = ["self-service/", "sessions/whoami"];
+
+/// Registration stays closed to browsers even where an operator opened it
+/// for a provider (#109): it would also take a password, and an account
+/// with a password is for an invitation only. Kratos registers someone who
+/// comes back from a provider on its own, behind the provider's callback.
+const CLOSED_PATHS: [&str; 1] = ["self-service/registration"];
 
 fn kratos(state: &AppState) -> Result<&Kratos, Problem> {
     state
@@ -49,7 +55,13 @@ pub async fn forward(
     request: Request,
 ) -> Result<Response, Problem> {
     let kratos = kratos(&state)?;
-    if !PUBLIC_PATHS.iter().any(|allowed| path.starts_with(allowed)) {
+    // Compared without empty segments, so `self-service//registration`
+    // counts as what Kratos' router would make of it.
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let closed = CLOSED_PATHS
+        .iter()
+        .any(|closed| segments.starts_with(&closed.split('/').collect::<Vec<_>>()));
+    if !PUBLIC_PATHS.iter().any(|allowed| path.starts_with(allowed)) || closed {
         return Err(Problem::new(ErrorCode::NotFound));
     }
     let signing_in = request.method() == Method::POST && path.starts_with("self-service/login");
@@ -81,13 +93,24 @@ pub struct Methods {
     directory: bool,
     /// Local accounts in Kratos.
     local: bool,
+    /// OpenID Connect providers for local accounts (#109).
+    providers: Vec<Provider>,
 }
 
 /// `GET /api/session/methods`, before anyone signs in.
 pub async fn methods(State(state): State<AppState>) -> Json<Methods> {
+    let providers = match &state.settings.kratos {
+        // Without the list, the password still signs in.
+        Some(kratos) => kratos.providers().await.unwrap_or_else(|error| {
+            tracing::warn!(%error, "cannot read the sign-in providers from Kratos");
+            Vec::new()
+        }),
+        None => Vec::new(),
+    };
     Json(Methods {
         directory: state.directory.is_some(),
         local: state.settings.kratos.is_some(),
+        providers,
     })
 }
 

@@ -111,6 +111,7 @@ services:
       SELFSERVICE_ALLOWED_RETURN_URLS: '["http://localhost:5180/"]'
       SELFSERVICE_FLOWS_ERROR_UI_URL: http://localhost:5180/sign-in
       SELFSERVICE_FLOWS_LOGIN_UI_URL: http://localhost:5180/sign-in
+      SELFSERVICE_FLOWS_REGISTRATION_UI_URL: http://localhost:5180/sign-in
       SELFSERVICE_FLOWS_SETTINGS_UI_URL: http://localhost:5180/account
       SELFSERVICE_FLOWS_RECOVERY_UI_URL: http://localhost:5180/sign-in/recovery
       SELFSERVICE_FLOWS_LOGOUT_AFTER_DEFAULT_BROWSER_RETURN_URL: http://localhost:5180/sign-in
@@ -118,6 +119,13 @@ services:
       SECRETS_COOKIE: '["dev-cookie-secret-not-for-production"]'
       SECRETS_CIPHER: '["dev-cipher-secret-32-characters!"]'
       SECRETS_DEFAULT: '["dev-default-secret-not-for-production"]'
+      # The lab's OpenID Connect provider (deploy/testlab/oidc, #109).
+      SELFSERVICE_METHODS_OIDC_ENABLED: "true"
+      SELFSERVICE_METHODS_OIDC_CONFIG_PROVIDERS: >-
+        [{"id": "lab", "label": "Lab", "provider": "generic",
+        "issuer_url": "http://oidc:5556/dex", "client_id": "remotehub",
+        "client_secret": "lab-oidc-secret", "scope": ["openid", "email", "profile"],
+        "mapper_url": "file:///etc/config/kratos/oidc.jsonnet"}]
       # No courier in development: invitations hand out their code.
       LOG_FORMAT: text
       # No usage reports to Ory.
@@ -203,6 +211,14 @@ services:
     build: testlab/web
     image: remotehub-testlab-web
     hostname: web-target
+
+  # An OpenID Connect provider for sign-in through Kratos (#109).
+  oidc:
+    image: ghcr.io/dexidp/dex:v2.43.1
+    hostname: oidc
+    volumes:
+      - ./testlab/oidc/config.yaml:/etc/dex/config.yaml:ro
+    command: dex serve /etc/dex/config.yaml
 
   # Web interfaces of HTTPS devices (deploy/browser, ADR 0007), hardened as in
   # production. Like guacd, it serves anyone who reaches it: never published.
