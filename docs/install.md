@@ -97,7 +97,7 @@ before the first start, Caddy's address within it:
 ```
 REMOTEHUB_SUBNET=10.99.99.0/24
 REMOTEHUB_GATEWAY=10.99.99.1
-REMOTEHUB_CADDY_ADDRESS=10.99.99.2
+REMOTEHUB_CADDY_ADDRESS=10.99.99.254
 ```
 
 A proxy elsewhere than on this host goes into `REMOTEHUB_TRUSTED_PROXIES` in `compose.yml` instead.

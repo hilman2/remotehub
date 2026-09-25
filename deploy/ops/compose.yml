@@ -40,8 +40,9 @@ services:
       - caddy-admin:/run/caddy
     networks:
       default:
-        # A fixed address, so that remotehub trusts the client it names.
-        ipv4_address: ${REMOTEHUB_CADDY_ADDRESS:-10.213.213.2}
+        # A fixed address, so that remotehub trusts the client it names; at
+        # the top of the range, since Docker hands out from the bottom.
+        ipv4_address: ${REMOTEHUB_CADDY_ADDRESS:-10.213.213.254}
     depends_on:
       remotehub:
         condition: service_healthy
@@ -70,7 +71,7 @@ services:
       # Caddy above, or a reverse proxy on this host, which comes through
       # the gateway of the network below; either names the client in
       # X-Forwarded-For. REMOTEHUB_EXTRA_PROXIES adds others, e.g. Traefik.
-      REMOTEHUB_TRUSTED_PROXIES: ${REMOTEHUB_GATEWAY:-10.213.213.1},${REMOTEHUB_CADDY_ADDRESS:-10.213.213.2}${REMOTEHUB_EXTRA_PROXIES:-}
+      REMOTEHUB_TRUSTED_PROXIES: ${REMOTEHUB_GATEWAY:-10.213.213.1},${REMOTEHUB_CADDY_ADDRESS:-10.213.213.254}${REMOTEHUB_EXTRA_PROXIES:-}
     secrets: [db_password, master_key, ssh_ca_key, courier_token]
     ports:
       - "127.0.0.1:${REMOTEHUB_PORT:-8080}:8080"

@@ -59,7 +59,8 @@ host() { # name prepare check
     -e REMOTEHUB_VERSION="$tag" \
     "$host_image" bash -euo pipefail -c "
       ${prepare}
-      sh /install.sh --domain remotehub.test --package /install/remotehub-ops.tar.gz | tee /tmp/first.log
+      sh /install.sh --domain remotehub.test --package /install/remotehub-ops.tar.gz | tee /tmp/first.log ||
+        { tail -n 40 /var/log/remotehub-install.log; exit 1; }
       grep -q 'https://remotehub.test/setup#code=' /tmp/first.log || { echo 'FAILED: no setup link'; exit 1; }
       ${check}
     " || rc=$?
