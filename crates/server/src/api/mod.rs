@@ -13,6 +13,7 @@ mod origin;
 mod personal;
 pub mod problem;
 mod requests;
+mod roles;
 mod search;
 pub mod session;
 mod terminal;
@@ -52,6 +53,11 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route(
             "/groups/{id}/members/{sid}",
             put(groups::add_member).delete(groups::remove_member),
+        )
+        .route("/roles", get(roles::list))
+        .route(
+            "/roles/{role}/members/{sid}",
+            put(roles::assign).delete(roles::revoke),
         )
         .route("/tree", get(catalog::tree))
         .route("/folders", post(catalog::create_folder))

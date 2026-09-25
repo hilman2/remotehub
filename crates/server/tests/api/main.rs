@@ -19,6 +19,7 @@ mod http;
 mod journal;
 mod personal;
 mod requests;
+mod roles;
 mod search;
 mod secrets;
 mod session;

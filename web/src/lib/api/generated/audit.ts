@@ -50,7 +50,9 @@ export const AUDIT_ACTIONS = [
 	'group.updated',
 	'group.deleted',
 	'group.member_added',
-	'group.member_removed'
+	'group.member_removed',
+	'role.assigned',
+	'role.revoked'
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

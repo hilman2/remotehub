@@ -205,7 +205,10 @@ async fn a_kratos_session_counts_only_with_its_second_factor(pool: PgPool) {
     assert_eq!(response.status, StatusCode::OK);
     assert_eq!(
         response.json(),
-        json!({ "username": "ada@example.com", "display_name": "Ada", "kind": "local", "admin": false })
+        json!({
+            "username": "ada@example.com", "display_name": "Ada", "kind": "local", "admin": false,
+            "roles": [],
+        })
     );
     let token = response.session_token().unwrap();
     assert_eq!(

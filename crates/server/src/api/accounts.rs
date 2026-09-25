@@ -21,7 +21,7 @@ use crate::AppState;
 use crate::audit::{self, Action, Actor, Entry};
 use crate::auth::PER_ADDRESS;
 use crate::kratos::{Kratos, KratosError, KratosSession, Whoami};
-use crate::session::{self, Session};
+use crate::session;
 
 /// The public API paths a browser needs; everything else stays hidden.
 const PUBLIC_PATHS: [&str; 2] = ["self-service/", "sessions/whoami"];
@@ -142,18 +142,7 @@ pub async fn sign_in(
     tx.commit().await?;
     tracing::info!(username = %email, identity = %found.identity.id, %address, "signed in");
 
-    let session = Session {
-        user_id,
-        username: email,
-        display_name: name,
-        kind: "local".to_owned(),
-        sid: None,
-        upn: None,
-        groups: Vec::new(),
-        identity_id: Some(found.identity.id),
-        memberships: Vec::new(),
-    };
-    let me = Me::of(&session, &state.settings);
+    let me = Me::started(&state, &token).await?;
     Ok((AppendHeaders([session::set_cookie(&token)]), Json(me)))
 }
 

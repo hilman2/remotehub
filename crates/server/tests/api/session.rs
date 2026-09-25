@@ -21,7 +21,8 @@ async fn sign_in_session_and_sign_out(pool: PgPool) {
             "username": "alice",
             "display_name": "Alice Admin",
             "kind": "directory",
-            "admin": true
+            "admin": true,
+            "roles": ["administrator"]
         })
     );
     let cookie = response.headers[header::SET_COOKIE]
