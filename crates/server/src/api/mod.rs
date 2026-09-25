@@ -6,6 +6,7 @@ mod catalog;
 mod connect;
 mod connectors;
 mod display;
+mod groups;
 pub mod health;
 mod journal;
 mod origin;
@@ -46,6 +47,12 @@ pub fn router(state: AppState) -> Router<AppState> {
         )
         .route("/users/{id}/sessions", delete(users::end))
         .route("/users/{id}/recovery", post(users::recovery))
+        .route("/groups", get(groups::list).post(groups::create))
+        .route("/groups/{id}", patch(groups::update).delete(groups::delete))
+        .route(
+            "/groups/{id}/members/{sid}",
+            put(groups::add_member).delete(groups::remove_member),
+        )
         .route("/tree", get(catalog::tree))
         .route("/folders", post(catalog::create_folder))
         .route(

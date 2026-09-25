@@ -29,6 +29,7 @@ use super::session::ClientAddress;
 use crate::AppState;
 use crate::audit::{self, Action, Actor, Entry};
 use crate::kratos::{self, Invitation, Kratos, KratosError};
+use crate::principal::PrincipalId;
 use crate::session::Session;
 
 /// How long an invitation's or a recovery's code lasts.
@@ -362,11 +363,25 @@ pub async fn delete(
         .delete(identity)
         .await
         .map_err(unavailable)?;
-    // The row stays, because the audit log refers to it.
+    // The row stays, because the audit log refers to it. What names the
+    // account goes: nobody can ever sign in as it again.
+    let principal = PrincipalId::Local(identity).to_string();
+    let mut tx = state.db.begin().await?;
+    for statement in [
+        "DELETE FROM grants WHERE principal_sid = $1",
+        "DELETE FROM purpose_principals WHERE principal_sid = $1",
+        "DELETE FROM group_members WHERE principal_sid = $1",
+    ] {
+        sqlx::query(statement)
+            .bind(&principal)
+            .execute(&mut *tx)
+            .await?;
+    }
     sqlx::query("UPDATE users SET kind = 'deleted', identity_id = NULL WHERE id = $1")
         .bind(user.id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
     end_sessions(&state, user.id).await?;
     record(
         &state,

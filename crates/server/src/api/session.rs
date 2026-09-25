@@ -165,6 +165,7 @@ pub async fn sign_in(
         upn: identity.upn,
         groups,
         identity_id: None,
+        memberships: Vec::new(),
     };
     let me = Me::of(&session, &state.settings);
     Ok((AppendHeaders(cookies), Json(me)))
@@ -260,6 +261,7 @@ pub async fn sign_in_break_glass(
         upn: None,
         groups: Vec::new(),
         identity_id: None,
+        memberships: Vec::new(),
     };
     let me = Me::of(&session, &state.settings);
     // Break-glass accounts have no directory account to connect with.

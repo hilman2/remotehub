@@ -49,6 +49,12 @@ pub struct Session {
     /// The Kratos identity of a local account (#103).
     #[serde(skip)]
     pub identity_id: Option<Uuid>,
+    /// Groups of remotehub's own (`group:<id>`, #105) the user is in, by
+    /// their principal or a directory group. Read at every request, so a
+    /// change holds at once.
+    #[serde(skip)]
+    #[sqlx(default)]
+    pub memberships: Vec<String>,
 }
 
 impl Session {
@@ -75,16 +81,22 @@ impl Session {
             .or_else(|| self.identity_id.map(|id| format!("local:{id}")))
     }
 
-    /// Who asks, for `authorize()`: the own principal, all group SIDs, and
-    /// whether they are an administrator.
+    /// Everything grants and rules may name this user by: the own principal,
+    /// the directory groups and the groups of remotehub's own.
+    pub fn sids(&self) -> Vec<String> {
+        self.groups
+            .iter()
+            .chain(&self.memberships)
+            .cloned()
+            .chain(self.principal())
+            .collect()
+    }
+
+    /// Who asks, for `authorize()`: [`Session::sids`], and whether they are
+    /// an administrator.
     pub fn subject(&self, settings: &Settings) -> Subject {
         Subject {
-            sids: self
-                .groups
-                .iter()
-                .cloned()
-                .chain(self.principal())
-                .collect(),
+            sids: self.sids().into_iter().collect(),
             admin: self.is_admin(settings),
         }
     }
@@ -141,7 +153,11 @@ pub async fn lookup(
     let token_hash = hash(token);
     let session: Option<Session> = sqlx::query_as(
         "SELECT s.user_id, s.groups, u.username, u.display_name, u.kind, u.sid, u.upn,
-                u.identity_id
+                u.identity_id,
+                ARRAY(SELECT DISTINCT 'group:' || m.group_id FROM group_members m
+                      WHERE m.principal_sid = ANY (s.groups)
+                         OR m.principal_sid = u.sid
+                         OR m.principal_sid = 'local:' || u.identity_id) AS memberships
          FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = $1
            AND u.blocked_at IS NULL
