@@ -180,6 +180,51 @@ async fn concurrent_writers_keep_one_gapless_chain(pool: PgPool) {
     assert_eq!(audit::verify(&pool).await.unwrap().first_broken, None);
 }
 
+#[sqlx::test(migrations = "../../migrations")]
+async fn an_entry_waits_for_no_lock_on_its_actors_row(pool: PgPool) {
+    let alice: uuid::Uuid = sqlx::query_scalar(
+        "INSERT INTO users (kind, username, display_name) VALUES ('break_glass', 'alice', 'alice')
+         RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // A sign-in holds the user's row, as its upsert does, and writes its
+    // audit entry later in the same transaction (#152).
+    let mut sign_in = pool.begin().await.unwrap();
+    sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE")
+        .bind(alice)
+        .execute(&mut *sign_in)
+        .await
+        .unwrap();
+
+    // Meanwhile another request of the same user writes an entry, which
+    // takes the chain's lock: it must not wait for the row.
+    let mut other = pool.begin().await.unwrap();
+    let entry = audit::record(
+        &mut *other,
+        Entry {
+            actor: Actor {
+                id: Some(alice),
+                name: "alice",
+            },
+            action: Action::FolderCreated,
+            object: None,
+            details: json!({}),
+            address: None,
+        },
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(5), entry)
+        .await
+        .expect("the entry waited for the actor's row")
+        .unwrap();
+    other.commit().await.unwrap();
+
+    record(&mut *sign_in, "alice").await;
+    sign_in.commit().await.unwrap();
+    assert_eq!(audit::verify(&pool).await.unwrap().first_broken, None);
+}
+
 async fn record<'e>(db: impl sqlx::PgExecutor<'e>, name: &str) {
     audit::record(
         db,

@@ -179,12 +179,16 @@ test('the vault keeps folders, fields and icons, and shows what is shared', asyn
 	const shared = `Shared router ${run}`;
 	await page.evaluate(
 		async ({ shared }) => {
-			const post = (uri: string, body: unknown) =>
-				fetch(uri, {
+			const post = async (uri: string, body: unknown) => {
+				const response = await fetch(uri, {
 					method: 'POST',
 					headers: { 'content-type': 'application/json' },
 					body: JSON.stringify(body)
-				}).then((r) => r.json());
+				});
+				// A failure says which call it was and what the server answered.
+				if (!response.ok) throw new Error(`${uri}: ${response.status} ${await response.text()}`);
+				return response.json();
+			};
 			const folder = await post('/api/folders', { parent_id: null, name: `${shared} folder` });
 			await post('/api/credentials', {
 				folder_id: folder.id,
