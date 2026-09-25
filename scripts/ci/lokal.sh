@@ -124,6 +124,9 @@ job_image() {
   version="$(git -C "$CI_WURZEL" show "${CI_SHA}:Cargo.toml" | sed -n 's/^version = "\(.*\)"/\1/p' | head -n 1)"
   ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" remotehub-ci-image remotehub-ci-guacd \
     remotehub-ci-browser-image ci
+  # The installer (#142) with the images just built, on three kinds of host.
+  ci_docker_run "$tools" bash scripts/ci/install-check.sh remotehub-ci-image remotehub-ci-guacd \
+    remotehub-ci-browser-image ci
 }
 
 # Runs a script in the Rust tools container with the cargo caches, a fresh

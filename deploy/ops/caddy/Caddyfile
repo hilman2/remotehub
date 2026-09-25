@@ -1,0 +1,22 @@
+# Caddy in front of remotehub on a host of its own (#142, docs/install.md).
+# It serves REMOTEHUB_HOST with a certificate from Let's Encrypt if the
+# internet reaches this host, otherwise from Caddy's own CA, named after it.
+{
+	# Only remotehub reaches the admin API, through this socket (#146).
+	admin unix//run/caddy/admin.sock
+	pki {
+		ca local {
+			name "remotehub {$REMOTEHUB_HOST}"
+			root_cn "remotehub {$REMOTEHUB_HOST} Root"
+			intermediate_cn "remotehub {$REMOTEHUB_HOST} Intermediate"
+		}
+	}
+}
+
+{$REMOTEHUB_HOST} {
+	tls {
+		issuer acme
+		issuer internal
+	}
+	reverse_proxy remotehub:8080
+}

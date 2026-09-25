@@ -16,6 +16,36 @@ x-hardened: &hardened
   security_opt: [no-new-privileges:true]
 
 services:
+  # HTTPS in front of remotehub on a host of its own (#142): the installer
+  # turns it on with COMPOSE_PROFILES=caddy. Next to a reverse proxy of your
+  # own, it stays off and that proxy reaches remotehub on REMOTEHUB_PORT.
+  caddy:
+    <<: *hardened
+    image: caddy:2.11.4
+    profiles: [caddy]
+    cap_add: [NET_BIND_SERVICE]
+    tmpfs:
+      - /tmp
+    environment:
+      REMOTEHUB_HOST: ${REMOTEHUB_HOST:?set REMOTEHUB_HOST in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and the key of Caddy's CA: back them up with the rest.
+      - ./caddy/data:/data
+      - ./caddy/config:/config
+      - caddy-admin:/run/caddy
+    networks:
+      default:
+        # A fixed address, so that remotehub trusts the client it names.
+        ipv4_address: ${REMOTEHUB_CADDY_ADDRESS:-10.213.213.2}
+    depends_on:
+      remotehub:
+        condition: service_healthy
+
   remotehub:
     <<: *hardened
     image: ${REMOTEHUB_IMAGE:-ghcr.io/hilman2/remotehub}:${REMOTEHUB_VERSION:?set REMOTEHUB_VERSION in .env}
@@ -37,9 +67,10 @@ services:
       REMOTEHUB_RDP_KEYBOARD_LAYOUT: ${REMOTEHUB_RDP_KEYBOARD_LAYOUT:-en-us-qwerty}
       REMOTEHUB_SESSION_IDLE_MINUTES: ${REMOTEHUB_SESSION_IDLE_MINUTES:-30}
       REMOTEHUB_SESSION_MAX_HOURS: ${REMOTEHUB_SESSION_MAX_HOURS:-12}
-      # The reverse proxy on this host reaches remotehub through the gateway
-      # of the network below; it names the client in X-Forwarded-For.
-      REMOTEHUB_TRUSTED_PROXIES: ${REMOTEHUB_GATEWAY:-10.213.213.1}
+      # Caddy above, or a reverse proxy on this host, which comes through
+      # the gateway of the network below; either names the client in
+      # X-Forwarded-For. REMOTEHUB_EXTRA_PROXIES adds others, e.g. Traefik.
+      REMOTEHUB_TRUSTED_PROXIES: ${REMOTEHUB_GATEWAY:-10.213.213.1},${REMOTEHUB_CADDY_ADDRESS:-10.213.213.2}${REMOTEHUB_EXTRA_PROXIES:-}
     secrets: [db_password, master_key, ssh_ca_key, courier_token]
     ports:
       - "127.0.0.1:${REMOTEHUB_PORT:-8080}:8080"
@@ -176,6 +207,8 @@ networks:
 
 volumes:
   db:
+  # Caddy's admin socket; remotehub reaches it here (#146).
+  caddy-admin:
 
 # Files made by init.sh; see docs/install.md#secrets.
 secrets:
