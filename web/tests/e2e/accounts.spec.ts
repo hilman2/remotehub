@@ -72,6 +72,14 @@ async function accept(page: Page, recoveryLink: string, code: string, password: 
 	return secret;
 }
 
+/** Signs in with a directory account of the lab, up to the password. */
+async function typeDirectory(page: Page, user: string, password: string) {
+	await page.goto('/sign-in');
+	await page.getByLabel('User name or e-mail').fill(user);
+	await page.getByLabel('Password').fill(password);
+	await page.getByRole('button', { name: 'Sign in' }).click();
+}
+
 async function signOut(page: Page) {
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await expect(page).toHaveURL(/\/sign-in$/);
@@ -79,8 +87,7 @@ async function signOut(page: Page) {
 
 async function signInLocal(page: Page, email: string, password: string, secret: string) {
 	await page.goto('/sign-in');
-	await page.getByRole('button', { name: 'Account', exact: true }).click();
-	await page.getByLabel('E-mail').fill(email);
+	await page.getByLabel('User name or e-mail').fill(email);
 	await page.getByLabel('Password').fill(password);
 	await page.getByRole('button', { name: 'Sign in' }).click();
 	// The next time step: another code than the one used just before, and
@@ -114,8 +121,7 @@ test('a wrong code keeps an account with a second factor out', async ({ page }) 
 	await signOut(page);
 
 	await page.goto('/sign-in');
-	await page.getByRole('button', { name: 'Account', exact: true }).click();
-	await page.getByLabel('E-mail').fill(email);
+	await page.getByLabel('User name or e-mail').fill(email);
 	await page.getByLabel('Password').fill(password);
 	await page.getByRole('button', { name: 'Sign in' }).click();
 	const wrong = totp(secret, step() + 5);
@@ -132,11 +138,7 @@ test('an administrator invites an account on the users page and blocks it', asyn
 	browser
 }) => {
 	// alice administers through the directory.
-	await page.goto('/sign-in');
-	await page.getByRole('button', { name: 'Company account (AD)' }).click();
-	await page.getByLabel('User name').fill('alice');
-	await page.getByLabel('Password').fill('Alice-Passw0rd!');
-	await page.getByRole('button', { name: 'Sign in' }).click();
+	await typeDirectory(page, 'alice', 'Alice-Passw0rd!');
 	await page.getByRole('link', { name: 'Users' }).click();
 
 	const email = address('invited');
@@ -170,14 +172,17 @@ test('an administrator invites an account on the users page and blocks it', asyn
 	await own.close();
 });
 
-/** Signs in with a directory account of the lab, up to the password. */
-async function typeDirectory(page: Page, user: string, password: string) {
-	await page.goto('/sign-in');
-	await page.getByRole('button', { name: 'Company account (AD)' }).click();
-	await page.getByLabel('User name').fill(user);
-	await page.getByLabel('Password').fill(password);
-	await page.getByRole('button', { name: 'Sign in' }).click();
-}
+test('one form signs in directory accounts by name and by principal name', async ({ page }) => {
+	// An address that is no local account goes on to the directory.
+	await typeDirectory(page, 'bob@remotehub.test', 'Bob-Passw0rd!');
+	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
+	await signOut(page);
+
+	// A wrong password is refused by both, with one message.
+	await typeDirectory(page, 'bob@remotehub.test', 'wrong');
+	await expect(page.getByRole('alert')).toHaveCount(1);
+	await expect(page).toHaveURL(/\/sign-in$/);
+});
 
 test('a directory account that needs a second factor sets it up at sign-in', async ({
 	page,
