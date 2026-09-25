@@ -56,8 +56,8 @@ remotehub runs as user 65532, PostgreSQL as 999 and Kratos as 10000, so the file
 itself is open to root only. Keep these owners and modes when you edit a file, e.g. with `sudo tee secrets/ldap_bind_password`.
 
 Without `master_key`, the credentials in the database cannot be read by anyone. Keep a copy of it apart from
-the database backups. The same goes for `ssh_ca_key`: a new one means every device must trust the new
-public key.
+the database backups, or let the organisation recovery key hold it (see [Back up and restore](#back-up-and-restore)).
+Keep a copy of `ssh_ca_key` too: a new one means every device must trust the new public key.
 
 An installation from 0.1.0 has no `ssh_ca_key` and no `kratos.yml` yet; running `sudo sh init.sh` again
 creates them and keeps the other files.
@@ -284,7 +284,18 @@ sudo docker compose exec -T db pg_restore -U remotehub -d kratos --clean --if-ex
 sudo docker compose start kratos remotehub
 ```
 
-The backup needs the `master_key` of the installation it came from.
+The backup needs the `master_key` of the installation it came from. Once there is an organisation recovery key
+(see [Recover personal vaults](#recover-personal-vaults)), the database holds a copy of `master_key` sealed for
+it, and *Vault recovery* shows "Holds the master key". Without the file, restore it with the key's printed text:
+
+```bash
+sudo sh init.sh
+sudo docker compose up -d db
+sudo docker compose run --rm -T --no-deps remotehub recover-master-key | sudo tee secrets/master_key > /dev/null
+```
+
+`init.sh` creates the files a new host lacks, `master_key` among them, and the last command overwrites that one.
+Type the printed text, then press Enter and Ctrl+D.
 
 ## Upgrade
 

@@ -29,6 +29,9 @@ chacha20poly1305 = { version = "0.11.0", features = ["zeroize"] }
 fluent-bundle = "0.16.0"
 fluent-syntax = "0.12.0"
 getrandom = "0.4.3"
+# Already in the tree through russh: ECDH for the organisation recovery key.
+p256 = { version = "0.14.0", default-features = false, features = ["ecdh"] }
+hkdf = "0.13.0"
 hmac = "0.13.0"
 ldap3 = { version = "0.12.1", default-features = false, features = ["tls-rustls-ring"] }
 russh = { version = "0.63.3", default-features = false, features = ["ring", "rsa", "flate2"] }

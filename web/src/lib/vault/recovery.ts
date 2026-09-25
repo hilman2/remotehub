@@ -29,6 +29,8 @@ export interface RecoveryKey {
 	created_at: string;
 	/** How many vaults are wrapped for it. */
 	vaults: number;
+	/** Whether it holds the server's master key in use (#96). */
+	master_key: boolean;
 }
 
 export interface CoveredVault {

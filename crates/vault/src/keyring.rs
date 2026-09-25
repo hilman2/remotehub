@@ -76,6 +76,13 @@ impl KeyProvider for FileKeyring {
             .filter(|_| id == FILE_KEYRING_ID)
             .ok_or(VaultError::UnknownKey(id.to_owned(), version))
     }
+
+    fn all(&self) -> Vec<(&str, i32)> {
+        self.keys
+            .keys()
+            .map(|version| (FILE_KEYRING_ID, *version))
+            .collect()
+    }
 }
 
 /// A new line for the key file: `<version>:<base64 key>`.

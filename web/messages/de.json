@@ -389,6 +389,8 @@
 	"recovery_key_made": "erzeugt von {name}, {time}",
 	"recovery_key_vaults": "Tresore: {count}",
 	"recovery_key_current": "Aktuell",
+	"recovery_key_master": "Hält den Master-Key",
+	"recovery_key_no_master": "Hält keine Kopie des aktuellen Master-Keys; der Server legt sie beim nächsten Start ab",
 	"recovery_key_create_hint": "Der private Schlüssel entsteht in diesem Browser. Er wird zweimal ausgegeben: als Datei, versiegelt mit dieser Passphrase, und als Text zum Ausdrucken für den Tresorschrank. Der Server behält nur den öffentlichen Schlüssel.",
 	"recovery_key_passphrase": "Passphrase der Schlüsseldatei",
 	"recovery_key_shown_once": "Die Schlüsseldatei wurde heruntergeladen. Diesen Text ausdrucken und im Tresorschrank verwahren. Er wird nur jetzt angezeigt.",

@@ -389,6 +389,8 @@
 	"recovery_key_made": "made by {name}, {time}",
 	"recovery_key_vaults": "Vaults: {count}",
 	"recovery_key_current": "Current",
+	"recovery_key_master": "Holds the master key",
+	"recovery_key_no_master": "Holds no copy of the current master key; the server keeps one at its next start",
 	"recovery_key_create_hint": "The private key is made in this browser. It is handed out twice: as a file sealed with this passphrase, and as text to print and keep in a safe. The server keeps only the public key.",
 	"recovery_key_passphrase": "Passphrase of the key file",
 	"recovery_key_shown_once": "The key file was downloaded. Print this text and keep it in a safe. It is shown only now.",

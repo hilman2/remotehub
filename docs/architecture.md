@@ -166,7 +166,9 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   `organisation` the owner cannot remove. An administrator asks for a recovery, a security officer who
   is someone else approves it, and for a day the requester's browser may fetch the wrap and open the
   vault with the private key: it gives the owner a one-time recovery key, or moves the entries into a
-  shared folder. The private key exists only as a passphrase-sealed file and as printed text.
+  shared folder. The private key exists only as a passphrase-sealed file and as printed text. The server
+  also seals its master keys for the newest recovery key (`escrow.rs`, table `master_key_escrow`), so
+  `remotehub recover-master-key` restores a lost key file from a database backup.
 - The server cannot inject personal entries into connections; the browser can: while
   the vault is unlocked (the key stays in memory until it is locked, the user signs out or the page
   reloads), a device that asks for credentials offers its entries, and the chosen one is sent as if
