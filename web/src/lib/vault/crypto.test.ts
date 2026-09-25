@@ -7,7 +7,9 @@ import {
 	parseRecoveryKey,
 	passphraseKey,
 	randomBytes,
+	openFile,
 	seal,
+	sealFile,
 	secretKey,
 	toBase64,
 	unwrapKey,
@@ -32,6 +34,20 @@ describe('personal vault encryption', () => {
 		await expect(open(key, ENTRY, nonce, tampered)).rejects.toThrow();
 		// Nothing of the content shows in the ciphertext.
 		expect(new TextDecoder().decode(ciphertext)).not.toContain('Router');
+	});
+
+	it('keeps files apart from entries', async () => {
+		const key = await newVaultKey();
+		const bytes = new Uint8Array(200_000).map((_, i) => i % 251);
+		const { nonce, ciphertext } = await sealFile(key, ENTRY, bytes);
+		expect(await openFile(key, ENTRY, nonce, ciphertext)).toEqual(bytes);
+		await expect(openFile(key, OTHER, nonce, ciphertext)).rejects.toThrow();
+		// A file does not open as an entry of the same ID, nor the other way.
+		await expect(open(key, ENTRY, nonce, ciphertext)).rejects.toThrow();
+		const entry = await seal(key, ENTRY, { title: 'x' });
+		await expect(openFile(key, ENTRY, entry.nonce, entry.ciphertext)).rejects.toThrow();
+		// Large files go through base64 and back.
+		expect(fromBase64(toBase64(ciphertext))).toEqual(ciphertext);
 	});
 
 	it('uses a new nonce every time', async () => {

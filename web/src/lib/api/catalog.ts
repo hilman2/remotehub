@@ -101,6 +101,8 @@ export interface Credential {
 	/** One of KeePass' standard icons (lib/vault/icons.ts). */
 	icon: number;
 	fields: CredentialField[];
+	/** Files kept with it (#100), without content. */
+	attachments: { id: string; name: string; size: number }[];
 	role: Role;
 }
 

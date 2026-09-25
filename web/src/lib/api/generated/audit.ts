@@ -59,7 +59,11 @@ export const AUDIT_ACTIONS = [
 	'second_factor.reset',
 	'second_factor.required',
 	'second_factor.waived',
-	'credential.revealed'
+	'credential.revealed',
+	'credential.attachment_added',
+	'credential.attachment_deleted',
+	'personal.attachment_saved',
+	'personal.attachment_deleted'
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

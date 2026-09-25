@@ -10,6 +10,8 @@
 	import { errorMessage } from '$lib/api/errors';
 	import { reveal, type RevealPurpose, type Revealed } from '$lib/api/reveal';
 	import { m } from '$lib/paraglide/messages';
+	import TotpCode from '$lib/vault/TotpCode.svelte';
+	import { totpOf } from '$lib/vault/totp';
 
 	let { owner, id }: { owner: 'credentials' | 'devices'; id: string } = $props();
 
@@ -110,6 +112,10 @@
 			{/if}
 		{/if}
 		{#each shown.fields ?? [] as field (field.name)}
+			{@const totp = totpOf(field.name, field.value)}
+			{#if totp}
+				<p class="text-xs text-ink-2">{field.name}: <TotpCode params={totp} /></p>
+			{/if}
 			<p class="text-xs text-ink-2">
 				{field.name}:
 				<span class="font-mono break-all select-all" data-testid="revealed-field"

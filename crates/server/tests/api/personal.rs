@@ -39,6 +39,56 @@ async fn set_up(app: &Router, token: &str) {
     }
 }
 
+/// Files of personal entries (#100): sealed in the browser, for their owner
+/// only, gone with the vault.
+#[sqlx::test(migrations = "../../migrations")]
+async fn personal_files_are_kept_for_their_owner_only(pool: PgPool) {
+    let app = app(state(pool), None);
+    let alice = token(&app, "alice").await;
+    let bob = token(&app, "bob").await;
+    let uri = format!("/api/personal/attachments/{ENTRY}");
+    let sealed = json!({ "nonce": NONCE, "ciphertext": CIPHERTEXT });
+    let saved = call(&app, &alice, "PUT", &uri, Some(sealed.clone())).await;
+    assert_eq!(saved.status, StatusCode::NO_CONTENT, "{}", saved.json());
+    assert_eq!(call(&app, &alice, "GET", &uri, None).await.json(), sealed);
+
+    // Someone else's ID is not found, neither to read nor to overwrite.
+    assert_eq!(
+        call(&app, &bob, "GET", &uri, None).await.status,
+        StatusCode::NOT_FOUND
+    );
+    let taken = call(&app, &bob, "PUT", &uri, Some(sealed.clone())).await;
+    assert_eq!(taken.status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        call(&app, &bob, "DELETE", &uri, None).await.status,
+        StatusCode::NOT_FOUND
+    );
+    let odd = call(
+        &app,
+        &alice,
+        "PUT",
+        &uri,
+        Some(json!({ "nonce": "AAE=", "ciphertext": CIPHERTEXT })),
+    )
+    .await;
+    assert_eq!(odd.json()["params"]["field"], "nonce");
+
+    assert_eq!(
+        call(&app, &alice, "DELETE", &uri, None).await.status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(&app, &alice, "GET", &uri, None).await.status,
+        StatusCode::NOT_FOUND
+    );
+    call(&app, &alice, "PUT", &uri, Some(sealed)).await;
+    call(&app, &alice, "DELETE", "/api/personal/vault", None).await;
+    assert_eq!(
+        call(&app, &alice, "GET", &uri, None).await.status,
+        StatusCode::NOT_FOUND
+    );
+}
+
 /// What the owner picked after searching (#81): sealed like an entry, kept
 /// per owner, gone with the vault, and no entry in the audit log per pick.
 #[sqlx::test(migrations = "../../migrations")]

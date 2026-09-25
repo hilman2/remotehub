@@ -195,6 +195,15 @@ struct CredentialRow {
     icon: i16,
     /// Custom fields; protected ones without their value.
     fields: sqlx::types::Json<Vec<Field>>,
+    /// Files kept with it (#100), without their content.
+    attachments: sqlx::types::Json<Vec<Attachment>>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Attachment {
+    id: Uuid,
+    name: String,
+    size: i64,
 }
 
 #[derive(Serialize)]
@@ -222,9 +231,14 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
     .fetch_all(&state.db)
     .await?;
     let credentials: Vec<CredentialRow> = sqlx::query_as(
-        "SELECT id, folder_id, name, kind, username, domain, version, key_algorithm, key_fingerprint,
-                has_certificate, url, notes, icon, fields
-         FROM credentials ORDER BY lower(name)",
+        "SELECT c.id, c.folder_id, c.name, c.kind, c.username, c.domain, c.version,
+                c.key_algorithm, c.key_fingerprint, c.has_certificate, c.url, c.notes, c.icon,
+                c.fields,
+                coalesce((SELECT json_agg(json_build_object('id', a.id, 'name', a.name,
+                                                            'size', a.size) ORDER BY a.name)
+                          FROM credential_attachments a WHERE a.credential_id = c.id),
+                         '[]') AS attachments
+         FROM credentials c ORDER BY lower(c.name)",
     )
     .fetch_all(&state.db)
     .await?;
@@ -1382,6 +1396,14 @@ pub async fn delete_credential(
     // Devices that used it fall back to asking for credentials.
     sqlx::query(
         "UPDATE devices SET auth_mode = 'ask', credential_id = NULL WHERE credential_id = $1",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+    // The files' contents are sealed under their own IDs.
+    sqlx::query(
+        "DELETE FROM secret_fields
+         WHERE owner_id IN (SELECT id FROM credential_attachments WHERE credential_id = $1)",
     )
     .bind(id)
     .execute(&mut *tx)

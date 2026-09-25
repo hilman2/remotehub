@@ -54,6 +54,7 @@
 	import Grants from '$lib/catalog/Grants.svelte';
 	import Journal from '$lib/catalog/Journal.svelte';
 	import RevealSecret from '$lib/catalog/RevealSecret.svelte';
+	import CredentialExtras from '$lib/catalog/CredentialExtras.svelte';
 	import EntryDetails from '$lib/vault/EntryDetails.svelte';
 	import {
 		AUTH_MODE_LABELS,
@@ -748,6 +749,11 @@
 						/>
 					</section>
 				{/if}
+				<section class="{card} md:col-span-3">
+					{#key credential.id}
+						<CredentialExtras {credential} onchange={load} />
+					{/key}
+				</section>
 			</div>
 			{@render requestedNotice(credential.id)}
 		{:else if tree}

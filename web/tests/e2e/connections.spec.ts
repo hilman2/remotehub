@@ -223,6 +223,81 @@ test('the vault keeps folders, fields and icons, and shows what is shared', asyn
 	await expect(entry.getByTestId('revealed-field')).toHaveText('8765');
 });
 
+test('a shared credential keeps files and its earlier passwords', async ({ page }) => {
+	await signIn(page);
+	const dialog = page.getByRole('dialog');
+	await newFolder(page, `E2E files ${run}`);
+	const credential = `files ${run}`;
+	await page.getByRole('button', { name: 'New credential' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(credential);
+	await dialog.getByLabel('Password', { exact: true }).fill('Old-Passw0rd!');
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name: credential })).toBeVisible();
+
+	await page.locator('input[type=file]').setInputFiles({
+		name: 'vpn.ovpn',
+		mimeType: 'text/plain',
+		buffer: Buffer.from('remote vpn.example.com')
+	});
+	const downloading = page.waitForEvent('download');
+	await page.getByRole('link', { name: 'vpn.ovpn' }).click();
+	const download = await downloading;
+	expect(download.suggestedFilename()).toBe('vpn.ovpn');
+
+	await page.getByRole('button', { name: 'Settings' }).click();
+	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await dialog.getByLabel('Password', { exact: true }).fill('New-Passw0rd!');
+	await dialog.getByRole('button', { name: 'Save' }).click();
+	await page.getByRole('button', { name: 'Earlier versions' }).click();
+	await page
+		.getByRole('listitem')
+		.filter({ hasText: 'Version 1' })
+		.getByRole('button', { name: 'Show' })
+		.click();
+	await expect(page.getByTestId('earlier-password')).toHaveText('Old-Passw0rd!');
+});
+
+test('vault entries keep files, earlier passwords and show TOTP codes', async ({ page }) => {
+	await signIn(page);
+	await freshVault(page, 'long enough passphrase');
+	const dialog = page.getByRole('dialog');
+	await page.getByRole('button', { name: 'New entry' }).click();
+	await dialog.getByLabel('Title').fill('Mail');
+	await dialog.getByLabel('Password').fill('First-Pass!');
+	await dialog.getByRole('button', { name: 'Add field' }).click();
+	await dialog.getByLabel('Field name').fill('otp');
+	await dialog
+		.getByLabel('Value')
+		.fill('otpauth://totp/mail?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
+	await dialog.locator('input[type=file]').setInputFiles({
+		name: 'backup-codes.txt',
+		mimeType: 'text/plain',
+		buffer: Buffer.from('11111 22222')
+	});
+	await dialog.getByRole('button', { name: 'Save' }).click();
+	await expect(page.getByText('Mail', { exact: true })).toBeVisible();
+
+	// A new password from the generator; the first one goes into the history.
+	await page.getByRole('button', { name: 'Edit' }).click();
+	await dialog.getByRole('button', { name: 'Generate a password' }).click();
+	const generated = await dialog.getByLabel('Password').inputValue();
+	expect(generated).toHaveLength(20);
+	await dialog.getByRole('button', { name: 'Save' }).click();
+	await page.getByRole('button', { name: 'Show', exact: true }).click();
+	await expect(page.getByText(generated)).toBeVisible();
+	await expect(page.getByTestId('totp-code')).toHaveText(/^\d{6}$/);
+	await page.getByText('Earlier versions').click();
+	await expect(page.getByTestId('earlier-password')).toHaveText('First-Pass!');
+
+	// The file comes back as it went in, opened in the browser.
+	const downloading = page.waitForEvent('download');
+	await page.getByRole('button', { name: /backup-codes\.txt/ }).click();
+	const download = await downloading;
+	const chunks: Buffer[] = [];
+	for await (const chunk of await download.createReadStream()) chunks.push(chunk as Buffer);
+	expect(Buffer.concat(chunks).toString()).toBe('11111 22222');
+});
+
 test('an SSH key protected by a passphrase signs in', async ({ page }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');

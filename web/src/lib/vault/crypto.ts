@@ -116,6 +116,44 @@ export async function open(
 	return JSON.parse(new TextDecoder().decode(plaintext));
 }
 
+/**
+ * The associated data of a file (#100): not an entry's, so neither can be
+ * passed off as the other.
+ */
+function fileAad(fileId: string): Uint8Array<ArrayBuffer> {
+	return encoder.encode(`${SCHEME}\nfile\n${fileId}`);
+}
+
+/** Seals the bytes of a file of the personal vault. */
+export async function sealFile(
+	vaultKey: CryptoKey,
+	fileId: string,
+	content: Uint8Array<ArrayBuffer>
+): Promise<{ nonce: Uint8Array<ArrayBuffer>; ciphertext: Uint8Array<ArrayBuffer> }> {
+	const nonce = randomBytes(12);
+	const ciphertext = await subtle().encrypt(
+		{ name: 'AES-GCM', iv: nonce, additionalData: fileAad(fileId) },
+		vaultKey,
+		content
+	);
+	return { nonce, ciphertext: new Uint8Array(ciphertext) };
+}
+
+/** The bytes of a file; throws if key, nonce or ID do not fit. */
+export async function openFile(
+	vaultKey: CryptoKey,
+	fileId: string,
+	nonce: Uint8Array<ArrayBuffer>,
+	ciphertext: Uint8Array<ArrayBuffer>
+): Promise<Uint8Array<ArrayBuffer>> {
+	const plaintext = await subtle().decrypt(
+		{ name: 'AES-GCM', iv: nonce, additionalData: fileAad(fileId) },
+		vaultKey,
+		ciphertext
+	);
+	return new Uint8Array(plaintext);
+}
+
 /** A recovery key: random bytes, and as text in groups of four (`ABCD-EFGH-…`). */
 export function newRecoveryKey(): { bytes: Uint8Array<ArrayBuffer>; text: string } {
 	const bytes = randomBytes(RECOVERY_BYTES);
@@ -139,9 +177,12 @@ export function parseRecoveryKey(text: string): Uint8Array<ArrayBuffer> | null {
 }
 
 export function toBase64(bytes: Uint8Array): string {
-	let text = '';
-	for (const byte of bytes) text += String.fromCharCode(byte);
-	return btoa(text);
+	// In pieces: files of megabytes would make one string of each byte slow.
+	const pieces: string[] = [];
+	for (let at = 0; at < bytes.length; at += 0x8000) {
+		pieces.push(String.fromCharCode(...bytes.subarray(at, at + 0x8000)));
+	}
+	return btoa(pieces.join(''));
 }
 
 export function fromBase64(text: string): Uint8Array<ArrayBuffer> {

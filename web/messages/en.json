@@ -481,5 +481,15 @@
 	"vault_remove_folder": "Remove this empty folder",
 	"vault_shared": "Shared with me",
 	"vault_shared_hint": "Credentials of the folders you may see. With the right to reveal them, you show or copy them here too; each time is recorded.",
-	"vault_shared_none": "Nothing shared with you yet."
+	"vault_shared_none": "Nothing shared with you yet.",
+	"vault_generate": "Generate a password",
+	"vault_files": "Files",
+	"vault_add_file": "Add a file",
+	"vault_file_too_large": "Files may have up to {megabytes} MB.",
+	"vault_history": "Earlier versions",
+	"vault_totp_left": "{seconds} s",
+	"audit_credential_attachment_added": "Added a file to a credential",
+	"audit_credential_attachment_deleted": "Removed a file of a credential",
+	"audit_personal_attachment_saved": "Saved a file of the personal vault",
+	"audit_personal_attachment_deleted": "Deleted a file of the personal vault"
 }
