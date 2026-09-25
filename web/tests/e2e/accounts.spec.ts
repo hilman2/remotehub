@@ -409,7 +409,7 @@ test('a forgotten password’s code comes by mail, in the browser’s language',
 		extraHTTPHeaders: { 'Accept-Language': 'de-DE,de;q=0.9' }
 	});
 	const page = await context.newPage();
-	await onboard(page, email, `Forgot-Passw0rd-${run}`);
+	const secret = await onboard(page, email, `Forgot-Passw0rd-${run}`);
 	await signOut(page);
 
 	await page.getByRole('link', { name: 'Forgot the password?' }).click();
@@ -421,7 +421,17 @@ test('a forgotten password’s code comes by mail, in the browser’s language',
 	const code = mail.text.match(/\b(\d{6})\b/)![1];
 	await page.getByLabel('Code', { exact: true }).fill(code);
 	await page.getByRole('button', { name: 'Continue' }).click();
-	// Kratos takes the code: the page asks for it no more.
-	await expect(page).not.toHaveURL(/\/sign-in\/recovery/);
+	// The authenticator app's code first (#149), then the new password.
+	await expect(page).toHaveURL(/\/sign-in$/);
+	await page.getByLabel('Code', { exact: true }).fill(totp(secret, step() + 1));
+	await page.getByRole('button', { name: 'Confirm' }).click();
+	const renewed = `Renewed-Passw0rd-${run}`;
+	await page.getByLabel('New password').fill(renewed);
+	await page.getByRole('button', { name: 'Continue' }).click();
+	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
+
+	// The new password is the one that counts now.
+	await signOut(page);
+	await signInLocal(page, email, renewed, secret);
 	await context.close();
 });
