@@ -153,7 +153,7 @@
 			</div>
 		</header>
 
-		{#if session.user.kind === 'local'}
+		{#if session.user.kind === 'break_glass'}
 			<div
 				class="flex items-center justify-center gap-2 bg-critical px-4 py-2 text-sm font-medium text-white"
 				role="alert"

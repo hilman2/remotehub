@@ -4,7 +4,8 @@ import { api, type ApiResult } from './api/client';
 export interface User {
 	username: string;
 	display_name: string;
-	kind: 'directory' | 'local';
+	/** From AD, a break-glass account, or a local account in Kratos (#103). */
+	kind: 'directory' | 'break_glass' | 'local';
 	/** May manage remotehub: folders at the top, grants, the audit log. */
 	admin: boolean;
 }

@@ -35,7 +35,7 @@ pub struct Session {
     pub user_id: Uuid,
     pub username: String,
     pub display_name: String,
-    /// `directory` or `local` (break-glass).
+    /// `directory`, `break_glass`, or `local` (an account in Kratos, #103).
     pub kind: String,
     /// The user's own SID (directory users only).
     #[serde(skip)]
@@ -52,7 +52,7 @@ impl Session {
     /// Administrators manage remotehub itself: break-glass accounts and
     /// members of the configured admin groups.
     pub fn is_admin(&self, settings: &Settings) -> bool {
-        self.kind == "local"
+        self.kind == "break_glass"
             || self
                 .groups
                 .iter()

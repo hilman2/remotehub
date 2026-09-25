@@ -171,7 +171,7 @@ async fn the_endpoint_signs_in_an_administrator_and_audits_it(pool: PgPool) {
     assert_eq!(response.status, StatusCode::OK);
     assert_eq!(
         response.json(),
-        json!({ "username": "emergency", "display_name": "emergency", "kind": "local", "admin": true })
+        json!({ "username": "emergency", "display_name": "emergency", "kind": "break_glass", "admin": true })
     );
     let token = response.session_token().unwrap();
 
@@ -179,7 +179,7 @@ async fn the_endpoint_signs_in_an_administrator_and_audits_it(pool: PgPool) {
     assert_eq!(log[0]["action"], "session.sign_in");
     assert_eq!(
         log[0]["details"],
-        json!({ "kind": "local", "break_glass": true })
+        json!({ "kind": "break_glass", "break_glass": true })
     );
     assert_eq!(log[1]["action"], "session.sign_in_failed");
     assert_eq!(log[1]["details"]["break_glass"], true);

@@ -235,7 +235,7 @@ pub async fn sign_in_break_glass(
             },
             action: Action::SignIn,
             object: None,
-            details: json!({ "kind": "local", "break_glass": true }),
+            details: json!({ "kind": "break_glass", "break_glass": true }),
             address: Some(&address),
         },
     )
@@ -247,7 +247,7 @@ pub async fn sign_in_break_glass(
         user_id: account.user_id,
         username: account.username,
         display_name: account.display_name,
-        kind: "local".to_owned(),
+        kind: "break_glass".to_owned(),
         sid: None,
         upn: None,
         groups: Vec::new(),

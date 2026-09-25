@@ -243,7 +243,7 @@ async fn manage_break_glass(action: BreakGlassAction) -> anyhow::Result<()> {
         ),
     };
     let user_id: uuid::Uuid = sqlx::query_scalar(
-        "SELECT id FROM users WHERE kind = 'local' AND lower(username) = lower($1)",
+        "SELECT id FROM users WHERE kind = 'break_glass' AND lower(username) = lower($1)",
     )
     .bind(&issued.username)
     .fetch_one(&pool)
