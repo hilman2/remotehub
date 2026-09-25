@@ -154,10 +154,15 @@ struct DeviceRow {
     certificate_fingerprint: Option<String>,
     /// The site connector the device is reached through; none: directly.
     connector_id: Option<Uuid>,
-    /// Sign-in mode `device`: the user name and domain of its own
-    /// credentials; the password stays sealed.
+    /// Sign-in mode `device`: its own credentials as far as they may be
+    /// shown: user name, domain, `password` or `ssh_key`, and what
+    /// identifies a key. Password and key stay sealed.
     username: String,
     domain: String,
+    secret_kind: String,
+    key_algorithm: Option<String>,
+    key_fingerprint: Option<String>,
+    has_certificate: bool,
     #[serde(skip)]
     host_key: Option<String>,
 }
@@ -203,7 +208,8 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
             .await?;
     let devices: Vec<DeviceRow> = sqlx::query_as(
         "SELECT id, folder_id, name, protocol, host, port, auth_mode, credential_id, description,
-                keyboard_layout, certificate_fingerprint, connector_id, username, domain, host_key
+                keyboard_layout, certificate_fingerprint, connector_id, username, domain,
+                secret_kind, key_algorithm, key_fingerprint, has_certificate, host_key
          FROM devices ORDER BY lower(name)",
     )
     .fetch_all(&state.db)
@@ -462,14 +468,16 @@ pub struct DeviceInput {
     /// The site connector the device is reached through; none: directly.
     #[serde(default)]
     connector_id: Option<Uuid>,
-    /// Sign-in mode `device` only: the device's own credentials. Without a
-    /// password on a change, the sealed one stays.
+    /// Sign-in mode `device` only: the device's own credentials, a password
+    /// (default) or, for SSH, a key (`ssh_key`).
     #[serde(default)]
     username: String,
     #[serde(default)]
     domain: String,
     #[serde(default)]
-    password: Option<SecretString>,
+    secret_kind: Option<String>,
+    #[serde(flatten)]
+    secrets: SecretInput,
 }
 
 struct ValidDevice {
@@ -486,7 +494,10 @@ struct ValidDevice {
     /// Empty unless the sign-in mode is `device`.
     username: String,
     domain: String,
-    password: Option<SecretString>,
+    /// `password` unless the device's own credentials are a key.
+    secret_kind: &'static str,
+    /// New secrets of the device's own credentials, if given.
+    secrets: Option<Secrets>,
 }
 
 impl DeviceInput {
@@ -511,15 +522,23 @@ impl DeviceInput {
             _ => return Err(invalid("auth_mode")),
         };
         let own = auth_mode == "device";
-        let password = self
-            .password
-            .filter(|p| own && !p.expose_secret().is_empty());
-        if password
-            .as_ref()
-            .is_some_and(|p| p.expose_secret().chars().count() > 1024)
-        {
-            return Err(invalid("password"));
-        }
+        let secret_kind = match self.secret_kind.as_deref().filter(|_| own) {
+            None | Some("password") => "password",
+            // Keys are SSH's; RDP, VNC and web interfaces take passwords.
+            Some("ssh_key") if protocol == "ssh" => "ssh_key",
+            _ => return Err(invalid("secret_kind")),
+        };
+        let mut given = self.secrets;
+        // An empty field is one left empty to keep what is stored.
+        given.password = given.password.filter(|p| !p.expose_secret().is_empty());
+        given.private_key = given
+            .private_key
+            .filter(|k| !k.expose_secret().trim().is_empty());
+        let secrets = if own {
+            new_secrets(secret_kind, &given)?
+        } else {
+            None
+        };
         // A stored credential is exactly what "stored" means, and nothing else.
         if (auth_mode == "stored") != self.credential_id.is_some() {
             return Err(invalid("credential_id"));
@@ -570,29 +589,35 @@ impl DeviceInput {
             } else {
                 String::new()
             },
-            password,
+            secret_kind,
+            secrets,
         })
     }
 }
 
-/// Seals the password of a device's own credentials as `version`.
-async fn seal_device_password(
-    tx: &mut sqlx::PgConnection,
-    state: &AppState,
-    device: Uuid,
-    version: i32,
-    password: &SecretString,
-) -> Result<(), Problem> {
-    secrets::store(
-        &mut *tx,
-        &state.vault,
-        device,
-        version,
-        PASSWORD_FIELD,
-        password.expose_secret().as_bytes(),
-    )
-    .await
-    .map_err(secret_problem)
+/// A device as it is stored, before a change.
+#[derive(sqlx::FromRow)]
+struct DeviceBefore {
+    protocol: String,
+    host: String,
+    port: i32,
+    credential_id: Option<Uuid>,
+    connector_id: Option<Uuid>,
+    auth_mode: String,
+    secret_version: i32,
+    secret_kind: String,
+    key_algorithm: Option<String>,
+    key_fingerprint: Option<String>,
+    has_certificate: bool,
+}
+
+/// The field a device's own credentials miss when they have no secret yet.
+fn missing_secret(secret_kind: &str) -> Problem {
+    invalid(if secret_kind == "ssh_key" {
+        "private_key"
+    } else {
+        "password"
+    })
 }
 
 /// A connector the device names must exist; the foreign key would only say
@@ -637,18 +662,24 @@ pub async fn create_device(
         )?;
     }
     require_connector(&state, device.connector_id).await?;
-    // Own credentials need their password from the start.
-    if device.auth_mode == "device" && device.password.is_none() {
-        return Err(invalid("password"));
+    // Own credentials need their password or key from the start.
+    if device.auth_mode == "device" && device.secrets.is_none() {
+        return Err(missing_secret(device.secret_kind));
     }
-    let secret_version = i32::from(device.password.is_some());
+    let secret_version = i32::from(device.secrets.is_some());
+    let (key_algorithm, key_fingerprint, has_certificate) = device
+        .secrets
+        .as_ref()
+        .map_or((None, None, false), Secrets::key_info);
 
     let mut tx = state.db.begin().await?;
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO devices
              (folder_id, name, protocol, host, port, auth_mode, credential_id, description, keyboard_layout,
-              connector_id, username, domain, secret_version)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id",
+              connector_id, username, domain, secret_version, secret_kind, key_algorithm,
+              key_fingerprint, has_certificate)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+         RETURNING id",
     )
     .bind(device.folder_id)
     .bind(&device.name)
@@ -663,17 +694,22 @@ pub async fn create_device(
     .bind(&device.username)
     .bind(&device.domain)
     .bind(secret_version)
+    .bind(device.secret_kind)
+    .bind(key_algorithm)
+    .bind(key_fingerprint)
+    .bind(has_certificate)
     .fetch_one(&mut *tx)
     .await
     .map_err(database)?;
-    if let Some(password) = &device.password {
-        seal_device_password(&mut tx, &state, id, secret_version, password).await?;
+    if let Some(secrets) = &device.secrets {
+        seal_version(&mut tx, &state, id, secret_version, secrets).await?;
     }
     let details = json!({
         "name": device.name, "protocol": device.protocol, "host": device.host, "port": device.port,
         "auth_mode": device.auth_mode, "credential_id": device.credential_id,
         "keyboard_layout": device.keyboard_layout, "connector_id": device.connector_id,
-        "username": device.username, "domain": device.domain,
+        "username": device.username, "domain": device.domain, "secret_kind": device.secret_kind,
+        "key_fingerprint": key_fingerprint,
     });
     audit::record(
         &mut *tx,
@@ -708,8 +744,9 @@ pub async fn update_device(
             ObjectId::Folder(device.folder_id),
         )?;
     }
-    let before: (String, String, i32, Option<Uuid>, Option<Uuid>, String, i32) = sqlx::query_as(
-        "SELECT protocol, host, port, credential_id, connector_id, auth_mode, secret_version
+    let before: DeviceBefore = sqlx::query_as(
+        "SELECT protocol, host, port, credential_id, connector_id, auth_mode, secret_version,
+                secret_kind, key_algorithm, key_fingerprint, has_certificate
          FROM devices WHERE id = $1",
     )
     .bind(id)
@@ -718,12 +755,12 @@ pub async fn update_device(
     // A credential may only be linked, or sent to a changed target, by
     // someone who may use it (see create_device). Another connector is
     // another target: the same address may be another machine at its site.
-    let target_changed = before.0 != device.protocol
-        || before.1 != device.host
-        || before.2 != device.port
-        || before.4 != device.connector_id;
+    let target_changed = before.protocol != device.protocol
+        || before.host != device.host
+        || before.port != device.port
+        || before.connector_id != device.connector_id;
     if let Some(credential) = device.credential_id
-        && (before.3 != Some(credential) || target_changed)
+        && (before.credential_id != Some(credential) || target_changed)
     {
         require(
             &catalog,
@@ -733,21 +770,41 @@ pub async fn update_device(
         )?;
     }
     require_connector(&state, device.connector_id).await?;
-    // The device's own password goes only to the target it was entered for:
-    // whoever changes the target enters it again, like a linked credential
-    // needs its right to be used (above).
-    let secret_version = match (&device.password, device.auth_mode) {
-        (Some(_), _) => before.6 + 1,
-        (None, "device") if before.5 == "device" && before.6 > 0 && !target_changed => before.6,
-        (None, "device") => return Err(invalid("password")),
+    // The device's own password or key goes only to the target it was
+    // entered for: whoever changes the target enters it again, like a linked
+    // credential needs its right to be used (above).
+    let keeps = before.auth_mode == "device"
+        && before.secret_version > 0
+        && before.secret_kind == device.secret_kind
+        && !target_changed;
+    let secret_version = match (&device.secrets, device.auth_mode) {
+        (Some(_), _) => before.secret_version + 1,
+        (None, "device") if keeps => before.secret_version,
+        (None, "device") => return Err(missing_secret(device.secret_kind)),
         (None, _) => 0,
+    };
+    let (key_algorithm, key_fingerprint, has_certificate) = match &device.secrets {
+        Some(secrets) => {
+            let (algorithm, fingerprint, certificate) = secrets.key_info();
+            (
+                algorithm.map(str::to_owned),
+                fingerprint.map(str::to_owned),
+                certificate,
+            )
+        }
+        None if secret_version > 0 => (
+            before.key_algorithm,
+            before.key_fingerprint,
+            before.has_certificate,
+        ),
+        None => (None, None, false),
     };
 
     let mut tx = state.db.begin().await?;
-    if let Some(password) = &device.password {
-        seal_device_password(&mut tx, &state, id, secret_version, password).await?;
+    if let Some(secrets) = &device.secrets {
+        seal_version(&mut tx, &state, id, secret_version, secrets).await?;
     }
-    // Only the current password is kept; without own credentials, none.
+    // Only the current secrets are kept; without own credentials, none.
     sqlx::query("DELETE FROM secret_fields WHERE owner_id = $1 AND version <> $2")
         .bind(id)
         .bind(secret_version)
@@ -757,6 +814,7 @@ pub async fn update_device(
         "UPDATE devices SET folder_id = $2, name = $3, protocol = $4, host = $5, port = $6,
              auth_mode = $7, credential_id = $8, description = $9, keyboard_layout = $11,
              connector_id = $12, username = $13, domain = $14, secret_version = $15,
+             secret_kind = $16, key_algorithm = $17, key_fingerprint = $18, has_certificate = $19,
              updated_at = now(),
              host_key = CASE WHEN $10 THEN NULL ELSE host_key END,
              host_key_pinned_at = CASE WHEN $10 THEN NULL ELSE host_key_pinned_at END,
@@ -779,6 +837,10 @@ pub async fn update_device(
     .bind(&device.username)
     .bind(&device.domain)
     .bind(secret_version)
+    .bind(device.secret_kind)
+    .bind(&key_algorithm)
+    .bind(&key_fingerprint)
+    .bind(has_certificate)
     .execute(&mut *tx)
     .await
     .map_err(database)?;
@@ -786,8 +848,8 @@ pub async fn update_device(
         "name": device.name, "protocol": device.protocol, "host": device.host, "port": device.port,
         "auth_mode": device.auth_mode, "credential_id": device.credential_id, "folder_id": device.folder_id,
         "keyboard_layout": device.keyboard_layout, "connector_id": device.connector_id,
-        "username": device.username, "domain": device.domain,
-        "secret_changed": device.password.is_some(),
+        "username": device.username, "domain": device.domain, "secret_kind": device.secret_kind,
+        "key_fingerprint": key_fingerprint, "secret_changed": device.secrets.is_some(),
     });
     audit::record(
         &mut *tx,
@@ -892,10 +954,17 @@ pub struct CredentialInput {
     username: String,
     #[serde(default)]
     domain: String,
-    /// Kind `password`: required when creating; absent keeps it.
+    #[serde(flatten)]
+    secrets: SecretInput,
+}
+
+/// The secret fields a credential or a device's own credentials carry.
+/// Required when creating; absent on a change, the sealed ones stay.
+#[derive(Deserialize)]
+pub struct SecretInput {
+    /// Kind `password`.
     password: Option<SecretString>,
-    /// Kind `ssh_key`: required when creating; absent keeps key, passphrase
-    /// and certificate.
+    /// Kind `ssh_key`: the key, with its passphrase and certificate if any.
     private_key: Option<SecretString>,
     passphrase: Option<SecretString>,
     certificate: Option<String>,
@@ -957,7 +1026,7 @@ const CERTIFICATE_FIELD: &str = "certificate";
 
 /// The new secrets of a credential, if any were given; keys are parsed and
 /// matched against their certificate before anything is stored.
-fn new_secrets(kind: &str, input: &CredentialInput) -> Result<Option<Secrets>, Problem> {
+fn new_secrets(kind: &str, input: &SecretInput) -> Result<Option<Secrets>, Problem> {
     match kind {
         "password" => Ok(input.password.clone().map(Secrets::Password)),
         "ssh_key" => {
@@ -1032,7 +1101,7 @@ pub async fn create_credential(
     let username = plain(&input.username, "username")?;
     let domain = plain(&input.domain, "domain")?;
     let kind = input.kind.clone().unwrap_or_else(|| "password".to_owned());
-    let secrets = new_secrets(&kind, &input)?.ok_or_else(|| {
+    let secrets = new_secrets(&kind, &input.secrets)?.ok_or_else(|| {
         invalid(if kind == "ssh_key" {
             "private_key"
         } else {
@@ -1113,7 +1182,7 @@ pub async fn update_credential(
     if input.kind.as_deref().is_some_and(|k| k != kind) {
         return Err(invalid("kind"));
     }
-    let secrets = new_secrets(&kind, &input)?;
+    let secrets = new_secrets(&kind, &input.secrets)?;
 
     let mut tx = state.db.begin().await?;
     let version: i32 = sqlx::query_scalar(

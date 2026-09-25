@@ -152,7 +152,7 @@
 	"protocol_https": "Web interface (HTTPS)",
 	"auth_stored": "A stored credential",
 	"auth_device": "Credentials of this device",
-	"auth_device_target_changed": "Another target needs the password again.",
+	"auth_device_target_changed": "Another target, or another kind, needs the password or key again.",
 	"auth_ask": "Credentials asked for when connecting",
 	"auth_own": "My own directory account",
 	"auth_certificate": "A certificate from remotehub, as myself",
