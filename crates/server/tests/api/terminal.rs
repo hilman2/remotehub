@@ -805,3 +805,32 @@ async fn a_session_goes_into_the_journal_with_its_purpose(pool: PgPool) {
         .unwrap();
     assert_eq!(opened["details"]["purpose"], "Rotate the logs");
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn a_device_signs_in_with_credentials_of_its_own(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let device = create(
+        &app,
+        &token,
+        "/api/devices",
+        json!({
+            "folder_id": folder, "name": "own", "protocol": "ssh", "host": ssh_host(),
+            "port": 22, "auth_mode": "device", "credential_id": null,
+            "username": "tester", "password": "Tester-Passw0rd!",
+        }),
+    )
+    .await;
+    let address = serve(state).await;
+
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({})).await;
+    expect_connected(&mut socket).await;
+    socket
+        .send(Message::Binary(
+            b"echo \"own says $(whoami)\"\n".to_vec().into(),
+        ))
+        .await
+        .unwrap();
+    output_until(&mut socket, "own says tester").await;
+}

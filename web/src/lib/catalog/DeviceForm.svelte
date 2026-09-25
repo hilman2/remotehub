@@ -44,6 +44,20 @@
 	let description = $state(start?.description ?? '');
 	let keyboardLayout = $state<KeyboardLayout | ''>(start?.keyboard_layout ?? '');
 	let connectorId = $state(start?.connector_id ?? '');
+	let username = $state(start?.username ?? '');
+	let domain = $state(start?.domain ?? '');
+	let password = $state('');
+
+	// The server keeps the device's own password only for the target it was
+	// entered for; another target, or a device without one, needs it.
+	const retarget = $derived(
+		!start ||
+			start.auth_mode !== 'device' ||
+			start.protocol !== protocol ||
+			start.host !== host.trim() ||
+			start.port !== Number(port) ||
+			(start.connector_id ?? '') !== connectorId
+	);
 
 	// Layouts by name in the UI's language; Unicode last.
 	const layouts = $derived(
@@ -78,8 +92,10 @@
 			credential_id: authMode === 'stored' ? credentialId || null : null,
 			description,
 			keyboard_layout: protocol === 'rdp' ? keyboardLayout || null : null,
-			connector_id: connectorId || null
+			connector_id: connectorId || null,
+			...(authMode === 'device' ? { username, domain, ...(password ? { password } : {}) } : {})
 		});
+		password = '';
 	}
 
 	const field = 'mt-1 w-full rounded-lg border border-line bg-page px-3 py-2';
@@ -168,6 +184,50 @@
 		<p class="mt-1 text-xs break-words text-ink-3">
 			{m.auth_certificate_hint({ url: new URL('/api/ssh-ca.pub', window.location.href).href })}
 		</p>
+	{/if}
+
+	{#if authMode === 'device'}
+		<div class="grid grid-cols-2 gap-3">
+			<div>
+				<label class={label} for="device-username">
+					{protocol === 'vnc' ? m.credentials_username_optional() : m.field_username()}
+				</label>
+				<input
+					id="device-username"
+					class={field}
+					required={protocol !== 'vnc'}
+					maxlength="256"
+					autocomplete="off"
+					spellcheck="false"
+					bind:value={username}
+				/>
+			</div>
+			<div>
+				<label class={label} for="device-domain">{m.field_domain()}</label>
+				<input
+					id="device-domain"
+					class={field}
+					maxlength="256"
+					autocomplete="off"
+					spellcheck="false"
+					bind:value={domain}
+				/>
+			</div>
+		</div>
+		<label class={label} for="device-password">{m.field_password()}</label>
+		<input
+			id="device-password"
+			class={field}
+			type="password"
+			autocomplete="new-password"
+			required={retarget}
+			bind:value={password}
+		/>
+		{#if !retarget}
+			<p class="mt-1 text-xs text-ink-3">{m.field_password_keep()}</p>
+		{:else if start?.auth_mode === 'device'}
+			<p class="mt-1 text-xs text-ink-3">{m.auth_device_target_changed()}</p>
+		{/if}
 	{/if}
 
 	{#if authMode === 'stored'}

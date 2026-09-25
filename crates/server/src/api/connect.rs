@@ -337,7 +337,8 @@ pub async fn ssh_ca_public_key(State(state): State<AppState>) -> Result<String, 
         .ok_or(Problem::new(ErrorCode::NotFound))
 }
 
-/// A sealed field of the credential's current version as text.
+/// A sealed field of the owner's current version as text: a credential's,
+/// or a device's own password.
 async fn stored_text(
     state: &AppState,
     credential: Uuid,
@@ -356,7 +357,7 @@ async fn stored_text(
         .map_err(|_| Problem::new(ErrorCode::Internal))
 }
 
-/// Credentials for the device's sign-in mode `stored`, `laps` or `ask`.
+/// Credentials for the device's sign-in mode `stored`, `device`, `laps` or `ask`.
 pub async fn credentials(
     state: &AppState,
     target: &Target,
@@ -425,6 +426,22 @@ pub async fn credentials(
                 username: laps.account,
                 domain: laps.computer,
                 login: Login::Password(laps.password),
+            })
+        }
+        "device" => {
+            let (username, domain, version): (String, String, i32) = sqlx::query_as(
+                "SELECT username, domain, secret_version FROM devices WHERE id = $1",
+            )
+            .bind(target.id)
+            .fetch_one(&state.db)
+            .await?;
+            let password = stored_text(state, target.id, version, PASSWORD_FIELD)
+                .await?
+                .ok_or(Problem::new(ErrorCode::Internal))?;
+            Ok(Credentials {
+                username,
+                domain,
+                login: Login::Password(password),
             })
         }
         "ask" => {

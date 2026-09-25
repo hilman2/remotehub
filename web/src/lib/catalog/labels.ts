@@ -35,6 +35,7 @@ export const PROTOCOL_SHORT: Record<Protocol, string> = {
 
 export const AUTH_MODE_LABELS: Record<AuthMode, () => string> = {
 	stored: m.auth_stored,
+	device: m.auth_device,
 	ask: m.auth_ask,
 	own: m.auth_own,
 	certificate: m.auth_certificate,

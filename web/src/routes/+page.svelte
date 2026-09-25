@@ -616,12 +616,18 @@
 			<div class="grid gap-4 md:grid-cols-3">
 				<section class={card}>
 					<h3 class="eyebrow">{m.field_auth_mode()}</h3>
-					<p class="text-lg font-semibold">
-						{device.credential_id
-							? (tree?.credentials.find((c) => c.id === device.credential_id)?.name ?? '')
-							: AUTH_MODE_LABELS[device.auth_mode]()}
+					<p class="text-lg font-semibold break-words">
+						{#if device.credential_id}
+							{tree?.credentials.find((c) => c.id === device.credential_id)?.name ?? ''}
+						{:else if device.auth_mode === 'device'}
+							<span class="font-mono">
+								{device.domain ? `${device.domain}\\${device.username}` : device.username}
+							</span>
+						{:else}
+							{AUTH_MODE_LABELS[device.auth_mode]()}
+						{/if}
 					</p>
-					{#if device.credential_id}
+					{#if device.credential_id || device.auth_mode === 'device'}
 						<p class="mt-auto flex items-center gap-2 text-sm text-ink-2">
 							<Lock size={14} aria-hidden="true" />
 							{AUTH_MODE_LABELS[device.auth_mode]()}

@@ -173,6 +173,32 @@ test('an SSH device signs in with a certificate from remotehub', async ({ page }
 	await expect(page.locator('.xterm-rows')).toContainText('ca says alice');
 });
 
+test('a device signs in with credentials of its own', async ({ page }) => {
+	await signIn(page);
+	const dialog = page.getByRole('dialog');
+	const folder = `E2E own ${run}`;
+	await newFolder(page, folder);
+
+	// No credential object: user name and password belong to the device.
+	const name = `lab ssh own ${run}`;
+	await page.getByRole('button', { name: 'New device' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(name);
+	await dialog.getByLabel('Host name or IP address').fill(sshHost);
+	await dialog.getByLabel('Sign in with').selectOption({ label: 'Credentials of this device' });
+	await dialog.getByLabel('User name', { exact: true }).fill('tester');
+	await dialog.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name })).toBeVisible();
+	await expect(page.locator('body')).not.toContainText('Tester-Passw0rd!');
+
+	await page.getByRole('button', { name: 'Connect', exact: true }).click();
+	await expect(page.getByText(/host key/)).toBeVisible();
+	await page.locator('.xterm').click();
+	await page.keyboard.type('echo "own says $(whoami)"');
+	await page.keyboard.press('Enter');
+	await expect(page.locator('.xterm-rows')).toContainText('own says tester');
+});
+
 test('access asked for just in time is approved by someone else', async ({ page, browser }) => {
 	// alice sets up a device that bob may only see.
 	await signIn(page);

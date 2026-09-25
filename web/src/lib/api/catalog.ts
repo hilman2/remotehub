@@ -19,8 +19,15 @@ export const DEFAULT_PORTS: Record<Protocol, number> = {
 /** Protocols shown as a picture (through guacd) rather than a terminal. */
 export const isGraphical = (protocol: Protocol) => protocol !== 'ssh';
 
-export type AuthMode = 'stored' | 'ask' | 'own' | 'certificate' | 'laps';
-export const AUTH_MODES: readonly AuthMode[] = ['stored', 'ask', 'own', 'laps', 'certificate'];
+export type AuthMode = 'stored' | 'device' | 'ask' | 'own' | 'certificate' | 'laps';
+export const AUTH_MODES: readonly AuthMode[] = [
+	'stored',
+	'device',
+	'ask',
+	'own',
+	'laps',
+	'certificate'
+];
 
 /**
  * Sign-in modes a protocol offers: certificates are SSH's own, and LAPS
@@ -62,6 +69,9 @@ export interface Device {
 	host_key_fingerprint: string | null;
 	/** The site connector the device is reached through; null: directly. */
 	connector_id: string | null;
+	/** Sign-in mode `device`: its own user name and domain; the password stays on the server. */
+	username: string;
+	domain: string;
 	role: Role;
 }
 
@@ -104,6 +114,11 @@ export interface DeviceInput {
 	description: string;
 	keyboard_layout: KeyboardLayout | null;
 	connector_id: string | null;
+	/** Sign-in mode `device` only. */
+	username?: string;
+	domain?: string;
+	/** Left out on a change: the stored one stays, unless the target changed. */
+	password?: string;
 }
 
 export interface CredentialInput {

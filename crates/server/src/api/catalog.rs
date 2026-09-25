@@ -154,6 +154,10 @@ struct DeviceRow {
     certificate_fingerprint: Option<String>,
     /// The site connector the device is reached through; none: directly.
     connector_id: Option<Uuid>,
+    /// Sign-in mode `device`: the user name and domain of its own
+    /// credentials; the password stays sealed.
+    username: String,
+    domain: String,
     #[serde(skip)]
     host_key: Option<String>,
 }
@@ -199,7 +203,7 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
             .await?;
     let devices: Vec<DeviceRow> = sqlx::query_as(
         "SELECT id, folder_id, name, protocol, host, port, auth_mode, credential_id, description,
-                keyboard_layout, certificate_fingerprint, connector_id, host_key
+                keyboard_layout, certificate_fingerprint, connector_id, username, domain, host_key
          FROM devices ORDER BY lower(name)",
     )
     .fetch_all(&state.db)
@@ -458,6 +462,14 @@ pub struct DeviceInput {
     /// The site connector the device is reached through; none: directly.
     #[serde(default)]
     connector_id: Option<Uuid>,
+    /// Sign-in mode `device` only: the device's own credentials. Without a
+    /// password on a change, the sealed one stays.
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    domain: String,
+    #[serde(default)]
+    password: Option<SecretString>,
 }
 
 struct ValidDevice {
@@ -471,6 +483,10 @@ struct ValidDevice {
     description: String,
     keyboard_layout: Option<&'static str>,
     connector_id: Option<Uuid>,
+    /// Empty unless the sign-in mode is `device`.
+    username: String,
+    domain: String,
+    password: Option<SecretString>,
 }
 
 impl DeviceInput {
@@ -491,8 +507,19 @@ impl DeviceInput {
             // LAPS keeps the password of a computer's local administrator:
             // not VNC's own password, nor a web interface's.
             "laps" if protocol == "ssh" || protocol == "rdp" => "laps",
+            "device" => "device",
             _ => return Err(invalid("auth_mode")),
         };
+        let own = auth_mode == "device";
+        let password = self
+            .password
+            .filter(|p| own && !p.expose_secret().is_empty());
+        if password
+            .as_ref()
+            .is_some_and(|p| p.expose_secret().chars().count() > 1024)
+        {
+            return Err(invalid("password"));
+        }
         // A stored credential is exactly what "stored" means, and nothing else.
         if (auth_mode == "stored") != self.credential_id.is_some() {
             return Err(invalid("credential_id"));
@@ -533,8 +560,39 @@ impl DeviceInput {
             description: self.description.trim().to_owned(),
             keyboard_layout,
             connector_id: self.connector_id,
+            username: if own {
+                plain(&self.username, "username")?
+            } else {
+                String::new()
+            },
+            domain: if own {
+                plain(&self.domain, "domain")?
+            } else {
+                String::new()
+            },
+            password,
         })
     }
+}
+
+/// Seals the password of a device's own credentials as `version`.
+async fn seal_device_password(
+    tx: &mut sqlx::PgConnection,
+    state: &AppState,
+    device: Uuid,
+    version: i32,
+    password: &SecretString,
+) -> Result<(), Problem> {
+    secrets::store(
+        &mut *tx,
+        &state.vault,
+        device,
+        version,
+        PASSWORD_FIELD,
+        password.expose_secret().as_bytes(),
+    )
+    .await
+    .map_err(secret_problem)
 }
 
 /// A connector the device names must exist; the foreign key would only say
@@ -579,13 +637,18 @@ pub async fn create_device(
         )?;
     }
     require_connector(&state, device.connector_id).await?;
+    // Own credentials need their password from the start.
+    if device.auth_mode == "device" && device.password.is_none() {
+        return Err(invalid("password"));
+    }
+    let secret_version = i32::from(device.password.is_some());
 
     let mut tx = state.db.begin().await?;
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO devices
              (folder_id, name, protocol, host, port, auth_mode, credential_id, description, keyboard_layout,
-              connector_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id",
+              connector_id, username, domain, secret_version)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id",
     )
     .bind(device.folder_id)
     .bind(&device.name)
@@ -597,13 +660,20 @@ pub async fn create_device(
     .bind(&device.description)
     .bind(device.keyboard_layout)
     .bind(device.connector_id)
+    .bind(&device.username)
+    .bind(&device.domain)
+    .bind(secret_version)
     .fetch_one(&mut *tx)
     .await
     .map_err(database)?;
+    if let Some(password) = &device.password {
+        seal_device_password(&mut tx, &state, id, secret_version, password).await?;
+    }
     let details = json!({
         "name": device.name, "protocol": device.protocol, "host": device.host, "port": device.port,
         "auth_mode": device.auth_mode, "credential_id": device.credential_id,
         "keyboard_layout": device.keyboard_layout, "connector_id": device.connector_id,
+        "username": device.username, "domain": device.domain,
     });
     audit::record(
         &mut *tx,
@@ -638,8 +708,9 @@ pub async fn update_device(
             ObjectId::Folder(device.folder_id),
         )?;
     }
-    let before: (String, String, i32, Option<Uuid>, Option<Uuid>) = sqlx::query_as(
-        "SELECT protocol, host, port, credential_id, connector_id FROM devices WHERE id = $1",
+    let before: (String, String, i32, Option<Uuid>, Option<Uuid>, String, i32) = sqlx::query_as(
+        "SELECT protocol, host, port, credential_id, connector_id, auth_mode, secret_version
+         FROM devices WHERE id = $1",
     )
     .bind(id)
     .fetch_one(&state.db)
@@ -662,12 +733,31 @@ pub async fn update_device(
         )?;
     }
     require_connector(&state, device.connector_id).await?;
+    // The device's own password goes only to the target it was entered for:
+    // whoever changes the target enters it again, like a linked credential
+    // needs its right to be used (above).
+    let secret_version = match (&device.password, device.auth_mode) {
+        (Some(_), _) => before.6 + 1,
+        (None, "device") if before.5 == "device" && before.6 > 0 && !target_changed => before.6,
+        (None, "device") => return Err(invalid("password")),
+        (None, _) => 0,
+    };
 
     let mut tx = state.db.begin().await?;
+    if let Some(password) = &device.password {
+        seal_device_password(&mut tx, &state, id, secret_version, password).await?;
+    }
+    // Only the current password is kept; without own credentials, none.
+    sqlx::query("DELETE FROM secret_fields WHERE owner_id = $1 AND version <> $2")
+        .bind(id)
+        .bind(secret_version)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query(
         "UPDATE devices SET folder_id = $2, name = $3, protocol = $4, host = $5, port = $6,
              auth_mode = $7, credential_id = $8, description = $9, keyboard_layout = $11,
-             connector_id = $12, updated_at = now(),
+             connector_id = $12, username = $13, domain = $14, secret_version = $15,
+             updated_at = now(),
              host_key = CASE WHEN $10 THEN NULL ELSE host_key END,
              host_key_pinned_at = CASE WHEN $10 THEN NULL ELSE host_key_pinned_at END,
              certificate_fingerprint = CASE WHEN $10 THEN NULL ELSE certificate_fingerprint END,
@@ -686,6 +776,9 @@ pub async fn update_device(
     .bind(target_changed)
     .bind(device.keyboard_layout)
     .bind(device.connector_id)
+    .bind(&device.username)
+    .bind(&device.domain)
+    .bind(secret_version)
     .execute(&mut *tx)
     .await
     .map_err(database)?;
@@ -693,6 +786,8 @@ pub async fn update_device(
         "name": device.name, "protocol": device.protocol, "host": device.host, "port": device.port,
         "auth_mode": device.auth_mode, "credential_id": device.credential_id, "folder_id": device.folder_id,
         "keyboard_layout": device.keyboard_layout, "connector_id": device.connector_id,
+        "username": device.username, "domain": device.domain,
+        "secret_changed": device.password.is_some(),
     });
     audit::record(
         &mut *tx,
@@ -718,6 +813,11 @@ pub async fn delete_device(
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Edit, ObjectId::Device(id))?;
     let mut tx = state.db.begin().await?;
+    // The password of its own credentials, if it has them.
+    sqlx::query("DELETE FROM secret_fields WHERE owner_id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("DELETE FROM devices WHERE id = $1")
         .bind(id)
         .execute(&mut *tx)
