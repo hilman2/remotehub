@@ -338,7 +338,7 @@ pub async fn ssh_ca_public_key(State(state): State<AppState>) -> Result<String, 
 
 /// A sealed field of the owner's current version as text: a credential's,
 /// or a device's own credentials'.
-async fn stored_text(
+pub(super) async fn stored_text(
     state: &AppState,
     owner: Uuid,
     version: i32,

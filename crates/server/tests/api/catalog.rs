@@ -872,6 +872,115 @@ async fn device_secrets(pool: &PgPool, device: &str) -> Vec<i32> {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn stored_secrets_are_shown_only_with_reveal_and_audited(pool: PgPool) {
+    let f = fixture(pool).await;
+    let db01 = create(
+        &f.app,
+        &f.alice,
+        "/api/devices",
+        json!({
+            "folder_id": f.linux, "name": "db01", "protocol": "ssh", "host": "db01", "port": 22,
+            "auth_mode": "device", "credential_id": null, "username": "admin", "domain": "LAB",
+            "password": "Own-S3cret!",
+        }),
+    )
+    .await;
+    let credential = format!("/api/credentials/{}/reveal", f.root_pw);
+    let device = format!("/api/devices/{db01}/reveal");
+    let web01 = format!("/api/devices/{}/reveal", f.web01);
+    let show = || Some(json!({ "purpose": "show" }));
+
+    let olaf = sign_in(&f.app, "olaf").await;
+    for uri in [&credential, &device] {
+        let hidden = call(&f.app, &olaf, "POST", uri, show()).await;
+        assert_eq!(hidden.status, StatusCode::NOT_FOUND, "{uri}");
+    }
+    let bob = sign_in(&f.app, "bob").await;
+    grant(
+        &f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "connect",
+    )
+    .await;
+    for uri in [&credential, &device] {
+        let refused = call(&f.app, &bob, "POST", uri, show()).await;
+        assert_eq!(refused.status, StatusCode::FORBIDDEN, "{uri}");
+    }
+
+    grant(
+        &f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "reveal",
+    )
+    .await;
+    let shown = call(&f.app, &bob, "POST", &credential, show()).await;
+    assert_eq!(shown.status, StatusCode::OK);
+    assert_eq!(shown.headers["cache-control"], "no-store");
+    assert_eq!(
+        shown.json(),
+        json!({ "username": "root", "domain": "", "password": "T0p-Secret!" })
+    );
+    let copied = call(
+        &f.app,
+        &bob,
+        "POST",
+        &device,
+        Some(json!({ "purpose": "copy" })),
+    )
+    .await;
+    assert_eq!(
+        copied.json(),
+        json!({ "username": "admin", "domain": "LAB", "password": "Own-S3cret!" })
+    );
+    // web01 uses the shared credential and keeps nothing of its own.
+    let none = call(&f.app, &bob, "POST", &web01, show()).await;
+    assert_eq!(none.status, StatusCode::NOT_FOUND);
+    // A device that asks now keeps nothing to show either.
+    let asking = json!({
+        "folder_id": f.linux, "name": "db01", "protocol": "ssh", "host": "db01", "port": 22,
+        "auth_mode": "ask", "credential_id": null,
+    });
+    let changed = call(
+        &f.app,
+        &f.alice,
+        "PUT",
+        &format!("/api/devices/{db01}"),
+        Some(asking),
+    )
+    .await;
+    assert_eq!(changed.status, StatusCode::NO_CONTENT, "{}", changed.json());
+    let gone = call(&f.app, &bob, "POST", &device, show()).await;
+    assert_eq!(gone.status, StatusCode::NOT_FOUND);
+    let odd = call(
+        &f.app,
+        &bob,
+        "POST",
+        &credential,
+        Some(json!({ "purpose": "print" })),
+    )
+    .await;
+    assert_eq!(odd.json()["params"]["field"], "purpose");
+
+    let log = call(&f.app, &f.alice, "GET", "/api/audit", None)
+        .await
+        .json();
+    let revealed: Vec<(&str, &str, &str)> = log
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["action"] == "credential.revealed")
+        .map(|e| {
+            (
+                e["actor_name"].as_str().unwrap(),
+                e["object_type"].as_str().unwrap(),
+                e["details"]["purpose"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        revealed,
+        [("bob", "device", "copy"), ("bob", "credential", "show")]
+    );
+    assert!(!log.to_string().contains("T0p-Secret!"));
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn a_device_keeps_credentials_of_its_own(pool: PgPool) {
     let f = fixture(pool.clone()).await;
     let device = |host: &str, password: Option<&str>| {

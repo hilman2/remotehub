@@ -86,6 +86,7 @@ audit_actions! {
     SecondFactorReset = "second_factor.reset",
     SecondFactorRequired = "second_factor.required",
     SecondFactorWaived = "second_factor.waived",
+    CredentialRevealed = "credential.revealed",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).
