@@ -32,6 +32,11 @@ use crate::{AuthError, Group, Identity, IdentityProvider, Principal, PrincipalKi
 const SIZE_LIMIT_EXCEEDED: u32 = 4;
 const INVALID_CREDENTIALS: u32 = 49;
 
+/// `ACCOUNTDISABLE` in `userAccountControl`.
+const ACCOUNT_DISABLED: u32 = 0x2;
+/// Seconds from 1601-01-01, where Windows file times start, to 1970-01-01.
+const FILETIME_TO_UNIX: u64 = 11_644_473_600;
+
 const USER_ATTRIBUTES: [&str; 6] = [
     "sAMAccountName",
     "userPrincipalName",
@@ -296,6 +301,46 @@ impl IdentityProvider for LdapDirectory {
         .ok_or_else(|| LapsError::NoPassword(host.into()))
     }
 
+    async fn refresh(&self, sid: &Sid) -> Result<Vec<Sid>, AuthError> {
+        let filter = format!(
+            "(&(objectCategory=person)(objectClass=user)(objectSid={}){})",
+            escape_binary(&sid.to_bytes()),
+            self.config.user_filter.as_deref().unwrap_or_default()
+        );
+        let mut service = self.service().await?;
+        let (entries, _) = service
+            .with_timeout(self.config.timeout)
+            .search(
+                &self.config.base_dn,
+                Scope::Subtree,
+                &filter,
+                vec!["userAccountControl", "accountExpires"],
+            )
+            .await
+            .map_err(unavailable)?
+            .success()
+            .map_err(directory)?;
+        let Some(entry) = entries.into_iter().next().map(SearchEntry::construct) else {
+            let _ = service.unbind().await;
+            return Err(AuthError::InvalidCredentials);
+        };
+        let control: u32 = first_text(&entry, "userAccountControl")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        if control & ACCOUNT_DISABLED != 0 {
+            let _ = service.unbind().await;
+            return Err(AuthError::AccountDisabled);
+        }
+        let expires = first_text(&entry, "accountExpires").and_then(|v| v.parse().ok());
+        if expired(expires, std::time::SystemTime::now()) {
+            let _ = service.unbind().await;
+            return Err(AuthError::AccountExpired);
+        }
+        let groups = self.token_groups(&mut service, &entry.dn).await;
+        let _ = service.unbind().await;
+        groups
+    }
+
     async fn search(&self, query: &str, limit: i32) -> Result<Vec<Principal>, AuthError> {
         if query.trim().chars().count() < 2 {
             return Ok(Vec::new());
@@ -390,6 +435,23 @@ fn user_filter(account: &Account, extra: Option<&str>) -> String {
         "(&(objectCategory=person)(objectClass=user){name}{})",
         extra.unwrap_or_default()
     )
+}
+
+/// A filter value that matches `bytes` exactly: every byte as `\hh`.
+fn escape_binary(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("\\{b:02x}")).collect()
+}
+
+/// Whether `accountExpires` (100-nanosecond steps since 1601) lies before
+/// `now`. 0 means never; so does `i64::MAX`, which lies 29 000 years ahead.
+fn expired(account_expires: Option<i64>, now: std::time::SystemTime) -> bool {
+    let Some(expires) = account_expires.filter(|&e| e > 0) else {
+        return false;
+    };
+    let now = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() + FILETIME_TO_UNIX);
+    (expires as u64) / 10_000_000 < now
 }
 
 /// Maps the Active Directory sub-code in a failed bind's diagnostic message
@@ -496,6 +558,24 @@ mod tests {
             user_filter(&Account::Upn("a@b".into()), Some("(memberOf=CN=x)")),
             "(&(objectCategory=person)(objectClass=user)(userPrincipalName=a@b)(memberOf=CN=x))"
         );
+    }
+
+    #[test]
+    fn escapes_every_byte_of_a_binary_value() {
+        assert_eq!(escape_binary(&[1, 0x2a, 0xff]), r"\01\2a\ff");
+    }
+
+    #[test]
+    fn reads_when_an_account_expires() {
+        use std::time::{Duration, UNIX_EPOCH};
+        // 2026-01-01T00:00:00Z as a file time.
+        let new_year = (1_767_225_600 + FILETIME_TO_UNIX as i64) * 10_000_000;
+        let at = |secs: u64| UNIX_EPOCH + Duration::from_secs(secs);
+        assert!(!expired(Some(new_year), at(1_767_225_599)));
+        assert!(expired(Some(new_year), at(1_767_225_601)));
+        for never in [None, Some(0), Some(i64::MAX)] {
+            assert!(!expired(never, at(4_000_000_000)), "{never:?}");
+        }
     }
 
     #[test]

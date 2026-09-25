@@ -139,6 +139,16 @@ impl IdentityProvider for FakeDirectory {
         }
     }
 
+    /// Everyone keeps the groups they sign in with.
+    async fn refresh(&self, sid: &Sid) -> Result<Vec<Sid>, AuthError> {
+        let groups: &[&str] = match sid.as_str() {
+            ALICE_SID => &[ADMINS_SID],
+            OLAF_SID => &[OPS_SID],
+            _ => &[],
+        };
+        Ok(groups.iter().map(|g| g.parse().unwrap()).collect())
+    }
+
     /// The lab's SSH and desktop targets have LAPS passwords, as in the lab's
     /// directory (deploy/testlab/dc/users.sh); "nolaps" has none; "offline"
     /// makes the directory unreachable.

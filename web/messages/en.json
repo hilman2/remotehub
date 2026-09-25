@@ -441,5 +441,6 @@
 	"role_security_officer": "Security officer",
 	"role_security_officer_hint": "Approves the recovery of vaults.",
 	"audit_role_assigned": "Gave a role",
-	"audit_role_revoked": "Took back a role"
+	"audit_role_revoked": "Took back a role",
+	"audit_session_ended_by_directory": "The directory ended a user's sessions"
 }

@@ -13,6 +13,7 @@ pub mod db;
 pub mod kratos;
 pub mod principal;
 pub mod proxy;
+pub mod refresh;
 pub mod secrets;
 pub mod session;
 
