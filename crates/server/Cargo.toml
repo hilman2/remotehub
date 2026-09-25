@@ -38,6 +38,8 @@ rustls-pki-types.workspace = true
 secrecy.workspace = true
 sha1.workspace = true
 sha2.workspace = true
+# Security keys of directory users (#129): ES256 signatures and SPKI keys.
+p256 = { workspace = true, features = ["ecdsa", "pkcs8"] }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

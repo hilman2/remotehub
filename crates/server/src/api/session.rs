@@ -22,6 +22,7 @@ use crate::break_glass;
 use crate::proxy;
 use crate::second_factor;
 use crate::session::{self, Session};
+use crate::webauthn::RelyingParty;
 use crate::{AppState, Settings};
 
 #[derive(Deserialize)]
@@ -34,6 +35,9 @@ pub struct SignIn {
     /// The secret the server offered, when the app is set up now.
     #[serde(default)]
     totp_secret: Option<SecretString>,
+    /// A security key's answer to the challenge the server sent (#129).
+    #[serde(default)]
+    security_key: Option<second_factor::KeyAnswer>,
 }
 
 /// The signed-in user as the UI sees them.
@@ -108,6 +112,7 @@ pub async fn sign_in(
         password,
         code,
         totp_secret,
+        security_key,
     }) = body.map_err(|_| Problem::new(ErrorCode::InvalidRequest))?;
     let keys = [
         (PER_USER, username.as_str()),
@@ -158,14 +163,23 @@ pub async fn sign_in(
         .cloned()
         .chain([identity.sid.to_string()])
         .collect();
+    let rp = RelyingParty::of(&state.settings.public_origin);
+    let step = second_factor::SecondStep {
+        code: code.as_deref(),
+        new_secret: totp_secret.as_ref().map(ExposeSecret::expose_secret),
+        key: security_key.as_ref(),
+    };
     let second = second_factor::at_sign_in(
+        &state.db,
         &mut tx,
         &state.vault,
-        user_id,
-        &identity.username,
-        &sids,
-        code.as_deref(),
-        totp_secret.as_ref().map(ExposeSecret::expose_secret),
+        &rp,
+        second_factor::Signer {
+            user_id,
+            account: &identity.username,
+            sids: &sids,
+        },
+        step,
     )
     .await?;
     let (second_factor, enrolled) = match second {

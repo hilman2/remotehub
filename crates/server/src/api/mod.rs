@@ -67,6 +67,15 @@ pub fn router(state: AppState) -> Router<AppState> {
                 .delete(second_factor::remove),
         )
         .route("/account/second-factor/offer", post(second_factor::offer))
+        .route(
+            "/account/security-keys/offer",
+            post(second_factor::offer_key),
+        )
+        .route("/account/security-keys", post(second_factor::add_key))
+        .route(
+            "/account/security-keys/{id}",
+            delete(second_factor::remove_key),
+        )
         .route("/users/{id}/second-factor", delete(second_factor::reset))
         .route("/second-factor-principals", get(second_factor::rules))
         .route(

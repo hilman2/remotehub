@@ -8,6 +8,7 @@
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import { goto } from '$app/navigation';
 	import DirectoryFactor from '$lib/account/DirectoryFactor.svelte';
+	import DirectoryKeys from '$lib/account/DirectoryKeys.svelte';
 	import { resolve } from '$app/paths';
 	import { errorMessage } from '$lib/api/errors';
 	import {
@@ -171,7 +172,7 @@
 {#if session.user?.kind === 'directory'}
 	<p class="mt-2 text-sm text-ink-2">{session.user.username}</p>
 	<p class="mt-6 text-sm text-ink-2">{m.account_not_local()}</p>
-	<div class="mt-6"><DirectoryFactor /></div>
+	<div class="mt-6 flex flex-col gap-4"><DirectoryFactor /><DirectoryKeys /></div>
 {:else if !local}
 	<p class="mt-6 text-sm text-ink-2">{m.account_not_local()}</p>
 {:else if flow}

@@ -26,7 +26,13 @@
 	} from '$lib/kratos/flow';
 	import Messages from '$lib/kratos/Messages.svelte';
 	import { m } from '$lib/paraglide/messages';
-	import { loadMethods, signIn, signInLocal, type Methods } from '$lib/session.svelte';
+	import {
+		loadMethods,
+		signIn,
+		signInLocal,
+		type DirectoryFactor,
+		type Methods
+	} from '$lib/session.svelte';
 
 	/** Kratos' message for a wrong identifier or password. */
 	const KRATOS_INVALID_CREDENTIALS = 4000006;
@@ -45,6 +51,9 @@
 	// Directory accounts (#107): a code of their app, or setting one up with
 	// the key the server offers. The password is sent again with it.
 	let directoryFactor = $state<'code' | { secret: string; uri: string } | null>(null);
+	/** Whether the account has an app, and a key's challenge if it has keys (#129). */
+	let directoryApp = $state(true);
+	let directoryKey = $state<{ challenge: string; options: unknown } | null>(null);
 
 	$effect(() => {
 		// Read once: navigating on from here must not run this again.
@@ -178,8 +187,8 @@
 		await follow(result);
 	}
 
-	/** Signs in with the directory, with a code of the app if there is one. */
-	async function signInDirectory(factor: { code?: string; totp_secret?: string } = {}) {
+	/** Signs in with the directory, with a code of the app or a key's answer if there is one. */
+	async function signInDirectory(factor: DirectoryFactor = {}) {
 		busy = true;
 		error = null;
 		const result = await signIn(username, password, factor);
@@ -189,6 +198,12 @@
 			await goto(resolve('/'));
 		} else if (result.code === 'second_factor_required') {
 			directoryFactor = 'code';
+			// Which of the account's factors to offer (#129).
+			directoryApp = result.params.app !== false;
+			directoryKey =
+				typeof result.params.key_challenge_id === 'string'
+					? { challenge: result.params.key_challenge_id, options: result.params.key_options }
+					: null;
 		} else if (result.code === 'second_factor_setup_required') {
 			directoryFactor = { secret: String(result.params.secret), uri: String(result.params.uri) };
 		} else {
@@ -206,6 +221,27 @@
 		const typed = code.trim();
 		code = '';
 		await signInDirectory({ code: typed });
+	}
+
+	/** The second factor of a directory account with a security key (#129). */
+	async function directoryWithKey() {
+		const key = directoryKey;
+		if (!key) return;
+		let credential: unknown;
+		try {
+			credential = JSON.parse(await getCredential(JSON.stringify(key.options)));
+		} catch {
+			error = m.passkey_failed();
+			return;
+		}
+		await signInDirectory({ security_key: { challenge_id: key.challenge, credential } });
+		if (error) {
+			// Each challenge counts once: fetch a new one for the next try,
+			// and keep the message.
+			const refused = error;
+			await signInDirectory();
+			error = refused;
+		}
 	}
 
 	/** Goes on from what Kratos answered. */
@@ -348,32 +384,47 @@
 				</form>
 			{:else if directoryFactor === 'code'}
 				<form class="flex flex-col gap-5" onsubmit={submitDirectoryCode}>
-					<p class="text-sm text-ink-2">{m.sign_in_second_hint()}</p>
-					<div class="flex flex-col gap-2">
-						<label class="text-sm font-medium" for="directory-code">{m.sign_in_code()}</label>
-						<input
-							id="directory-code"
-							class="{field} font-mono tracking-widest"
-							autocomplete="one-time-code"
-							inputmode="numeric"
-							required
-							bind:value={code}
-						/>
-					</div>
+					{#if directoryApp}
+						<p class="text-sm text-ink-2">{m.sign_in_second_hint()}</p>
+						<div class="flex flex-col gap-2">
+							<label class="text-sm font-medium" for="directory-code">{m.sign_in_code()}</label>
+							<input
+								id="directory-code"
+								class="{field} font-mono tracking-widest"
+								autocomplete="one-time-code"
+								inputmode="numeric"
+								required
+								bind:value={code}
+							/>
+						</div>
+					{/if}
 					{#if error}
 						<p class="flex items-start gap-2 text-sm" role="alert">
 							<CircleAlert size={16} class="mt-0.5 shrink-0 text-critical" aria-hidden="true" />
 							{error}
 						</p>
 					{/if}
-					<button
-						type="submit"
-						disabled={busy}
-						class="inline-flex h-13 w-full items-center justify-center gap-2 rounded-xl bg-accent font-display text-lg font-semibold text-accent-ink hover:brightness-110 disabled:opacity-60"
-					>
-						<LogIn size={18} aria-hidden="true" />
-						{busy ? m.sign_in_busy() : m.sign_in_confirm()}
-					</button>
+					{#if directoryApp}
+						<button
+							type="submit"
+							disabled={busy}
+							class="inline-flex h-13 w-full items-center justify-center gap-2 rounded-xl bg-accent font-display text-lg font-semibold text-accent-ink hover:brightness-110 disabled:opacity-60"
+						>
+							<LogIn size={18} aria-hidden="true" />
+							{busy ? m.sign_in_busy() : m.sign_in_confirm()}
+						</button>
+					{/if}
+					{#if directoryKey && webauthnAvailable()}
+						<button
+							type="button"
+							disabled={busy}
+							class="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-line-strong bg-surface font-medium hover:bg-surface-2 disabled:opacity-60"
+							onclick={directoryWithKey}
+						>
+							<Fingerprint size={18} aria-hidden="true" />
+							{m.sign_in_use_key()}
+						</button>
+					{/if}
 				</form>
 			{:else if directoryFactor}
 				{@const offer = directoryFactor}

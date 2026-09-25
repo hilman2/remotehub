@@ -160,7 +160,8 @@ pub async fn list(
                     AS last_sign_in_at,
                 u.blocked_at IS NOT NULL AS blocked,
                 (u.kind <> 'directory'
-                 OR EXISTS (SELECT 1 FROM second_factors f WHERE f.user_id = u.id))
+                 OR EXISTS (SELECT 1 FROM second_factors f WHERE f.user_id = u.id)
+                 OR EXISTS (SELECT 1 FROM security_keys k WHERE k.user_id = u.id))
                     AS second_factor,
                 (SELECT count(*) FROM sessions s WHERE s.user_id = u.id AND s.expires_at > now())
                     AS sessions

@@ -2301,6 +2301,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "p256",
  "remotehub-browser",
  "remotehub-directory",
  "remotehub-gateway",

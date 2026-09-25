@@ -95,8 +95,11 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - **Second factor for directory accounts (`second_factor.rs`):** TOTP whose secret is sealed in the vault
   (owner = user). A user sets it up on the account page, or during sign-in when a rule in
   `second_factor_principals` names them or a group of theirs; the password is then sent again with the
-  code. Each code works once, and wrong codes count against the sign-in limit. Local accounts get their
-  second factor from Kratos.
+  code. Each code works once, and wrong codes count against the sign-in limit. Security keys and passkeys
+  (#129, `webauthn.rs`) serve as well: remotehub checks them itself, ES256 only, without attestation; the
+  public key comes from the browser's `getPublicKey()`, and the checks bind it to the credential. The server
+  sends a single-use challenge with `second_factor_required`; a key's counter must grow. Local accounts get
+  their second factor from Kratos.
 - **Sessions:** server-side in PostgreSQL; cookie HttpOnly, Secure, SameSite=Strict; CSRF protection.
 - **Directory changes reach sessions (`refresh.rs`):** every five minutes and before every connection,
   the service account reads a directory user's groups and `userAccountControl`/`accountExpires` again, by
