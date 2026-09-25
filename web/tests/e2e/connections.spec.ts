@@ -155,12 +155,22 @@ test('a stored password is shown and copied, and the audit log knows', async ({
 	await expect(page.getByRole('status').filter({ hasText: 'Copied' })).toBeVisible();
 	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Shown-Passw0rd!');
 
-	// The newest two entries, whatever an earlier run left.
+	// This credential's entries: other tests write to the log meanwhile.
+	const purposes = await page.evaluate(async (name) => {
+		const tree = await (await fetch('/api/tree')).json();
+		const id = tree.credentials.find((c: { name: string }) => c.name === name).id;
+		const log = (await (await fetch('/api/audit')).json()) as {
+			action: string;
+			object_id: string | null;
+			details: { purpose?: string };
+		}[];
+		return log
+			.filter((e) => e.action === 'credential.revealed' && e.object_id === id)
+			.map((e) => e.details.purpose);
+	}, credential);
+	expect(purposes).toEqual(['copy', 'show']);
 	await page.getByRole('link', { name: 'Audit log' }).click();
-	const rows = page.getByRole('row');
-	for (const row of [rows.nth(1), rows.nth(2)]) {
-		await expect(row).toContainText('Showed or copied a stored credential');
-	}
+	await expect(page.getByText('Showed or copied a stored credential').first()).toBeVisible();
 });
 
 test('the vault keeps folders, fields and icons, and shows what is shared', async ({ page }) => {
@@ -1136,4 +1146,39 @@ test('a vault is recovered with the organisation key once someone else approved'
 	await page.getByRole('searchbox').fill('Bob mail');
 	await expect(page.getByRole('list', { name: 'Search results' })).toContainText(target);
 	await bobs.close();
+});
+
+test('the permission report names what bob reaches and who reaches a folder', async ({ page }) => {
+	await signIn(page);
+	const folder = `E2E report ${run}`;
+	await newFolder(page, folder);
+	await page.evaluate(async (folder) => {
+		const tree = await (await fetch('/api/tree')).json();
+		const id = tree.folders.find((f: { name: string }) => f.name === folder).id;
+		const found = (await (await fetch('/api/directory/principals?q=Bob')).json()) as {
+			sid: string;
+			name: string;
+		}[];
+		const bob = found.find((p) => p.name === 'Bob Helpdesk')!;
+		await fetch('/api/grants', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({
+				object: { kind: 'folder', id },
+				principal_kind: 'user',
+				principal_sid: bob.sid,
+				principal_name: bob.name,
+				role: 'list'
+			})
+		});
+	}, folder);
+
+	await page.getByRole('link', { name: 'Permissions' }).click();
+	await page.getByLabel('Person', { exact: true }).selectOption({ label: 'Bob Helpdesk (bob)' });
+	await expect(
+		page.getByTestId('person-report').getByRole('row').filter({ hasText: folder })
+	).toContainText('See for Bob Helpdesk');
+
+	await page.getByLabel('Folder', { exact: true }).selectOption({ label: folder });
+	await expect(page.getByTestId('folder-report')).toContainText('Bob Helpdesk');
 });
