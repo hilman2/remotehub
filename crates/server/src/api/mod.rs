@@ -13,6 +13,7 @@ mod origin;
 mod personal;
 pub mod problem;
 mod requests;
+mod reveal;
 mod roles;
 mod search;
 mod second_factor;
@@ -99,6 +100,8 @@ pub fn router(state: AppState) -> Router<AppState> {
             put(journal::require_purpose).delete(journal::waive_purpose),
         )
         .route("/credentials", post(catalog::create_credential))
+        .route("/credentials/{id}/reveal", post(reveal::credential))
+        .route("/devices/{id}/reveal", post(reveal::device))
         .route(
             "/credentials/{id}",
             put(catalog::update_credential).delete(catalog::delete_credential),

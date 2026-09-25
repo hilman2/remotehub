@@ -461,5 +461,11 @@
 	"audit_second_factor_removed": "Removed their second factor",
 	"audit_second_factor_reset": "Removed a user's second factor",
 	"audit_second_factor_required": "Asked for a second factor",
-	"audit_second_factor_waived": "No longer asked for a second factor"
+	"audit_second_factor_waived": "No longer asked for a second factor",
+	"reveal_show": "Show",
+	"reveal_hide": "Hide",
+	"reveal_copy": "Copy",
+	"reveal_copied": "Copied. It leaves the clipboard in {seconds} seconds.",
+	"reveal_copy_failed": "The browser did not let remotehub use the clipboard.",
+	"audit_credential_revealed": "Showed or copied a stored credential"
 }

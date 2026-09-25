@@ -461,5 +461,11 @@
 	"audit_second_factor_removed": "Eigenen zweiten Faktor entfernt",
 	"audit_second_factor_reset": "Zweiten Faktor eines Benutzers entfernt",
 	"audit_second_factor_required": "Zweiten Faktor vorgeschrieben",
-	"audit_second_factor_waived": "Zweiten Faktor nicht mehr vorgeschrieben"
+	"audit_second_factor_waived": "Zweiten Faktor nicht mehr vorgeschrieben",
+	"reveal_show": "Anzeigen",
+	"reveal_hide": "Verbergen",
+	"reveal_copy": "Kopieren",
+	"reveal_copied": "Kopiert. In {seconds} Sekunden verschwindet es aus der Zwischenablage.",
+	"reveal_copy_failed": "Der Browser hat remotehub die Zwischenablage nicht erlaubt.",
+	"audit_credential_revealed": "Gespeicherte Zugangsdaten angezeigt oder kopiert"
 }
