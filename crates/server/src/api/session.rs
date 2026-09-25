@@ -271,6 +271,9 @@ pub async fn sign_out(
     if let Some(token) = session::token(&headers)
         && let Some(ended) = session::lookup(&state.db, &token, state.settings.session.idle).await?
     {
+        if ended.kind == "local" {
+            super::accounts::sign_out(&state, &headers).await;
+        }
         let mut tx = state.db.begin().await?;
         session::delete(&mut *tx, &token).await?;
         audit::record(

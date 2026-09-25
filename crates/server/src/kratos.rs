@@ -58,9 +58,20 @@ pub struct Kratos {
     client: Client<HttpConnector, Body>,
 }
 
+/// What Kratos says about the session behind a browser's cookies.
+#[derive(Debug, Clone)]
+pub enum Whoami {
+    /// No session, an expired one, or one of a disabled account.
+    None,
+    /// The account has a second factor this session has not used yet.
+    SecondFactorPending,
+    Session(KratosSession),
+}
+
 /// The Kratos session behind a browser's cookie, as far as remotehub uses it.
 #[derive(Debug, Clone, Deserialize)]
 pub struct KratosSession {
+    pub id: Uuid,
     pub active: bool,
     /// `aal1` after the password, `aal2` after a second factor too.
     pub authenticator_assurance_level: String,
@@ -74,6 +85,17 @@ pub struct Identity {
     #[serde(default)]
     pub state: String,
     pub traits: Traits,
+}
+
+/// An invited account and the one-time code its owner starts with.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Invitation {
+    #[serde(default)]
+    pub identity_id: Uuid,
+    /// remotehub's page where the code is entered (`/account/recovery`).
+    pub recovery_link: String,
+    pub recovery_code: String,
+    pub expires_at: String,
 }
 
 /// What the identity schema (`deploy/kratos/identity.schema.json`) keeps.
@@ -134,9 +156,8 @@ impl Kratos {
             .map_err(|error| KratosError::Unreachable(error.to_string()))
     }
 
-    /// The Kratos session behind the browser's cookies, if there is a valid
-    /// one.
-    pub async fn whoami(&self, headers: &HeaderMap) -> Result<Option<KratosSession>, KratosError> {
+    /// The Kratos session behind the browser's cookies.
+    pub async fn whoami(&self, headers: &HeaderMap) -> Result<Whoami, KratosError> {
         let mut request = Request::builder()
             .method(Method::GET)
             .uri(format!("{}/sessions/whoami", self.public_url))
@@ -149,14 +170,60 @@ impl Kratos {
             .map_err(|error| KratosError::Unreachable(error.to_string()))?;
         let answer = self.send(request).await?;
         match answer.status() {
-            StatusCode::OK => json(answer).await.map(Some),
-            // No session, an expired one, or one that needs a second factor.
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Ok(None),
+            StatusCode::OK => json(answer).await.map(Whoami::Session),
+            StatusCode::UNAUTHORIZED => Ok(Whoami::None),
+            // `session_aal2_required`: `session.whoami.required_aal` is
+            // `highest_available` (deploy/kratos/kratos.yml).
+            StatusCode::FORBIDDEN => Ok(Whoami::SecondFactorPending),
             status => Err(unexpected(status, answer).await),
         }
     }
 
-    /// A request to the admin API with a JSON body, answered with JSON.
+    /// Creates an account for `email` and a one-time code that lets its
+    /// owner set a password and a second factor within `valid_for`.
+    pub async fn invite(
+        &self,
+        email: &str,
+        name: &str,
+        valid_for: Duration,
+    ) -> Result<Invitation, KratosError> {
+        #[derive(Deserialize)]
+        struct Created {
+            id: Uuid,
+        }
+        let created: Created = self
+            .admin(
+                Method::POST,
+                "/admin/identities",
+                Some(serde_json::json!({
+                    "schema_id": "user",
+                    "traits": { "email": email, "name": name },
+                })),
+            )
+            .await?;
+        let mut invitation: Invitation = self
+            .admin(
+                Method::POST,
+                "/admin/recovery/code",
+                Some(serde_json::json!({
+                    "identity_id": created.id,
+                    "expires_in": format!("{}s", valid_for.as_secs()),
+                })),
+            )
+            .await?;
+        invitation.identity_id = created.id;
+        Ok(invitation)
+    }
+
+    /// Ends one Kratos session, as signing out of remotehub does.
+    pub async fn revoke(&self, session: Uuid) -> Result<(), KratosError> {
+        self.admin::<serde_json::Value>(Method::DELETE, &format!("/admin/sessions/{session}"), None)
+            .await
+            .map(|_| ())
+    }
+
+    /// A request to the admin API with a JSON body, answered with JSON
+    /// (`null` for an answer without a body).
     pub async fn admin<T: DeserializeOwned>(
         &self,
         method: Method,
@@ -171,10 +238,17 @@ impl Kratos {
             .body(body.map_or_else(Body::empty, |b| Body::from(b.to_string())))
             .map_err(|error| KratosError::Unreachable(error.to_string()))?;
         let answer = self.send(request).await?;
-        if answer.status().is_success() {
-            json(answer).await
-        } else {
-            Err(unexpected(answer.status(), answer).await)
+        match answer.status() {
+            StatusCode::NO_CONTENT => {
+                serde_json::from_value(serde_json::Value::Null).map_err(|e| {
+                    KratosError::Unexpected {
+                        status: StatusCode::NO_CONTENT,
+                        body: e.to_string(),
+                    }
+                })
+            }
+            status if status.is_success() => json(answer).await,
+            status => Err(unexpected(status, answer).await),
         }
     }
 

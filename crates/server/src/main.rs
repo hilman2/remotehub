@@ -55,6 +55,23 @@ enum Command {
         #[command(subcommand)]
         action: BreakGlassAction,
     },
+    /// Manage local accounts in Ory Kratos (REMOTEHUB_KRATOS_URL).
+    Account {
+        #[command(subcommand)]
+        action: AccountAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum AccountAction {
+    /// Create an account and print the one-time code its owner starts with.
+    /// Administrators are the accounts in REMOTEHUB_ADMIN_ACCOUNTS.
+    Invite {
+        email: String,
+        /// The name remotehub shows; the e-mail address without one.
+        #[arg(long, default_value = "")]
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -92,6 +109,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::BreakGlass { action } => manage_break_glass(action).await,
+        Command::Account { action } => manage_accounts(action).await,
         Command::Connector => {
             let settings = AgentSettings::from_env()?;
             init_tracing(std::env::var("REMOTEHUB_LOG_FORMAT").is_ok_and(|f| f == "json"));
@@ -283,6 +301,66 @@ async fn manage_break_glass(action: BreakGlassAction) -> anyhow::Result<()> {
     }
     println!();
     say(Message::BreakGlassSignIn { url: sign_in_url });
+    Ok(())
+}
+
+/// How long an invitation's code lasts.
+const INVITATION: Duration = Duration::from_secs(48 * 3600);
+
+async fn manage_accounts(action: AccountAction) -> anyhow::Result<()> {
+    let config = Config::from_env()?;
+    let kratos = config
+        .kratos
+        .as_ref()
+        .map(remotehub_server::kratos::Kratos::new)
+        .context("REMOTEHUB_KRATOS_URL is not set: local accounts are off")?;
+    let pool = db::connect(&config.database_url, config.database_password.as_ref())
+        .await
+        .context("cannot connect to the database")?;
+    db::MIGRATOR
+        .run(&pool)
+        .await
+        .context("cannot apply database migrations")?;
+    let AccountAction::Invite { email, name } = action;
+    let email = email.trim().to_lowercase();
+    let invitation = kratos
+        .invite(&email, name.trim(), INVITATION)
+        .await
+        .with_context(|| format!("cannot invite {email}"))?;
+    audit::record(
+        &pool,
+        Entry {
+            actor: Actor {
+                id: None,
+                name: "cli",
+            },
+            action: Action::AccountInvited,
+            object: None,
+            details: serde_json::json!({
+                "email": email, "identity_id": invitation.identity_id,
+            }),
+            address: None,
+        },
+    )
+    .await?;
+    say(Message::AccountInvited {
+        email,
+        expires: invitation.expires_at.clone(),
+    });
+    // The code goes straight to the terminal, like a break-glass password.
+    let locale = cli_locale();
+    println!();
+    println!(
+        "  {} {}",
+        i18n::render(locale, &Message::AccountLinkLabel {}),
+        invitation.recovery_link
+    );
+    println!(
+        "  {} {}",
+        i18n::render(locale, &Message::AccountCodeLabel {}),
+        invitation.recovery_code
+    );
+    println!();
     Ok(())
 }
 

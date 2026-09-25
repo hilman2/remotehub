@@ -1,0 +1,118 @@
+# Ory Kratos for remotehub's local accounts (#103, ADR 0010).
+#
+# Browsers reach Kratos' public API only through remotehub, under
+# /api/auth/; the admin API stays on the internal network. remotehub renders
+# every page itself: the ui_urls below are its routes.
+#
+# What depends on the installation comes from the environment, where Kratos
+# reads every key as an upper-case variable (SERVE_PUBLIC_BASE_URL,
+# SELFSERVICE_FLOWS_LOGIN_UI_URL, …): the URLs, the database (DSN) and the
+# secrets (SECRETS_COOKIE, SECRETS_CIPHER, SECRETS_DEFAULT as JSON lists).
+# The compose files set them; the example.com values here never apply.
+version: v26.2.0
+
+serve:
+  public:
+    base_url: https://remotehub.example.com/api/auth/
+  admin:
+    base_url: http://kratos:4434/
+
+cookies:
+  same_site: Lax
+  path: /
+
+session:
+  lifespan: 12h
+  cookie:
+    name: remotehub_kratos_session
+    persistent: false
+  whoami:
+    # A session without the second factor its account has is refused.
+    # Kratos cannot require that an account has one: remotehub does.
+    required_aal: highest_available
+
+selfservice:
+  default_browser_return_url: https://remotehub.example.com/
+  allowed_return_urls:
+    - https://remotehub.example.com/
+
+  methods:
+    password:
+      enabled: true
+      config:
+        min_password_length: 12
+        identifier_similarity_check_enabled: true
+        # Asks api.pwnedpasswords.com with the first characters of the
+        # password's hash; an installation without internet access goes on.
+        haveibeenpwned_enabled: true
+        ignore_network_errors: true
+    totp:
+      enabled: true
+      config:
+        issuer: remotehub
+    lookup_secret:
+      enabled: true
+    # One-time codes for recovery only. An invitation's code gets its own,
+    # longer lifespan from remotehub.
+    code:
+      enabled: true
+      passwordless_enabled: false
+      mfa_enabled: false
+      config:
+        lifespan: 15m
+    link:
+      enabled: false
+    # The e-mail address is the account's identifier: administrators change it.
+    profile:
+      enabled: false
+
+  flows:
+    error:
+      ui_url: https://remotehub.example.com/sign-in
+    login:
+      ui_url: https://remotehub.example.com/sign-in
+      lifespan: 10m
+    # Accounts come from invitations only.
+    registration:
+      enabled: false
+    settings:
+      ui_url: https://remotehub.example.com/account
+      privileged_session_max_age: 15m
+      required_aal: highest_available
+    recovery:
+      enabled: true
+      use: code
+      ui_url: https://remotehub.example.com/account/recovery
+      notify_unknown_recipients: false
+    verification:
+      enabled: false
+    logout:
+      after:
+        default_browser_return_url: https://remotehub.example.com/sign-in
+
+security:
+  account_enumeration:
+    mitigate: true
+
+hashers:
+  algorithm: argon2
+
+ciphers:
+  algorithm: xchacha20-poly1305
+
+identity:
+  default_schema_id: user
+  schemas:
+    - id: user
+      url: file:///etc/config/kratos/identity.schema.json
+
+courier:
+  smtp:
+    connection_uri: smtps://mail.example.com:465/
+    from_address: remotehub@example.com
+    from_name: remotehub
+
+log:
+  level: info
+  format: json
+  leak_sensitive_values: false
