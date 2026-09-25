@@ -56,6 +56,11 @@
 	import RevealSecret from '$lib/catalog/RevealSecret.svelte';
 	import CredentialExtras from '$lib/catalog/CredentialExtras.svelte';
 	import EntryDetails from '$lib/vault/EntryDetails.svelte';
+	import FileDown from '@lucide/svelte/icons/file-down';
+	import FileUp from '@lucide/svelte/icons/file-up';
+	import KdbxForm from '$lib/vault/KdbxForm.svelte';
+	import { writeKdbx, type KdbxEntry } from '$lib/vault/kdbx';
+	import { exportFolder, importInto } from '$lib/vault/shared-kdbx';
 	import {
 		AUTH_MODE_LABELS,
 		CREDENTIAL_KIND_LABELS,
@@ -77,7 +82,8 @@
 		| { type: 'credential'; folderId: string; credential: Credential | null }
 		| { type: 'grants'; kind: ObjectKind; id: string; name: string }
 		| { type: 'delete'; kind: ObjectKind; id: string; name: string }
-		| { type: 'request'; kind: ObjectKind; id: string; name: string; role: Role };
+		| { type: 'request'; kind: ObjectKind; id: string; name: string; role: Role }
+		| { type: 'kdbx'; mode: 'import' | 'export'; folder: Folder };
 
 	let tree = $state<Tree | null>(null);
 	let connectors = $state<Connector[]>([]);
@@ -177,9 +183,50 @@
 
 	function show(next: Open) {
 		error = null;
+		kdbxResult = null;
 		open = next;
 		if (next.type === 'folder') folderName = next.folder?.name ?? '';
 		dialogOpen = true;
+	}
+
+	let kdbxBusy = $state(false);
+	let kdbxResult = $state<string | null>(null);
+
+	/** Creates what a KeePass file holds below `into` (#99). */
+	async function importKdbx(into: Folder, entries: KdbxEntry[]) {
+		if (!tree) return;
+		kdbxBusy = true;
+		const result = await importInto(tree, into.id, entries);
+		kdbxBusy = false;
+		kdbxResult = m.kdbx_imported({ count: result.created });
+		error =
+			result.failed.length > 0 ? m.kdbx_not_imported({ names: result.failed.join(', ') }) : null;
+		await load();
+	}
+
+	/** Writes the folder into a new KeePass file and hands it over (#99). */
+	async function exportKdbx(from: Folder, password: string) {
+		if (!tree) return;
+		kdbxBusy = true;
+		error = null;
+		const result = await exportFolder(tree, from.id);
+		if (!result.ok) {
+			kdbxBusy = false;
+			error =
+				'missing' in result
+					? m.kdbx_missing_reveal({ name: result.missing })
+					: m.kdbx_export_failed({ name: result.failed });
+			return;
+		}
+		const file = await writeKdbx(result.entries, password, from.name);
+		kdbxBusy = false;
+		const url = URL.createObjectURL(new Blob([file], { type: 'application/octet-stream' }));
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = `${from.name}.kdbx`;
+		link.click();
+		setTimeout(() => URL.revokeObjectURL(url), 10_000);
+		kdbxResult = m.kdbx_exported({ count: result.entries.length });
 	}
 
 	/** Runs a change; on success reloads the tree and closes the dialog. */
@@ -313,6 +360,8 @@
 				return m.catalog_delete();
 			case 'request':
 				return m.request_title({ name: open.name });
+			case 'kdbx':
+				return open.mode === 'import' ? m.kdbx_import() : m.kdbx_export();
 			default:
 				return '';
 		}
@@ -511,11 +560,31 @@
 					{@render requestAccess('folder', folder.id, folder.name, folder.role)}
 					<SettingsMenu
 						label={m.catalog_settings()}
-						items={settings('folder', folder.id, folder.name, folder.role, {
-							label: m.catalog_rename(),
-							icon: Pencil,
-							onselect: () => show({ type: 'folder', parent: folder.parent_id, folder })
-						})}
+						items={[
+							...settings('folder', folder.id, folder.name, folder.role, {
+								label: m.catalog_rename(),
+								icon: Pencil,
+								onselect: () => show({ type: 'folder', parent: folder.parent_id, folder })
+							}),
+							...(allows(folder.role, 'edit')
+								? [
+										{
+											label: m.kdbx_import(),
+											icon: FileUp,
+											onselect: () => show({ type: 'kdbx', mode: 'import', folder })
+										}
+									]
+								: []),
+							...(allows(folder.role, 'reveal')
+								? [
+										{
+											label: m.kdbx_export(),
+											icon: FileDown,
+											onselect: () => show({ type: 'kdbx', mode: 'export', folder })
+										}
+									]
+								: [])
+						]}
 					/>
 				</div>
 			</div>
@@ -808,6 +877,17 @@
 					onsubmit={saveCredential}
 					oncancel={() => (dialogOpen = false)}
 				/>
+			{:else if open?.type === 'kdbx'}
+				{@const target = open}
+				<KdbxForm
+					mode={target.mode}
+					busy={kdbxBusy}
+					onimport={(entries) => importKdbx(target.folder, entries)}
+					onexport={(password) => exportKdbx(target.folder, password)}
+				/>
+				{#if kdbxResult}
+					<p class="mt-3 text-sm" role="status">{kdbxResult}</p>
+				{/if}
 			{:else if open?.type === 'grants'}
 				<Grants kind={open.kind} id={open.id} />
 			{:else if open?.type === 'request'}
