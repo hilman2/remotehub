@@ -10,6 +10,7 @@
 //! not zero-knowledge: whoever holds the master key and the database can read
 //! them. Protect the key file accordingly.
 
+pub mod escrow;
 mod keyring;
 
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
@@ -18,7 +19,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-pub use keyring::{FileKeyring, generate_key_line};
+pub use keyring::{FILE_KEYRING_ID, FileKeyring, generate_key_line};
 
 /// Secrets sealed with a key the server does not keep — for example one that
 /// lives only in the user's cookie. The context (e.g. a session's token hash)
@@ -90,6 +91,9 @@ pub enum VaultError {
     UnknownKey(String, i32),
     #[error("key file: {0}")]
     KeyFile(String),
+    /// Not an uncompressed point on P-256.
+    #[error("not a P-256 public key")]
+    InvalidPublicKey,
 }
 
 /// Source of master keys: wraps and unwraps data keys. Keys have an id (the
@@ -97,6 +101,12 @@ pub enum VaultError {
 pub trait KeyProvider: Send + Sync {
     fn current(&self) -> (&str, i32);
     fn master_key(&self, id: &str, version: i32) -> Result<&Key, VaultError>;
+
+    /// Every key it holds, for keeping them for the organisation recovery
+    /// key (#96); the current one alone unless a provider knows more.
+    fn all(&self) -> Vec<(&str, i32)> {
+        vec![self.current()]
+    }
 }
 
 impl<T: KeyProvider + ?Sized> KeyProvider for Box<T> {
@@ -106,6 +116,10 @@ impl<T: KeyProvider + ?Sized> KeyProvider for Box<T> {
 
     fn master_key(&self, id: &str, version: i32) -> Result<&Key, VaultError> {
         (**self).master_key(id, version)
+    }
+
+    fn all(&self) -> Vec<(&str, i32)> {
+        (**self).all()
     }
 }
 

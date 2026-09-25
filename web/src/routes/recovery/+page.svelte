@@ -204,6 +204,17 @@
 								{m.recovery_key_made({ name: key.created_by_name, time: at(key.created_at) })}
 							</span>
 							<span class="text-ink-2">{m.recovery_key_vaults({ count: key.vaults })}</span>
+							{#if key.master_key}
+								<span class="flex items-center gap-1 text-ink-2">
+									<ShieldCheck size={14} class="text-ok" aria-hidden="true" />
+									{m.recovery_key_master()}
+								</span>
+							{:else}
+								<span class="flex items-center gap-1 text-ink-2">
+									<TriangleAlert size={14} class="text-warning" aria-hidden="true" />
+									{m.recovery_key_no_master()}
+								</span>
+							{/if}
 							{#if index === 0}
 								<span class="flex items-center gap-1 text-ink-2">
 									<CircleCheck size={14} class="text-ok" aria-hidden="true" />

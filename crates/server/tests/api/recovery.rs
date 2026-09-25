@@ -1,16 +1,20 @@
-//! The organisation recovery key (#95, ADR 0009): alice administers, bob
-//! owns a vault, olaf becomes a security officer. The server never sees a
-//! private key, so the bytes here only have to look right.
+//! The organisation recovery key (#95, #96, ADR 0009): alice administers,
+//! bob owns a vault, olaf becomes a security officer.
 
 use axum::Router;
 use axum::http::StatusCode;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use remotehub_server::app;
+use std::sync::Arc;
+
+use remotehub_server::{AppState, app, escrow as kept};
+use remotehub_vault::{FileKeyring, KeyProvider, Vault, escrow, generate_key_line};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
-use crate::common::{ALICE_SID, OLAF_SID, Response, authed, send, sign_in_request, state};
+use crate::common::{
+    ALICE_SID, FakeDirectory, OLAF_SID, Response, authed, send, settings, sign_in_request, state,
+};
 
 async fn token(app: &Router, user: &str) -> String {
     send(app, sign_in_request(user, "right"))
@@ -23,11 +27,22 @@ async fn call(app: &Router, token: &str, method: &str, uri: &str, body: Option<V
     send(app, authed(method, uri, body, token)).await
 }
 
-/// An uncompressed P-256 point, as far as the server can tell.
+/// 65 bytes that look like an uncompressed point; the server does not check
+/// the ephemeral keys in vault wraps, only the browser that opens them.
 fn point(fill: u8) -> String {
     let mut bytes = vec![fill; 65];
     bytes[0] = 4;
     STANDARD.encode(bytes)
+}
+
+/// The private key `[fill; 32]`: a scalar for any small `fill`.
+fn private(fill: u8) -> [u8; 32] {
+    [fill; 32]
+}
+
+/// The recovery key belonging to `private(fill)`.
+fn public(fill: u8) -> String {
+    STANDARD.encode(escrow::public_key_of(&private(fill)).unwrap())
 }
 
 const WRAPPED: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJw==";
@@ -41,7 +56,7 @@ async fn unlock(app: &Router, token: &str, kind: &str, params: Value) -> Respons
 }
 
 async fn new_key(app: &Router, admin: &str, fill: u8) -> String {
-    let body = json!({ "public_key": point(fill) });
+    let body = json!({ "public_key": public(fill) });
     let created = call(app, admin, "POST", "/api/recovery-keys", Some(body)).await;
     assert_eq!(created.status, StatusCode::CREATED, "{}", created.json());
     created.json()["id"].as_str().unwrap().to_owned()
@@ -81,7 +96,7 @@ async fn a_vault_is_wrapped_for_the_newest_key_and_keeps_that_wrap(pool: PgPool)
     assert_eq!(early.json()["params"]["field"], "params");
 
     // Only administrators handle keys.
-    let body = json!({ "public_key": point(1) });
+    let body = json!({ "public_key": public(1) });
     for (method, uri) in [
         ("GET", "/api/recovery-keys"),
         ("POST", "/api/recovery-keys"),
@@ -89,7 +104,8 @@ async fn a_vault_is_wrapped_for_the_newest_key_and_keeps_that_wrap(pool: PgPool)
         let response = call(&app, &bob, method, uri, Some(body.clone())).await;
         assert_eq!(response.status, StatusCode::FORBIDDEN, "{method} {uri}");
     }
-    let bent = json!({ "public_key": STANDARD.encode([4u8; 64]) });
+    // 65 bytes, but not a point on the curve.
+    let bent = json!({ "public_key": point(1) });
     let refused = call(&app, &alice, "POST", "/api/recovery-keys", Some(bent)).await;
     assert_eq!(refused.json()["params"]["field"], "public_key");
 
@@ -97,7 +113,7 @@ async fn a_vault_is_wrapped_for_the_newest_key_and_keeps_that_wrap(pool: PgPool)
     let vault = call(&app, &bob, "GET", "/api/personal/vault", None).await;
     assert_eq!(
         vault.json()["organisation_key"],
-        json!({ "id": first, "public_key": point(1) })
+        json!({ "id": first, "public_key": public(1) })
     );
     let short = json!({ "key_id": first, "ephemeral": STANDARD.encode([4u8; 33]) });
     assert_eq!(
@@ -281,7 +297,7 @@ async fn a_recovery_needs_a_security_officer_who_did_not_ask(pool: PgPool) {
     );
     let opened = call(&app, &alice, "GET", &open, None).await.json();
     assert_eq!(opened["unlock"]["wrapped_key"], WRAPPED);
-    assert_eq!(opened["unlock"]["public_key"], point(1));
+    assert_eq!(opened["unlock"]["public_key"], public(1));
     assert_eq!(opened["unlock"]["params"]["key_id"], key.as_str());
     assert_eq!(opened["entries"][0]["ciphertext"], CIPHERTEXT);
     let attachment = format!("/api/vault-recoveries/{id}/attachments/{ENTRY}");
@@ -399,4 +415,73 @@ async fn an_approval_holds_for_a_day(pool: PgPool) {
         .await
         .json();
     assert_eq!(listed, json!([]));
+}
+
+/// A key file with the master key versions `1..=versions`, as after
+/// rotations.
+fn keyring(versions: i32) -> String {
+    (1..=versions)
+        .map(|v| generate_key_line(v).as_str().to_owned())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// #96: the master keys are kept for the newest recovery key, and its
+/// private key alone brings back the key file.
+#[sqlx::test(migrations = "../../migrations")]
+async fn the_master_key_file_comes_back_with_the_recovery_key(pool: PgPool) {
+    let file = keyring(2);
+    let vault = Vault::new(Box::new(FileKeyring::parse(&file).unwrap()) as Box<dyn KeyProvider>);
+    let app = app(
+        AppState::new(
+            pool.clone(),
+            Some(Arc::new(FakeDirectory)),
+            settings(),
+            vault,
+        ),
+        None,
+    );
+    let alice = token(&app, "alice").await;
+    let first = new_key(&app, &alice, 1).await;
+    let keys = call(&app, &alice, "GET", "/api/recovery-keys", None)
+        .await
+        .json();
+    assert_eq!(keys["keys"][0]["master_key"], true);
+
+    let recovered = kept::recover(&pool, &private(1)).await.unwrap();
+    let original = FileKeyring::parse(&file).unwrap();
+    let back = FileKeyring::parse(&recovered).unwrap();
+    assert_eq!(back.all(), [("file", 1), ("file", 2)]);
+    for version in [1, 2] {
+        assert_eq!(
+            back.master_key("file", version).unwrap(),
+            original.master_key("file", version).unwrap()
+        );
+    }
+    let stranger = kept::recover(&pool, &private(3)).await.unwrap_err();
+    assert!(
+        stranger.to_string().contains("no recovery key"),
+        "{stranger}"
+    );
+
+    // A version added to the file is kept at the next start, once.
+    let rotated =
+        Vault::new(Box::new(FileKeyring::parse(&keyring(3)).unwrap()) as Box<dyn KeyProvider>);
+    assert_eq!(kept::keep(&pool, &rotated).await.unwrap(), 1);
+    assert_eq!(kept::keep(&pool, &rotated).await.unwrap(), 0);
+
+    // A new recovery key holds the master keys too; the old one keeps them
+    // until it is deleted.
+    new_key(&app, &alice, 2).await;
+    assert!(kept::recover(&pool, &private(2)).await.is_ok());
+    let deleted = call(
+        &app,
+        &alice,
+        "DELETE",
+        &format!("/api/recovery-keys/{first}"),
+        None,
+    )
+    .await;
+    assert_eq!(deleted.status, StatusCode::NO_CONTENT);
+    assert!(kept::recover(&pool, &private(1)).await.is_err());
 }
