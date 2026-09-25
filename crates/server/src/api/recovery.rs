@@ -72,6 +72,8 @@ pub struct RecoveryKey {
     created_at: String,
     /// How many vaults are wrapped for it.
     vaults: i64,
+    /// Whether it holds the master key in use (#96).
+    master_key: bool,
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -93,13 +95,18 @@ pub struct Keys {
 
 pub async fn keys(State(state): State<AppState>, session: Session) -> Result<Json<Keys>, Problem> {
     require_admin(&state, &session)?;
+    let (kek_id, kek_version) = state.vault.keys().current();
     let keys = sqlx::query_as(
         r#"SELECT k.id, k.public_key, k.created_by_name,
                   to_char(k.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
                   (SELECT count(*) FROM personal_vault_unlocks u
-                   WHERE u.kind = 'organisation' AND u.params->>'key_id' = k.id::text) AS vaults
+                   WHERE u.kind = 'organisation' AND u.params->>'key_id' = k.id::text) AS vaults,
+                  EXISTS (SELECT 1 FROM master_key_escrow e WHERE e.recovery_key_id = k.id
+                          AND e.kek_id = $1 AND e.kek_version = $2) AS master_key
            FROM recovery_keys k ORDER BY k.created_at DESC, k.id"#,
     )
+    .bind(kek_id)
+    .bind(kek_version)
     .fetch_all(&state.db)
     .await?;
     let vaults = sqlx::query_as(
@@ -131,9 +138,7 @@ pub async fn create_key(
 ) -> Result<(StatusCode, Json<Value>), Problem> {
     require_admin(&state, &session)?;
     let input = body(input)?;
-    // An uncompressed P-256 point; the browsers refuse one off the curve
-    // when they wrap for it.
-    if input.public_key.len() != 65 || input.public_key[0] != 4 {
+    if !remotehub_vault::escrow::is_public_key(&input.public_key) {
         return Err(invalid("public_key"));
     }
     let mut tx = state.db.begin().await?;
@@ -157,6 +162,11 @@ pub async fn create_key(
     )
     .await?;
     tx.commit().await?;
+    // The key exists either way; a master key not kept now is kept at the
+    // next start, and the page shows which keys hold it.
+    if let Err(error) = crate::escrow::keep(&state.db, &state.vault).await {
+        tracing::error!(%error, "cannot keep the master key for the new recovery key");
+    }
     Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
 }
 

@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -14,9 +15,10 @@ use remotehub_server::audit::{Action, Actor, Entry};
 use remotehub_server::auth::Authenticator;
 use remotehub_server::config::{self, Config};
 use remotehub_server::connector_agent::{self, AgentSettings};
-use remotehub_server::{AppState, Settings, VERSION, app, audit, break_glass, db, session};
+use remotehub_server::{AppState, Settings, VERSION, app, audit, break_glass, db, escrow, session};
 use remotehub_vault::{DynVault, FileKeyring, KeyProvider, Vault, generate_key_line};
 use tracing_subscriber::EnvFilter;
+use zeroize::Zeroizing;
 
 /// remotehub: browser-based remote access and credential vault.
 /// Configuration comes from REMOTEHUB_* environment variables.
@@ -42,6 +44,11 @@ enum Command {
     GenerateSshCa,
     /// Recompute the audit log's hash chain; exits with 1 if it is broken.
     VerifyAudit,
+    /// Print the master key file, recovered from the database with the
+    /// private key of the organisation recovery key, as printed for the
+    /// safe. Reads that text from standard input; needs only
+    /// REMOTEHUB_DATABASE_URL.
+    RecoverMasterKey,
     /// Ask the server running in this container for /api/health; exits with
     /// 1 unless it answers 200. The image's health check: it has no shell
     /// and no curl.
@@ -100,6 +107,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::VerifyAudit => verify_audit().await,
+        Command::RecoverMasterKey => recover_master_key().await,
         Command::Healthcheck => {
             let listen = config::listen_address(&|name| std::env::var(name).ok())?;
             if let Err(error) = health::probe(listen).await {
@@ -139,6 +147,12 @@ async fn serve() -> anyhow::Result<()> {
         .run(&pool)
         .await
         .context("cannot apply database migrations")?;
+    // A master key added to the file since the last start (#96).
+    match escrow::keep(&pool, &vault).await {
+        Ok(0) => {}
+        Ok(sealed) => tracing::info!(sealed, "master keys kept for the recovery key"),
+        Err(error) => tracing::error!(%error, "cannot keep the master keys for the recovery key"),
+    }
 
     let ldap = match config.ldap {
         Some(ldap) => {
@@ -424,6 +438,24 @@ async fn verify_audit() -> anyhow::Result<()> {
             std::process::exit(1);
         }
     }
+}
+
+async fn recover_master_key() -> anyhow::Result<()> {
+    let (url, password) = config::database(&|name| std::env::var(name).ok())?;
+    let pool = db::connect(&url, password.as_ref())
+        .await
+        .context("cannot connect to the database")?;
+    let mut text = Zeroizing::new(String::new());
+    std::io::stdin()
+        .read_to_string(&mut text)
+        .context("cannot read the private key from standard input")?;
+    let private_key = remotehub_vault::escrow::parse_printed(&text)
+        .context("that is not a private key as remotehub prints it")?;
+    let file = escrow::recover(&pool, &private_key).await?;
+    // Straight to standard output, like `generate-key`: redirect it into
+    // the master key file.
+    print!("{}", file.as_str());
+    Ok(())
 }
 
 fn load_vault(path: &Path) -> anyhow::Result<DynVault> {

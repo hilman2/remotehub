@@ -1047,6 +1047,10 @@ test('a vault is recovered with the organisation key once someone else approved'
 	const keyFile = await (await downloading).path();
 	const printed = (await dialog.getByTestId('organisation-private-key').innerText()).trim();
 	await dialog.getByRole('button', { name: 'I have kept it safe' }).click();
+	// The server keeps its master key for the new key at once (#96).
+	await expect(
+		page.getByRole('listitem').filter({ hasText: 'Current' }).getByText('Holds the master key')
+	).toBeVisible();
 
 	// bob's vault is wrapped for it as soon as it is open.
 	const bobs = await browser.newContext();

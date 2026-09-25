@@ -31,6 +31,10 @@ master key would be enough, and the end-to-end encryption would be a label.
     through the normal API.
 - **Rotation:** a new key pair; vaults are wrapped for it at their next unlock. An old key can be deleted
   once no vault depends on it.
+- **The master key too (#96).** The server seals every master key version for the newest recovery key
+  (ECDH P-256, HKDF-SHA-256, XChaCha20-Poly1305), at startup and when a key is created. A database backup and
+  the printed private key restore the key file with `remotehub recover-master-key`: one secret to keep safe
+  instead of two.
 
 ## Consequences
 

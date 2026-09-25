@@ -117,8 +117,7 @@ impl Config {
         let required = |name: &'static str| setting(name)?.ok_or(ConfigError::Missing(name));
 
         let listen = listen_address(&lookup)?;
-        let database_url = required("REMOTEHUB_DATABASE_URL")?;
-        let database_password = setting("REMOTEHUB_DATABASE_PASSWORD")?.map(SecretString::from);
+        let (database_url, database_password) = database(&lookup)?;
         let web_dir = setting("REMOTEHUB_WEB_DIR")?.map(PathBuf::from);
 
         let log_json = match setting("REMOTEHUB_LOG_FORMAT")?.as_deref() {
@@ -296,6 +295,17 @@ impl Config {
 
 /// The address the server binds to (`REMOTEHUB_LISTEN`). The health check
 /// reads it alone, without the settings a running server needs.
+/// The database's URL and password alone, for a command that needs nothing
+/// else: the recovery of a lost master key file (#96).
+pub fn database(
+    lookup: &impl Fn(&str) -> Option<String>,
+) -> Result<(String, Option<SecretString>), ConfigError> {
+    let url = read_setting(lookup, "REMOTEHUB_DATABASE_URL")?
+        .ok_or(ConfigError::Missing("REMOTEHUB_DATABASE_URL"))?;
+    let password = read_setting(lookup, "REMOTEHUB_DATABASE_PASSWORD")?.map(SecretString::from);
+    Ok((url, password))
+}
+
 pub fn listen_address(lookup: &impl Fn(&str) -> Option<String>) -> Result<SocketAddr, ConfigError> {
     parse_or(
         "REMOTEHUB_LISTEN",
