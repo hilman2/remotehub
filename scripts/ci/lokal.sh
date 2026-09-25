@@ -233,8 +233,10 @@ start_lab() { # tools
 
 # User interface: types, formatting and lint, tests (including the
 # translation guards) and the static build. The messages are compiled once;
-# then all four checks run in parallel — vitest and the build leave the
-# compiled messages alone (PARAGLIDE_PRECOMPILED, see web/vite.config.ts).
+# lint runs beside everything; vitest and the build follow the types in
+# parallel. Both load SvelteKit's Vite plugin, which writes .svelte-kit
+# anew while svelte-check reads it (#132). They leave the compiled messages
+# alone (PARAGLIDE_PRECOMPILED, see web/vite.config.ts).
 # The lockfile's packages were checked against minimumReleaseAge when they
 # were added, so the install does not ask the registry again.
 # The pnpm store stays between runs in a volume without a label.
@@ -259,8 +261,8 @@ part_web() { # tools
           echo "FAILED $((SECONDS - start))s" >"/tmp/$name.result"
         fi
       }
-      step svelte-check pnpm exec svelte-check --tsconfig ./tsconfig.json --fail-on-warnings &
       step lint pnpm lint &
+      step svelte-check pnpm exec svelte-check --tsconfig ./tsconfig.json --fail-on-warnings
       step vitest pnpm exec vitest --run &
       step build pnpm exec vite build &
       wait
