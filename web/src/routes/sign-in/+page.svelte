@@ -1,5 +1,6 @@
 <script lang="ts">
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import Fingerprint from '@lucide/svelte/icons/fingerprint';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import LogIn from '@lucide/svelte/icons/log-in';
 	import { goto } from '$app/navigation';
@@ -10,11 +11,14 @@
 	import ProtocolChip from '$lib/catalog/ProtocolChip.svelte';
 	import AuthenticatorSetup from '$lib/components/AuthenticatorSetup.svelte';
 	import Logo from '$lib/components/Logo.svelte';
+	import { getCredential, webauthnAvailable } from '$lib/kratos/webauthn';
 	import {
 		endSession,
 		loadFlow,
 		messages,
+		offers,
 		startFlow,
+		value,
 		submitFlow,
 		type Flow,
 		type FlowResult,
@@ -65,6 +69,49 @@
 			}
 		});
 	});
+
+	/**
+	 * Signs in with a passkey instead of the password (#112). The account's
+	 * second factor follows as after the password.
+	 */
+	async function signInWithPasskey() {
+		busy = true;
+		error = null;
+		texts = [];
+		await endSession();
+		const started = await startFlow('login');
+		if (started.kind !== 'flow') {
+			await follow(started);
+			return;
+		}
+		let passkey: string;
+		try {
+			passkey = await getCredential(String(value(started.flow, 'passkey_challenge')));
+		} catch {
+			busy = false;
+			error = m.passkey_failed();
+			return;
+		}
+		await follow(await submitFlow(started.flow, { method: 'passkey', passkey_login: passkey }));
+	}
+
+	/** The second factor with a security key or passkey instead of the app's code. */
+	async function secondWithKey() {
+		if (!second) return;
+		busy = true;
+		error = null;
+		let key: string;
+		try {
+			key = await getCredential(String(value(second, 'webauthn_login_trigger')));
+		} catch {
+			busy = false;
+			error = m.passkey_failed();
+			return;
+		}
+		// Kratos wants the identifier back, which the flow names itself.
+		const identifier = value(second, 'identifier');
+		await follow(await submitFlow(second, { method: 'webauthn', webauthn_login: key, identifier }));
+	}
 
 	/**
 	 * Signs in through an OpenID Connect provider (#109). The browser leaves
@@ -280,6 +327,17 @@
 						<LogIn size={18} aria-hidden="true" />
 						{busy ? m.sign_in_busy() : m.sign_in_confirm()}
 					</button>
+					{#if offers(second, 'webauthn_login_trigger') && webauthnAvailable()}
+						<button
+							type="button"
+							disabled={busy}
+							class="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-line-strong bg-surface font-medium hover:bg-surface-2 disabled:opacity-60"
+							onclick={secondWithKey}
+						>
+							<Fingerprint size={18} aria-hidden="true" />
+							{m.sign_in_use_key()}
+						</button>
+					{/if}
 					<button
 						type="button"
 						class="self-center text-sm text-ink-3 hover:text-ink hover:underline"
@@ -391,13 +449,24 @@
 						</a>
 					{/if}
 				</form>
-				{#if methods.local && methods.providers.length > 0}
+				{#if methods.local && (methods.providers.length > 0 || webauthnAvailable())}
 					<div class="flex items-center gap-3 text-sm text-ink-3">
 						<span class="h-px flex-1 bg-line"></span>
 						{m.sign_in_or()}
 						<span class="h-px flex-1 bg-line"></span>
 					</div>
 					<div class="flex flex-col gap-2">
+						{#if webauthnAvailable()}
+							<button
+								type="button"
+								disabled={busy}
+								class="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-line-strong bg-surface font-medium hover:bg-surface-2 disabled:opacity-60"
+								onclick={signInWithPasskey}
+							>
+								<Fingerprint size={18} aria-hidden="true" />
+								{m.sign_in_passkey()}
+							</button>
+						{/if}
 						{#each methods.providers as provider (provider.id)}
 							<button
 								type="button"

@@ -119,6 +119,11 @@ services:
       SECRETS_COOKIE: '["dev-cookie-secret-not-for-production"]'
       SECRETS_CIPHER: '["dev-cipher-secret-32-characters!"]'
       SECRETS_DEFAULT: '["dev-default-secret-not-for-production"]'
+      # Passkeys and security keys (#112) belong to the origin people open.
+      SELFSERVICE_METHODS_WEBAUTHN_CONFIG_RP_ID: localhost
+      SELFSERVICE_METHODS_WEBAUTHN_CONFIG_RP_ORIGINS: '["http://localhost:5180"]'
+      SELFSERVICE_METHODS_PASSKEY_CONFIG_RP_ID: localhost
+      SELFSERVICE_METHODS_PASSKEY_CONFIG_RP_ORIGINS: '["http://localhost:5180"]'
       # The lab's OpenID Connect provider (deploy/testlab/oidc, #109).
       SELFSERVICE_METHODS_OIDC_ENABLED: "true"
       SELFSERVICE_METHODS_OIDC_CONFIG_PROVIDERS: >-

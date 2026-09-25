@@ -52,6 +52,26 @@ selfservice:
         issuer: remotehub
     lookup_secret:
       enabled: true
+    # A security key or passkey as the second factor (#112). The relying
+    # party is the origin people open: SELFSERVICE_METHODS_WEBAUTHN_CONFIG_RP_*.
+    webauthn:
+      enabled: true
+      config:
+        passwordless: false
+        rp:
+          display_name: remotehub
+          id: remotehub.example.com
+          origins:
+            - https://remotehub.example.com
+    # Signing in with a passkey alone, without the password (#112).
+    passkey:
+      enabled: true
+      config:
+        rp:
+          display_name: remotehub
+          id: remotehub.example.com
+          origins:
+            - https://remotehub.example.com
     # One-time codes for recovery only. An invitation's code gets its own,
     # longer lifespan from remotehub.
     code:

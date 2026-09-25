@@ -158,6 +158,9 @@ through remotehub. Its settings are in `kratos/kratos.yml`; database and secrets
 - **Second factor:** every local account sets up an authenticator app before its first session, and can
   create recovery codes under *My account*. A lost authenticator app takes a *New sign-in code* too: it
   removes the second factor, and the person sets up a new one with the code.
+- **Passkeys:** under *My account*, a passkey (Touch ID, Face ID, Windows Hello, a security key) signs in
+  instead of the password, and a security key can stand in for the authenticator app's code. Passkeys
+  belong to `REMOTEHUB_HOST` in `.env`: changing it later makes every passkey useless.
 - **Backups:** Kratos' database sits next to remotehub's; see [Back up and restore](#back-up-and-restore).
 
 ## Sign in with Entra ID, Google or GitHub

@@ -302,3 +302,42 @@ test('someone the provider knows and remotehub does not stays out', async ({ pag
 	const me = await page.evaluate(async () => (await fetch('/api/session')).status);
 	expect(me).toBe(401);
 });
+
+test('a passkey takes the password’s place and a security key the app’s', async ({ page }) => {
+	const email = address('passkey');
+	const password = `Passkey-Passw0rd-${run}`;
+	await onboard(page, email, password, 'Pia Passkey');
+	// A platform authenticator that keeps passkeys and confirms the person,
+	// as Touch ID does.
+	const cdp = await page.context().newCDPSession(page);
+	await cdp.send('WebAuthn.enable');
+	await cdp.send('WebAuthn.addVirtualAuthenticator', {
+		options: {
+			protocol: 'ctap2',
+			transport: 'internal',
+			hasResidentKey: true,
+			hasUserVerification: true,
+			isUserVerified: true,
+			automaticPresenceSimulation: true
+		}
+	});
+
+	await page.getByRole('link', { name: /Pia Passkey/ }).click();
+	const passkeys = page.getByRole('region', { name: 'Passkeys' });
+	await passkeys.getByRole('button', { name: 'Add a passkey' }).click();
+	await expect(passkeys.getByRole('button', { name: /^Remove / })).toHaveCount(1);
+	const keys = page.getByRole('region', { name: 'Security keys' });
+	await keys.getByLabel('Name of the key').fill('Desk key');
+	await keys.getByRole('button', { name: 'Add a security key' }).click();
+	await expect(keys.getByRole('button', { name: 'Remove Desk key' })).toBeVisible();
+
+	// No password, no code: the passkey, then the key as the second factor.
+	await signOut(page);
+	await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
+	await page.getByRole('button', { name: 'Use a security key or passkey' }).click();
+	await expect(page.getByRole('link', { name: /Pia Passkey/ })).toBeVisible();
+
+	await page.getByRole('link', { name: /Pia Passkey/ }).click();
+	await keys.getByRole('button', { name: 'Remove Desk key' }).click();
+	await expect(keys.getByRole('button', { name: /^Remove / })).toHaveCount(0);
+});

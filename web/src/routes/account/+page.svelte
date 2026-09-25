@@ -17,12 +17,14 @@
 		offers,
 		providers,
 		startFlow,
+		value,
 		submitFlow,
 		type Flow,
 		type FlowResult,
 		type UiText
 	} from '$lib/kratos/flow';
 	import Messages from '$lib/kratos/Messages.svelte';
+	import { createCredential, webauthnAvailable } from '$lib/kratos/webauthn';
 	import TotpSetup from '$lib/kratos/TotpSetup.svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { session, signOut } from '$lib/session.svelte';
@@ -43,6 +45,47 @@
 		const id = new URLSearchParams(location.search).get('flow');
 		(id ? loadFlow('settings', id) : startFlow('settings')).then(follow);
 	});
+
+	/** The passkeys or security keys the flow offers to remove (#112). */
+	function keys(name: 'passkey_remove' | 'webauthn_remove') {
+		return (flow?.ui.nodes ?? [])
+			.filter((n) => n.attributes.name === name)
+			.map((n) => {
+				const context = n.meta?.label?.context ?? {};
+				return { id: String(n.attributes.value), name: String(context.display_name ?? '') };
+			});
+	}
+	const passkeys = $derived(keys('passkey_remove'));
+	const securityKeys = $derived(keys('webauthn_remove'));
+	let keyName = $state('');
+
+	/** Creates a passkey or security key with the flow's options and saves it. */
+	async function addKey(kind: 'passkey' | 'webauthn') {
+		if (!flow) return;
+		error = null;
+		let credential: string;
+		try {
+			credential = await createCredential(
+				String(
+					value(flow, kind === 'passkey' ? 'passkey_create_data' : 'webauthn_register_trigger')
+				)
+			);
+		} catch {
+			error = m.passkey_failed();
+			return;
+		}
+		if (kind === 'passkey') {
+			await change({ method: 'passkey', passkey_settings_register: credential });
+		} else {
+			const name = keyName.trim();
+			keyName = '';
+			await change({
+				method: 'webauthn',
+				webauthn_register: credential,
+				webauthn_register_displayname: name
+			});
+		}
+	}
 
 	const linked = $derived(flow ? providers(flow, 'unlink') : []);
 	const linkable = $derived(flow ? providers(flow, 'link') : []);
@@ -97,6 +140,31 @@
 	const button =
 		'self-start rounded-xl border border-line-strong bg-surface px-4 py-2 text-sm hover:bg-surface-2 disabled:opacity-60';
 </script>
+
+{#snippet keyList(list: { id: string; name: string }[], remove: string)}
+	{#if list.length > 0}
+		<ul class="flex flex-col gap-2">
+			{#each list as key (key.id)}
+				<li class="flex flex-wrap items-center gap-3 text-sm">
+					<CircleCheck size={16} class="text-ok" aria-hidden="true" />
+					{key.name || m.account_key_unnamed()}
+					<button
+						type="button"
+						class={button}
+						disabled={busy}
+						onclick={() =>
+							change({
+								method: remove.startsWith('passkey') ? 'passkey' : 'webauthn',
+								[remove]: key.id
+							})}
+					>
+						{m.account_key_remove({ name: key.name || m.account_key_unnamed() })}
+					</button>
+				</li>
+			{/each}
+		</ul>
+	{/if}
+{/snippet}
 
 <h1 class="text-4xl font-semibold">{m.account_title()}</h1>
 
@@ -173,6 +241,44 @@
 				</button>
 			{/if}
 		</section>
+
+		{#if webauthnAvailable() && offers(flow, 'passkey_create_data')}
+			<section class={card} aria-labelledby="account-passkeys">
+				<h2 id="account-passkeys" class="text-lg font-semibold">{m.account_passkeys()}</h2>
+				<p class="text-sm text-ink-2">{m.account_passkeys_hint()}</p>
+				{@render keyList(passkeys, 'passkey_remove')}
+				<button type="button" class={button} disabled={busy} onclick={() => addKey('passkey')}>
+					{m.account_passkey_add()}
+				</button>
+			</section>
+		{/if}
+
+		{#if webauthnAvailable() && offers(flow, 'webauthn_register_trigger')}
+			<section class={card} aria-labelledby="account-keys">
+				<h2 id="account-keys" class="text-lg font-semibold">{m.account_keys()}</h2>
+				<p class="text-sm text-ink-2">{m.account_keys_hint()}</p>
+				{@render keyList(securityKeys, 'webauthn_remove')}
+				<form
+					class="flex flex-wrap items-end gap-3"
+					onsubmit={(event) => {
+						event.preventDefault();
+						addKey('webauthn');
+					}}
+				>
+					<div class="flex flex-col gap-1">
+						<label class="text-sm font-medium" for="account-key-name">{m.account_key_name()}</label>
+						<input
+							id="account-key-name"
+							class="h-11 w-72 rounded-xl border border-line-strong bg-page px-3"
+							required
+							maxlength="100"
+							bind:value={keyName}
+						/>
+					</div>
+					<button type="submit" class={button} disabled={busy}>{m.account_key_add()}</button>
+				</form>
+			</section>
+		{/if}
 
 		{#if linked.length + linkable.length > 0}
 			<section class={card} aria-labelledby="account-providers">

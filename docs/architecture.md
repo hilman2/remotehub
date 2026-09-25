@@ -72,7 +72,9 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - **Sign-in (M1):** bind to AD via LDAPS as the user to verify the password; read attributes and all
   nested groups through a service account from `tokenGroups` (fallback `LDAP_MATCHING_RULE_IN_CHAIN`).
 - **Local accounts (ADR 0010):** Ory Kratos keeps accounts without a directory: password, authenticator
-  app (required), recovery codes, invitations. Browsers reach it through remotehub under `/api/auth/`;
+  app (required), recovery codes, invitations, passkeys instead of the password and security keys as the
+  second factor (#112; the WebAuthn ceremonies run in `web/src/lib/kratos/webauthn.ts`, not in Kratos'
+  script). Browsers reach it through remotehub under `/api/auth/`;
   `POST /api/session/local` turns its session into remotehub's (`api/accounts.rs`). A local account can
   also sign in through an OpenID Connect provider (Entra ID, Google, GitHub) that its owner linked under
   *My account* (#109); the provider replaces the password, not the app. Browsers never reach Kratos'
