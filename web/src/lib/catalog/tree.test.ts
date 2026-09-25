@@ -52,6 +52,10 @@ const tree: Tree = {
 			key_algorithm: null,
 			key_fingerprint: null,
 			has_certificate: false,
+			url: '',
+			notes: '',
+			icon: 0,
+			fields: [],
 			role: 'connect'
 		}
 	]

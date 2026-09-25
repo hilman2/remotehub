@@ -109,6 +109,14 @@
 				</p>
 			{/if}
 		{/if}
+		{#each shown.fields ?? [] as field (field.name)}
+			<p class="text-xs text-ink-2">
+				{field.name}:
+				<span class="font-mono break-all select-all" data-testid="revealed-field"
+					>{field.value}</span
+				>
+			</p>
+		{/each}
 	{/if}
 	{#if error}
 		<p class="text-sm text-critical" role="alert">{error}</p>

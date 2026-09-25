@@ -54,6 +54,7 @@
 	import Grants from '$lib/catalog/Grants.svelte';
 	import Journal from '$lib/catalog/Journal.svelte';
 	import RevealSecret from '$lib/catalog/RevealSecret.svelte';
+	import EntryDetails from '$lib/vault/EntryDetails.svelte';
 	import {
 		AUTH_MODE_LABELS,
 		CREDENTIAL_KIND_LABELS,
@@ -736,6 +737,15 @@
 								? m.credential_certificate_yes()
 								: m.credential_certificate_no()}
 						</p>
+					</section>
+				{/if}
+				{#if credential.url || credential.notes || credential.fields.length > 0}
+					<section class="{card} md:col-span-3">
+						<EntryDetails
+							url={credential.url}
+							notes={credential.notes}
+							fields={credential.fields}
+						/>
 					</section>
 				{/if}
 			</div>

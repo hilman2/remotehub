@@ -467,5 +467,14 @@
 	"reveal_copy": "Kopieren",
 	"reveal_copied": "Kopiert. In {seconds} Sekunden verschwindet es aus der Zwischenablage.",
 	"reveal_copy_failed": "Der Browser hat remotehub die Zwischenablage nicht erlaubt.",
-	"audit_credential_revealed": "Gespeicherte Zugangsdaten angezeigt oder kopiert"
+	"audit_credential_revealed": "Gespeicherte Zugangsdaten angezeigt oder kopiert",
+	"vault_icon": "Symbol",
+	"vault_icon_number": "Symbol {number}",
+	"vault_fields": "Weitere Felder",
+	"vault_field_name": "Feldname",
+	"vault_field_value": "Wert",
+	"vault_field_protected": "Geschützt",
+	"vault_field_keep": "Leer lassen, um ihn zu behalten",
+	"vault_field_add": "Feld hinzufügen",
+	"vault_field_remove": "{name} entfernen"
 }
