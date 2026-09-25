@@ -31,6 +31,17 @@ use crate::session::Session;
 pub struct Reveal {
     /// `show` or `copy`, for the audit log.
     purpose: String,
+    /// An older version of a credential (#100); the current one without.
+    #[serde(default)]
+    version: Option<i32>,
+}
+
+/// A version of a credential's secrets, for its history.
+#[derive(Serialize, sqlx::FromRow)]
+pub struct Version {
+    version: i32,
+    /// RFC 3339, UTC.
+    created_at: String,
 }
 
 /// The stored values; the fields of the other kind are absent.
@@ -96,7 +107,7 @@ async fn record(
     state: &AppState,
     session: &Session,
     object: (&str, Uuid),
-    purpose: &str,
+    details: serde_json::Value,
     address: &str,
 ) -> Result<(), Problem> {
     audit::record(
@@ -108,7 +119,7 @@ async fn record(
             },
             action: Action::CredentialRevealed,
             object: Some(object),
-            details: json!({ "purpose": purpose }),
+            details,
             address: Some(address),
         },
     )
@@ -139,24 +150,70 @@ pub async fn credential(
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Reveal, ObjectId::Credential(id))?;
     type Row = (String, String, i32, String, sqlx::types::Json<Vec<Field>>);
-    let (username, domain, version, kind, fields): Row = sqlx::query_as(
+    let (username, domain, current, kind, fields): Row = sqlx::query_as(
         "SELECT username, domain, version, kind, fields FROM credentials WHERE id = $1",
     )
     .bind(id)
     .fetch_one(&state.db)
     .await?;
+    let version = input.version.unwrap_or(current);
+    if !(1..=current).contains(&version) {
+        return Err(invalid("version"));
+    }
+    // The current version's protected fields in their order; an older one's
+    // as they were sealed then.
+    let names: Vec<String> = if version == current {
+        fields
+            .0
+            .into_iter()
+            .filter(|f| f.protected)
+            .map(|f| f.name)
+            .collect()
+    } else {
+        sqlx::query_scalar(
+            "SELECT substr(field, 7) FROM secret_fields
+             WHERE owner_id = $1 AND version = $2 AND field LIKE 'field:%' ORDER BY field",
+        )
+        .bind(id)
+        .bind(version)
+        .fetch_all(&state.db)
+        .await?
+    };
     let mut revealed = open(&state, id, version, &kind, username, domain).await?;
-    for field in fields.0.into_iter().filter(|f| f.protected) {
-        let value = stored_text(&state, id, version, &secret_name(&field.name)).await?;
+    for name in names {
+        let value = stored_text(&state, id, version, &secret_name(&name)).await?;
         revealed.fields.push(RevealedField {
-            name: field.name,
+            name,
             value: value
                 .map(|v| v.expose_secret().to_owned())
                 .unwrap_or_default(),
         });
     }
-    record(&state, &session, ("credential", id), purpose, &address).await?;
+    let details = json!({ "purpose": purpose, "version": version });
+    record(&state, &session, ("credential", id), details, &address).await?;
     Ok(answer(revealed))
+}
+
+/// The versions of a credential's secrets, newest first; with `reveal`,
+/// since they lead to older passwords.
+pub async fn versions(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<Version>>, Problem> {
+    let (subject, catalog) = context(&state, &session).await?;
+    require(&catalog, &subject, Role::Reveal, ObjectId::Credential(id))?;
+    let versions = sqlx::query_as(
+        r#"SELECT version,
+                  to_char(min(created_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                      AS created_at
+           FROM secret_fields WHERE owner_id = $1
+           GROUP BY version ORDER BY version DESC"#,
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(versions))
 }
 
 pub async fn device(
@@ -182,6 +239,7 @@ pub async fn device(
         return Err(Problem::new(ErrorCode::NotFound));
     }
     let revealed = open(&state, id, version, &kind, username, domain).await?;
-    record(&state, &session, ("device", id), purpose, &address).await?;
+    let details = json!({ "purpose": purpose });
+    record(&state, &session, ("device", id), details, &address).await?;
     Ok(answer(revealed))
 }

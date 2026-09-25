@@ -1,6 +1,7 @@
 //! HTTP API under `/api`.
 
 mod accounts;
+mod attachments;
 mod audit;
 mod catalog;
 mod connect;
@@ -23,6 +24,7 @@ mod terminal;
 mod users;
 
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::middleware;
 use axum::routing::{any, delete, get, patch, post, put};
 
@@ -102,6 +104,23 @@ pub fn router(state: AppState) -> Router<AppState> {
         )
         .route("/credentials", post(catalog::create_credential))
         .route("/credentials/{id}/reveal", post(reveal::credential))
+        .route("/credentials/{id}/versions", get(reveal::versions))
+        .route(
+            "/credentials/{id}/attachments",
+            post(attachments::upload).layer(DefaultBodyLimit::max(attachments::MAX_SIZE + 1024)),
+        )
+        .route(
+            "/credentials/{id}/attachments/{attachment}",
+            get(attachments::download).delete(attachments::delete),
+        )
+        .route(
+            "/personal/attachments/{id}",
+            get(personal::attachment)
+                .put(personal::save_attachment)
+                .delete(personal::delete_attachment)
+                // Base64 of a sealed file of up to 5 MiB.
+                .layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
+        )
         .route("/devices/{id}/reveal", post(reveal::device))
         .route(
             "/credentials/{id}",

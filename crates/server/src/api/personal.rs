@@ -7,6 +7,8 @@
 //! - `GET /api/personal/vault`: unlocks and entries
 //! - `POST /api/personal/unlocks`, `DELETE /api/personal/unlocks/{id}`
 //! - `PUT /api/personal/entries/{id}`, `DELETE /api/personal/entries/{id}`
+//! - `GET`/`PUT`/`DELETE /api/personal/attachments/{id}`: files of entries
+//!   (#100), sealed like them
 //! - `PUT /api/personal/search`: what the owner picked after searching,
 //!   sealed like an entry
 //! - `DELETE /api/personal/vault`: start over, everything is gone
@@ -324,6 +326,101 @@ pub async fn delete_entry(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// A file of a personal entry (#100), sealed in the browser.
+#[derive(Serialize, sqlx::FromRow)]
+pub struct StoredAttachment {
+    #[serde(with = "bytes")]
+    nonce: Vec<u8>,
+    #[serde(with = "bytes")]
+    ciphertext: Vec<u8>,
+}
+
+/// Stores a sealed file under the ID the browser chose, as for entries.
+pub async fn save_attachment(
+    State(state): State<AppState>,
+    session: Session,
+    ClientAddress(address): ClientAddress,
+    Path(id): Path<Uuid>,
+    input: Result<Json<EntryInput>, JsonRejection>,
+) -> Result<StatusCode, Problem> {
+    let input = body(input)?;
+    if input.nonce.len() != 12 {
+        return Err(invalid("nonce"));
+    }
+    // A file of up to 5 MiB and the tag.
+    if !(16..=5 * 1024 * 1024 + 16).contains(&input.ciphertext.len()) {
+        return Err(invalid("ciphertext"));
+    }
+    let mut tx = state.db.begin().await?;
+    let saved = sqlx::query(
+        "INSERT INTO personal_attachments (id, user_id, nonce, ciphertext) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (id) DO UPDATE SET nonce = EXCLUDED.nonce, ciphertext = EXCLUDED.ciphertext
+             WHERE personal_attachments.user_id = EXCLUDED.user_id",
+    )
+    .bind(id)
+    .bind(session.user_id)
+    .bind(&input.nonce)
+    .bind(&input.ciphertext)
+    .execute(&mut *tx)
+    .await?;
+    if saved.rows_affected() == 0 {
+        return Err(Problem::new(ErrorCode::NotFound));
+    }
+    let details = json!({ "attachment_id": id, "size": input.ciphertext.len() - 16 });
+    audit::record(
+        &mut *tx,
+        entry(&session, Action::PersonalAttachmentSaved, details, &address),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn attachment(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<Uuid>,
+) -> Result<Json<StoredAttachment>, Problem> {
+    sqlx::query_as(
+        "SELECT nonce, ciphertext FROM personal_attachments WHERE id = $1 AND user_id = $2",
+    )
+    .bind(id)
+    .bind(session.user_id)
+    .fetch_optional(&state.db)
+    .await?
+    .map(Json)
+    .ok_or(Problem::new(ErrorCode::NotFound))
+}
+
+pub async fn delete_attachment(
+    State(state): State<AppState>,
+    session: Session,
+    ClientAddress(address): ClientAddress,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, Problem> {
+    let mut tx = state.db.begin().await?;
+    let deleted = sqlx::query("DELETE FROM personal_attachments WHERE id = $1 AND user_id = $2")
+        .bind(id)
+        .bind(session.user_id)
+        .execute(&mut *tx)
+        .await?;
+    if deleted.rows_affected() == 0 {
+        return Err(Problem::new(ErrorCode::NotFound));
+    }
+    audit::record(
+        &mut *tx,
+        entry(
+            &session,
+            Action::PersonalAttachmentDeleted,
+            json!({ "attachment_id": id }),
+            &address,
+        ),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Stores what the owner picked after searching the vault (#81), sealed in
 /// the browser like an entry (associated data `search`). A preference, not
 /// a secret: saved on every pick and not audited.
@@ -366,6 +463,10 @@ pub async fn reset(
         .await?
         .rows_affected();
     sqlx::query("DELETE FROM personal_search WHERE user_id = $1")
+        .bind(session.user_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM personal_attachments WHERE user_id = $1")
         .bind(session.user_id)
         .execute(&mut *tx)
         .await?;

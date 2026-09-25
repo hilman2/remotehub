@@ -87,6 +87,10 @@ audit_actions! {
     SecondFactorRequired = "second_factor.required",
     SecondFactorWaived = "second_factor.waived",
     CredentialRevealed = "credential.revealed",
+    CredentialAttachmentAdded = "credential.attachment_added",
+    CredentialAttachmentDeleted = "credential.attachment_deleted",
+    PersonalAttachmentSaved = "personal.attachment_saved",
+    PersonalAttachmentDeleted = "personal.attachment_deleted",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).

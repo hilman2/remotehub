@@ -1088,6 +1088,222 @@ async fn credentials_keep_keepass_fields_and_seal_the_protected_ones(pool: PgPoo
     assert_eq!(odd.json()["params"]["field"], "icon");
 }
 
+/// A file sent as the browser sends it: the body as it is.
+fn upload(
+    id: &str,
+    name: &str,
+    content: Vec<u8>,
+    token: &str,
+) -> axum::http::Request<axum::body::Body> {
+    axum::http::Request::post(format!("/api/credentials/{id}/attachments?name={name}"))
+        .header("cookie", format!("__Host-remotehub-session={token}"))
+        .header("origin", crate::common::ORIGIN)
+        .header("content-type", "application/x-pem-file")
+        .body(axum::body::Body::from(content))
+        .unwrap()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn files_are_sealed_with_a_credential_and_downloaded_with_reveal(pool: PgPool) {
+    let f = fixture(pool.clone()).await;
+    let id = f.root_pw.clone();
+    let sent = send(
+        &f.app,
+        upload(&id, "cert.pem", b"-----BEGIN-----".to_vec(), &f.alice),
+    )
+    .await;
+    assert_eq!(sent.status, StatusCode::NO_CONTENT, "{}", sent.json());
+    // The same name replaces the file.
+    send(
+        &f.app,
+        upload(&id, "cert.pem", b"-----NEWER-----!".to_vec(), &f.alice),
+    )
+    .await;
+    let listed = tree(&f.app, &f.alice).await["credentials"][0]["attachments"].clone();
+    assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
+    assert_eq!(
+        (&listed[0]["name"], &listed[0]["size"]),
+        (&json!("cert.pem"), &json!(16))
+    );
+    let file = listed[0]["id"].as_str().unwrap();
+    let sealed: Vec<Vec<u8>> =
+        sqlx::query_scalar("SELECT ciphertext FROM secret_fields WHERE owner_id = $1::uuid")
+            .bind(file)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(sealed.len(), 1);
+    assert!(!sealed[0].windows(6).any(|w| w == b"NEWER-"));
+
+    let uri = format!("/api/credentials/{id}/attachments/{file}");
+    let bob = sign_in(&f.app, "bob").await;
+    grant(
+        &f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "connect",
+    )
+    .await;
+    assert_eq!(
+        call(&f.app, &bob, "GET", &uri, None).await.status,
+        StatusCode::FORBIDDEN
+    );
+    let refused = send(&f.app, upload(&id, "x.txt", b"x".to_vec(), &bob)).await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN);
+    grant(
+        &f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "reveal",
+    )
+    .await;
+    let got = call(&f.app, &bob, "GET", &uri, None).await;
+    assert_eq!(got.status, StatusCode::OK);
+    assert_eq!(got.body, b"-----NEWER-----!");
+    assert_eq!(got.headers["content-type"], "application/octet-stream");
+    assert_eq!(
+        got.headers["content-disposition"],
+        "attachment; filename*=UTF-8''cert.pem"
+    );
+    assert_eq!(got.headers["cache-control"], "no-store");
+
+    let big = send(
+        &f.app,
+        upload(&id, "big.bin", vec![0; 5 * 1024 * 1024 + 1], &f.alice),
+    )
+    .await;
+    assert_eq!(big.json()["params"]["field"], "size");
+    let odd = send(&f.app, upload(&id, "..%2Fetc", b"x".to_vec(), &f.alice)).await;
+    assert_eq!(odd.json()["params"]["field"], "name");
+
+    assert_eq!(
+        call(&f.app, &f.alice, "DELETE", &uri, None).await.status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(&f.app, &f.alice, "GET", &uri, None).await.status,
+        StatusCode::NOT_FOUND
+    );
+    // Deleting the credential takes the sealed files along.
+    send(
+        &f.app,
+        upload(&id, "again.pem", b"again".to_vec(), &f.alice),
+    )
+    .await;
+    call(
+        &f.app,
+        &f.alice,
+        "DELETE",
+        &format!("/api/credentials/{id}"),
+        None,
+    )
+    .await;
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM secret_fields")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+
+    let log = call(&f.app, &f.alice, "GET", "/api/audit", None)
+        .await
+        .json();
+    let actions: Vec<(&str, &Value)> = log
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| (e["action"].as_str().unwrap(), &e["details"]))
+        .collect();
+    assert!(actions.contains(&(
+        "credential.revealed",
+        &json!({ "purpose": "download", "attachment": "cert.pem" })
+    )));
+    assert!(
+        actions
+            .iter()
+            .any(|(a, _)| *a == "credential.attachment_deleted")
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn older_versions_are_revealed_on_request(pool: PgPool) {
+    let f = fixture(pool).await;
+    let id = f.root_pw.clone();
+    let change = json!({
+        "folder_id": f.linux, "name": "root", "username": "root", "password": "Second-Pass!",
+    });
+    call(
+        &f.app,
+        &f.alice,
+        "PUT",
+        &format!("/api/credentials/{id}"),
+        Some(change),
+    )
+    .await;
+    let versions = call(
+        &f.app,
+        &f.alice,
+        "GET",
+        &format!("/api/credentials/{id}/versions"),
+        None,
+    )
+    .await;
+    let numbers: Vec<i64> = versions
+        .json()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["version"].as_i64().unwrap())
+        .collect();
+    assert_eq!(numbers, [2, 1]);
+    let reveal = format!("/api/credentials/{id}/reveal");
+    let old = call(
+        &f.app,
+        &f.alice,
+        "POST",
+        &reveal,
+        Some(json!({ "purpose": "show", "version": 1 })),
+    )
+    .await;
+    assert_eq!(old.json()["password"], "T0p-Secret!");
+    let now = call(
+        &f.app,
+        &f.alice,
+        "POST",
+        &reveal,
+        Some(json!({ "purpose": "show" })),
+    )
+    .await;
+    assert_eq!(now.json()["password"], "Second-Pass!");
+    for bad in [0, 3] {
+        let wrong = call(
+            &f.app,
+            &f.alice,
+            "POST",
+            &reveal,
+            Some(json!({ "purpose": "show", "version": bad })),
+        )
+        .await;
+        assert_eq!(wrong.json()["params"]["field"], "version", "{bad}");
+    }
+    let bob = sign_in(&f.app, "bob").await;
+    grant(
+        &f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "connect",
+    )
+    .await;
+    let hidden = call(
+        &f.app,
+        &bob,
+        "GET",
+        &format!("/api/credentials/{id}/versions"),
+        None,
+    )
+    .await;
+    assert_eq!(hidden.status, StatusCode::FORBIDDEN);
+    let log = call(&f.app, &f.alice, "GET", "/api/audit", None)
+        .await
+        .json();
+    assert!(
+        log.as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["details"] == json!({ "purpose": "show", "version": 1 }))
+    );
+}
+
 #[sqlx::test(migrations = "../../migrations")]
 async fn a_device_keeps_credentials_of_its_own(pool: PgPool) {
     let f = fixture(pool.clone()).await;
