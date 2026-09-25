@@ -22,12 +22,10 @@
 	import { m } from '$lib/paraglide/messages';
 	import { loadMethods, signIn, signInLocal, type Methods } from '$lib/session.svelte';
 
-	type Way = 'directory' | 'local';
-	/** The way chosen last, in this browser only. */
-	const WAY_KEY = 'remotehub.sign-in';
+	/** Kratos' message for a wrong identifier or password. */
+	const KRATOS_INVALID_CREDENTIALS = 4000006;
 
 	let methods = $state<Methods>({ directory: true, local: false });
-	let way = $state<Way>('directory');
 	let username = $state('');
 	let password = $state('');
 	let busy = $state(false);
@@ -46,40 +44,25 @@
 		loadMethods().then((result) => {
 			if (!result.ok) return;
 			methods = result.data;
-			let remembered: string | null = null;
-			try {
-				remembered = localStorage.getItem(WAY_KEY);
-			} catch {
-				// No storage: the default stays.
-			}
-			if (!methods.directory || (methods.local && remembered === 'local')) way = 'local';
 			// Recovery of an account with a second factor ends here.
-			if (methods.local && page.state.secondFactor) {
-				way = 'local';
-				askSecond();
-			}
+			if (methods.local && page.state.secondFactor) askSecond();
 		});
 	});
 
-	function choose(next: Way) {
-		way = next;
-		error = null;
-		texts = [];
-		second = null;
-		directoryFactor = null;
-		try {
-			localStorage.setItem(WAY_KEY, next);
-		} catch {
-			// Only a convenience.
-		}
-	}
-
+	/**
+	 * One form for both kinds of account (#121). A name without `@` is a
+	 * directory account. An address is tried as a local account first; if
+	 * Kratos does not take it, the directory gets it, where it may be a
+	 * user principal name. Nothing tells beforehand which kind an address
+	 * is: that would let anyone find out which local accounts exist.
+	 */
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();
 		busy = true;
 		error = null;
 		texts = [];
-		if (way === 'directory') {
+		const address = username.includes('@');
+		if (!methods.local || (!address && methods.directory)) {
 			await signInDirectory();
 			return;
 		}
@@ -95,6 +78,13 @@
 			identifier: username.trim(),
 			password
 		});
+		const refused =
+			result.kind === 'flow' &&
+			messages(result.flow).some((text) => text.id === KRATOS_INVALID_CREDENTIALS);
+		if (refused && methods.directory) {
+			await signInDirectory();
+			return;
+		}
 		password = '';
 		await follow(result);
 	}
@@ -184,8 +174,6 @@
 	}
 
 	const field = 'h-12 w-full rounded-xl border border-line-strong bg-surface px-3.5';
-	const tab =
-		'flex-1 rounded-lg px-3 py-2 text-sm font-medium text-ink-2 hover:text-ink aria-pressed:bg-surface aria-pressed:text-ink aria-pressed:shadow-sm';
 </script>
 
 <div class="grid min-h-dvh lg:grid-cols-2">
@@ -216,27 +204,6 @@
 				<span class="font-display text-lg font-bold">remotehub</span>
 			</div>
 			<h1 class="text-3xl font-semibold">{m.sign_in_title()}</h1>
-
-			{#if methods.directory && methods.local && !second && !directoryFactor}
-				<div class="flex gap-1 rounded-xl bg-sunken p-1" role="group" aria-label={m.sign_in_way()}>
-					<button
-						type="button"
-						class={tab}
-						aria-pressed={way === 'local'}
-						onclick={() => choose('local')}
-					>
-						{m.sign_in_way_local()}
-					</button>
-					<button
-						type="button"
-						class={tab}
-						aria-pressed={way === 'directory'}
-						onclick={() => choose('directory')}
-					>
-						{m.sign_in_way_directory()}
-					</button>
-				</div>
-			{/if}
 
 			{#if second}
 				<form class="flex flex-col gap-5" onsubmit={submitSecond}>
@@ -327,12 +294,16 @@
 				<form class="flex flex-col gap-5" onsubmit={submit}>
 					<div class="flex flex-col gap-2">
 						<label class="text-sm font-medium" for="username">
-							{way === 'local' ? m.sign_in_email() : m.sign_in_username()}
+							{!methods.directory
+								? m.sign_in_email()
+								: methods.local
+									? m.sign_in_username_or_email()
+									: m.sign_in_username()}
 						</label>
 						<input
 							id="username"
 							name="username"
-							type={way === 'local' ? 'email' : 'text'}
+							type="text"
 							autocomplete="username"
 							required
 							bind:value={username}
@@ -369,7 +340,7 @@
 						<LogIn size={18} aria-hidden="true" />
 						{busy ? m.sign_in_busy() : m.sign_in_submit()}
 					</button>
-					{#if way === 'local'}
+					{#if methods.local}
 						<a
 							href={resolve('/sign-in/recovery')}
 							class="self-center text-sm text-ink-3 hover:text-ink hover:underline"
