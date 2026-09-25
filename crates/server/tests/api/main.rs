@@ -22,3 +22,4 @@ mod search;
 mod secrets;
 mod session;
 mod terminal;
+mod users;

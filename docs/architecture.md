@@ -78,6 +78,11 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - **Identifiers:** users and groups are stored by `objectSid`/`objectGUID` (Entra object IDs later), never
   by name, so renames do not change permissions. Local accounts are `local:<Kratos identity>`.
 - **Sessions:** server-side in PostgreSQL; cookie HttpOnly, Secure, SameSite=Strict; CSRF protection.
+- **User management (`/users`, `api/users.rs`):** administrators invite local accounts, block and unblock
+  anyone, end sessions, issue a new sign-in code and delete local accounts. A block is `users.blocked_at`:
+  it ends the user's sessions, the session lookup ignores them, and every sign-in path refuses them. For a
+  local account the change goes to Kratos first; if Kratos is away, nothing changes. Deleted accounts
+  keep their row as `kind = 'deleted'`, because the audit log refers to it.
 - **Break-glass:** local accounts (argon2id + TOTP, each code accepted once), created, reset and deleted
   only via `remotehub break-glass …`, which prints password and TOTP secret once. The TOTP secret is sealed
   in the vault. They sign in at `/sign-in/break-glass`, work when AD is down, are administrators, and every

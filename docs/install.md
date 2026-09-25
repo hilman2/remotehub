@@ -147,11 +147,15 @@ Its password and TOTP secret are shown only this once. Keep them offline, e.g. i
 Local accounts live in Ory Kratos, which the ops package runs next to remotehub. People reach it only
 through remotehub. Its settings are in `kratos/kratos.yml`; database and secrets in `secrets/kratos.yml`.
 
+- **Inviting and managing:** administrators invite local accounts under *Users* and hand over the link
+  and code shown there. The same page blocks anyone, local or from the directory, ends their sessions,
+  and deletes local accounts. Everything done there is in the audit log.
 - **Forgotten passwords:** "Forgot the password?" on the sign-in page mails a code. For that, add your SMTP
-  server to `secrets/kratos.yml` as its comment shows, then `docker compose up -d kratos`. Without it,
-  invite the person again with `account invite`.
+  server to `secrets/kratos.yml` as its comment shows, then `docker compose up -d kratos`. Without it, an
+  administrator gives the person a *New sign-in code* under *Users*.
 - **Second factor:** every local account sets up an authenticator app before its first session, and can
-  create recovery codes under *My account*.
+  create recovery codes under *My account*. A lost authenticator app takes a *New sign-in code* too: it
+  removes the second factor, and the person sets up a new one with the code.
 - **Backups:** Kratos' database sits next to remotehub's; see [Back up and restore](#back-up-and-restore).
 
 ## Sign in to SSH devices without stored passwords

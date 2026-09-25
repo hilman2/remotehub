@@ -24,7 +24,8 @@ const IDENTICAL_IN_GERMAN = new Set<string>([
 	'field_passphrase',
 	'vault_kind_passkey',
 	'vault_kind_passphrase',
-	'sign_in_code'
+	'sign_in_code',
+	'users_code_link'
 ]);
 
 /** Every message as text; plural and select variants as their JSON. */

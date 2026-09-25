@@ -41,6 +41,7 @@
 		{ href: resolve('/requests'), label: m.nav_requests },
 		...(session.user?.admin
 			? [
+					{ href: resolve('/users'), label: m.nav_users },
 					{ href: resolve('/connectors'), label: m.nav_connectors },
 					{ href: resolve('/audit'), label: m.nav_audit },
 					{ href: resolve('/settings'), label: m.nav_settings }

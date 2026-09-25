@@ -53,9 +53,14 @@ const address = (who: string) => `${who}-${run}-${crypto.randomUUID().slice(0, 8
  */
 async function onboard(page: Page, email: string, password: string, name = '') {
 	const invitation = await invite(email, name);
-	const link = new URL(invitation.recovery_link);
+	return accept(page, invitation.recovery_link, invitation.recovery_code, password);
+}
+
+/** Walks through an invitation's link and code; see `onboard`. */
+async function accept(page: Page, recoveryLink: string, code: string, password: string) {
+	const link = new URL(recoveryLink);
 	await page.goto(link.pathname + link.search);
-	await page.getByLabel('Code', { exact: true }).fill(invitation.recovery_code);
+	await page.getByLabel('Code', { exact: true }).fill(code);
 	await page.getByRole('button', { name: 'Continue' }).click();
 	await page.getByLabel('New password').fill(password);
 	await page.getByRole('button', { name: 'Continue' }).click();
@@ -120,6 +125,49 @@ test('a wrong code keeps an account with a second factor out', async ({ page }) 
 	// No remotehub session came of it.
 	const me = await page.evaluate(async () => (await fetch('/api/session')).status);
 	expect(me).toBe(401);
+});
+
+test('an administrator invites an account on the users page and blocks it', async ({
+	page,
+	browser
+}) => {
+	// alice administers through the directory.
+	await page.goto('/sign-in');
+	await page.getByRole('button', { name: 'Company account (AD)' }).click();
+	await page.getByLabel('User name').fill('alice');
+	await page.getByLabel('Password').fill('Alice-Passw0rd!');
+	await page.getByRole('button', { name: 'Sign in' }).click();
+	await page.getByRole('link', { name: 'Users' }).click();
+
+	const email = address('invited');
+	const name = `Ines ${email.split('@')[0]}`;
+	const dialog = page.getByRole('dialog');
+	await page.getByRole('button', { name: 'Invite', exact: true }).click();
+	await dialog.getByLabel('E-mail').fill(email);
+	await dialog.getByLabel('Name').fill(name);
+	await dialog.getByRole('button', { name: 'Invite', exact: true }).click();
+	const link = (await dialog.getByTestId('code-link').innerText()).trim();
+	const code = (await dialog.getByTestId('code-value').innerText()).trim();
+	await dialog.getByRole('button', { name: 'Close' }).last().click();
+
+	// Ines, in a browser of her own.
+	const own = await browser.newContext();
+	const ines = await own.newPage();
+	await accept(ines, link, code, `Invited-Passw0rd-${run}`);
+
+	await page.reload();
+	const row = page.getByTestId('user-row').filter({ hasText: email });
+	await expect(row).toContainText('Local');
+	await expect(row).toContainText('Active');
+	await row.getByRole('button', { name: `Actions for ${name}` }).click();
+	await page.getByRole('menuitem', { name: 'Block' }).click();
+	await dialog.getByRole('button', { name: 'Block' }).click();
+	await expect(row).toContainText('Blocked');
+
+	// Her session is gone: the next request sends her to the sign-in.
+	await ines.reload();
+	await expect(ines).toHaveURL(/\/sign-in$/);
+	await own.close();
 });
 
 test('a Kratos session left in the browser never signs in whoever types', async ({
