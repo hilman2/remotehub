@@ -23,6 +23,7 @@ const IDENTICAL_IN_GERMAN = new Set<string>([
 	'credential_version',
 	'field_passphrase',
 	'vault_kind_passkey',
+	'account_passkeys',
 	'vault_kind_passphrase',
 	'sign_in_code',
 	'users_code_link',

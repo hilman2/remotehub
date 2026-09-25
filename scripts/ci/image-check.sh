@@ -29,7 +29,7 @@ dir="${PWD}/.image-check"
 rm -rf "$dir"
 cp -r deploy/ops "$dir"
 export REMOTEHUB_IMAGE="$image" GUACD_IMAGE="$guacd" BROWSER_IMAGE="$browser_image" REMOTEHUB_VERSION="$tag"
-export REMOTEHUB_PUBLIC_URL=http://localhost:8080
+export REMOTEHUB_PUBLIC_URL=http://localhost:8080 REMOTEHUB_HOST=localhost
 # The checks go through the stack's network; any free port on the host.
 export REMOTEHUB_PORT=0
 # No directory: remotehub starts without one; break-glass accounts work.

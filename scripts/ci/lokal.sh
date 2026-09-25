@@ -78,7 +78,7 @@ job_base() {
 
     echo "── Compose (development, ops package)"
     docker compose -f deploy/compose.dev.yml --profile workbench config --quiet
-    REMOTEHUB_VERSION=0 REMOTEHUB_PUBLIC_URL=https://x \
+    REMOTEHUB_VERSION=0 REMOTEHUB_PUBLIC_URL=https://x REMOTEHUB_HOST=x \
       docker compose -f deploy/ops/compose.yml config --quiet --no-path-resolution
 
     echo "── Rust version"
@@ -296,6 +296,10 @@ start_kratos() {
     -e "SELFSERVICE_FLOWS_ERROR_UI_URL=${base}/sign-in"
     -e "SELFSERVICE_FLOWS_LOGIN_UI_URL=${base}/sign-in"
     -e "SELFSERVICE_FLOWS_REGISTRATION_UI_URL=${base}/sign-in"
+    -e SELFSERVICE_METHODS_WEBAUTHN_CONFIG_RP_ID=localhost
+    -e "SELFSERVICE_METHODS_WEBAUTHN_CONFIG_RP_ORIGINS=[\"${base}\"]"
+    -e SELFSERVICE_METHODS_PASSKEY_CONFIG_RP_ID=localhost
+    -e "SELFSERVICE_METHODS_PASSKEY_CONFIG_RP_ORIGINS=[\"${base}\"]"
     -e "SELFSERVICE_FLOWS_SETTINGS_UI_URL=${base}/account"
     -e "SELFSERVICE_FLOWS_RECOVERY_UI_URL=${base}/sign-in/recovery"
     -e "SELFSERVICE_FLOWS_LOGOUT_AFTER_DEFAULT_BROWSER_RETURN_URL=${base}/sign-in"
