@@ -20,6 +20,7 @@
 		type UserRow
 	} from '$lib/api/users';
 	import Dialog from '$lib/components/Dialog.svelte';
+	import Groups from '$lib/users/Groups.svelte';
 	import SettingsMenu, { type MenuItem } from '$lib/components/SettingsMenu.svelte';
 	import { formatLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
@@ -247,6 +248,7 @@
 			</tbody>
 		</table>
 	</div>
+	<Groups />
 {/if}
 
 <Dialog bind:open={dialogOpen} {title}>

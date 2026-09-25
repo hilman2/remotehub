@@ -150,6 +150,8 @@ through remotehub. Its settings are in `kratos/kratos.yml`; database and secrets
 - **Inviting and managing:** administrators invite local accounts under *Users* and hand over the link
   and code shown there. The same page blocks anyone, local or from the directory, ends their sessions,
   and deletes local accounts. Everything done there is in the audit log.
+- **Groups:** without a directory, put local accounts into groups under *Users* and grant access to the
+  groups. Directory users and groups can be members too.
 - **Forgotten passwords:** "Forgot the password?" on the sign-in page mails a code. For that, add your SMTP
   server to `secrets/kratos.yml` as its comment shows, then `docker compose up -d kratos`. Without it, an
   administrator gives the person a *New sign-in code* under *Users*.
