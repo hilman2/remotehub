@@ -192,6 +192,21 @@ async fn serve() -> anyhow::Result<()> {
     tokio::spawn(purge_sessions(pool, config.session.idle));
     tokio::spawn(remotehub_server::refresh::run(state.clone()));
 
+    // Kratos hands over its mails on a port of their own (#145), which only
+    // the compose network reaches.
+    if let Some(token) = config.courier_token.clone() {
+        let courier = remotehub_server::api::courier::router(state.clone(), token);
+        let listener = tokio::net::TcpListener::bind(config.courier_listen)
+            .await
+            .with_context(|| format!("cannot listen on {}", config.courier_listen))?;
+        tracing::info!(listen = %config.courier_listen, "taking mails from Kratos");
+        tokio::spawn(async move {
+            if let Err(error) = axum::serve(listener, courier).await {
+                tracing::error!(%error, "the courier's port stopped");
+            }
+        });
+    }
+
     let app = app(state, config.web_dir.as_deref());
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await

@@ -26,7 +26,7 @@
 	import Groups from '$lib/users/Groups.svelte';
 	import Roles from '$lib/users/Roles.svelte';
 	import SettingsMenu, { type MenuItem } from '$lib/components/SettingsMenu.svelte';
-	import { formatLocale } from '$lib/i18n';
+	import { formatLocale, getLocale, LOCALE_NAMES, locales } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
 	import { loadMethods, session } from '$lib/session.svelte';
 
@@ -40,6 +40,11 @@
 
 	let users = $state<UserRow[]>([]);
 	let local = $state(false);
+	/** A mail server is set: codes can go out by mail (#145). */
+	let mailServer = $state(false);
+	let sendMail = $state(true);
+	let mailLanguage = $state<string>(getLocale());
+	const mailRequest = () => ({ send_mail: mailServer && sendMail, language: mailLanguage });
 	let error = $state<string | null>(null);
 	let open = $state<Open | null>(null);
 	let dialogOpen = $state(false);
@@ -65,7 +70,10 @@
 	$effect(() => {
 		if (!session.user?.admin) return;
 		load();
-		loadMethods().then((result) => (local = result.ok && result.data.local));
+		loadMethods().then((result) => {
+			local = result.ok && result.data.local;
+			mailServer = result.ok && result.data.mail;
+		});
 	});
 
 	function show(next: Open) {
@@ -111,7 +119,7 @@
 	async function invite(event: SubmitEvent) {
 		event.preventDefault();
 		busy = true;
-		const result = await inviteUser(email, name);
+		const result = await inviteUser(email, name, mailRequest());
 		busy = false;
 		if (!result.ok) {
 			dialogError = errorMessage(result.code);
@@ -127,7 +135,7 @@
 			block: blockUser,
 			unblock: unblockUser,
 			sessions: endSessions,
-			recovery: issueRecovery,
+			recovery: (id: string) => issueRecovery(id, mailRequest()),
 			factor: resetFactor,
 			delete: deleteUser
 		}[change](user.id);
@@ -274,6 +282,27 @@
 	<Roles />
 {/if}
 
+{#snippet mailChoice()}
+	{#if mailServer}
+		<div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+			<label class="flex items-center gap-2">
+				<input type="checkbox" bind:checked={sendMail} />
+				{m.users_send_mail()}
+			</label>
+			{#if sendMail}
+				<label class="flex items-center gap-2">
+					{m.users_mail_language()}
+					<select class="rounded-lg border border-line bg-page px-2 py-1" bind:value={mailLanguage}>
+						{#each locales as locale (locale)}
+							<option value={locale} lang={locale}>{LOCALE_NAMES[locale]}</option>
+						{/each}
+					</select>
+				</label>
+			{/if}
+		</div>
+	{/if}
+{/snippet}
+
 <Dialog bind:open={dialogOpen} {title}>
 	{#if open?.type === 'invite'}
 		<form onsubmit={invite}>
@@ -296,6 +325,7 @@
 				autocomplete="off"
 				bind:value={name}
 			/>
+			{@render mailChoice()}
 			{#if dialogError}
 				<p class="mt-3 text-sm text-critical" role="alert">{dialogError}</p>
 			{/if}
@@ -319,6 +349,9 @@
 	{:else if open?.type === 'confirm'}
 		{@const { change, user } = open}
 		<p class="text-sm">{questions[change](user.display_name)}</p>
+		{#if change === 'recovery'}
+			{@render mailChoice()}
+		{/if}
 		{#if dialogError}
 			<p class="mt-3 text-sm text-critical" role="alert">{dialogError}</p>
 		{/if}
@@ -352,6 +385,22 @@
 			<dt class="text-ink-2">{m.users_code_expires()}</dt>
 			<dd class="tabular-nums">{time.format(new Date(code.expires_at))}</dd>
 		</dl>
+		{#if code.mailed}
+			<p class="mt-4 flex items-center gap-2 text-sm" role="status" data-testid="code-mailed">
+				<CircleCheck size={16} class="text-ok" aria-hidden="true" />
+				{m.users_mailed()}
+			</p>
+		{:else if code.mail_failure}
+			<p class="mt-4 flex items-start gap-2 text-sm" role="alert">
+				<CircleAlert size={16} class="mt-0.5 shrink-0 text-critical" aria-hidden="true" />
+				<span>
+					{m.users_mail_failed()}
+					<span class="block font-mono text-xs break-all text-ink-3"
+						>{code.mail_failure.detail}</span
+					>
+				</span>
+			</p>
+		{/if}
 		<div class="mt-5 flex justify-end">
 			<button
 				type="button"

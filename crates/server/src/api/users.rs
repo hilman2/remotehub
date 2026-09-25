@@ -29,8 +29,10 @@ use super::session::ClientAddress;
 use crate::AppState;
 use crate::audit::{self, Action, Actor, Entry};
 use crate::kratos::{self, Invitation, Kratos, KratosError};
+use crate::mail;
 use crate::principal::PrincipalId;
 use crate::session::Session;
+use remotehub_i18n::{Locale, Message};
 
 /// How long an invitation's or a recovery's code lasts.
 pub(super) const CODE_LIFETIME: Duration = Duration::from_secs(48 * 3600);
@@ -52,12 +54,16 @@ pub struct UserRow {
     sessions: i64,
 }
 
-/// The one-time code an administrator hands to the account's owner.
+/// The one-time code an administrator hands to the account's owner, and
+/// whether it went out by mail too (#145).
 #[derive(Serialize)]
 pub struct Code {
     link: String,
     code: String,
     expires_at: String,
+    mailed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mail_failure: Option<mail::Failure>,
 }
 
 impl From<Invitation> for Code {
@@ -66,6 +72,74 @@ impl From<Invitation> for Code {
             link: invitation.recovery_link,
             code: invitation.recovery_code,
             expires_at: invitation.expires_at,
+            mailed: false,
+            mail_failure: None,
+        }
+    }
+}
+
+/// Whether and in which language a code goes out by mail.
+#[derive(Deserialize, Default)]
+pub struct MailRequest {
+    #[serde(default)]
+    pub(super) send_mail: bool,
+    /// `en` or `de`, as the administrator chose.
+    #[serde(default)]
+    pub(super) language: String,
+}
+
+/// Mails `code` to `to` if `request` asks for it, and notes the outcome in
+/// it. `invited` picks the text: an invitation, or a new sign-in code.
+async fn mail_code(
+    state: &AppState,
+    request: &MailRequest,
+    to: &str,
+    name: &str,
+    invited: bool,
+    code: &mut Code,
+) {
+    if !request.send_mail {
+        return;
+    }
+    let locale = Locale::from_accept_language(&request.language);
+    let (link, value, expires) = (
+        code.link.clone(),
+        code.code.clone(),
+        mail::expiry(&code.expires_at),
+    );
+    let name = if name.is_empty() { to } else { name }.to_owned();
+    let (subject, body) = if invited {
+        (
+            Message::MailInvitationSubject {},
+            Message::MailInvitationBody {
+                name,
+                link,
+                code: value,
+                expires,
+            },
+        )
+    } else {
+        (
+            Message::MailSignInCodeSubject {},
+            Message::MailSignInCodeBody {
+                name,
+                link,
+                code: value,
+                expires,
+            },
+        )
+    };
+    match mail::send(
+        &state.db,
+        &state.vault,
+        mail::Outgoing::new(to, locale, &subject, &body),
+    )
+    .await
+    {
+        Ok(()) => code.mailed = true,
+        Err(failure) => {
+            tracing::warn!(step = ?failure.step, detail = %failure.detail, "cannot mail a code");
+            code.mail_failure = Some(failure);
         }
     }
 }
@@ -204,6 +278,8 @@ pub struct NewAccount {
     pub(super) email: String,
     #[serde(default)]
     pub(super) name: String,
+    #[serde(flatten)]
+    pub(super) mail: MailRequest,
 }
 
 pub async fn invite(
@@ -236,7 +312,9 @@ pub async fn invite(
     )
     .await?;
     tx.commit().await?;
-    Ok((StatusCode::CREATED, Json(invitation.into())))
+    let mut code = Code::from(invitation);
+    mail_code(&state, &input.mail, &email, name, true, &mut code).await;
+    Ok((StatusCode::CREATED, Json(code)))
 }
 
 pub async fn block(
@@ -338,6 +416,7 @@ pub async fn recovery(
     session: Session,
     ClientAddress(address): ClientAddress,
     Path(id): Path<Uuid>,
+    request: Option<Json<MailRequest>>,
 ) -> Result<Json<Code>, Problem> {
     require_admin(&session)?;
     let user = target(&state, id).await?;
@@ -364,7 +443,11 @@ pub async fn recovery(
         &address,
     )
     .await?;
-    Ok(Json(code.into()))
+    let mut code = Code::from(code);
+    let request = request.map(|Json(r)| r).unwrap_or_default();
+    // A local account's user name is its e-mail address.
+    mail_code(&state, &request, &user.username, "", false, &mut code).await;
+    Ok(Json(code))
 }
 
 pub async fn delete(

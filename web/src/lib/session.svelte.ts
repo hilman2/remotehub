@@ -89,6 +89,8 @@ export interface Methods {
 	local: boolean;
 	/** OpenID Connect providers for local accounts (#109). */
 	providers: Provider[];
+	/** A mail server is set: a forgotten password's code goes out by mail (#145). */
+	mail: boolean;
 }
 
 export const loadMethods = () => api<Methods>('GET', '/api/session/methods');

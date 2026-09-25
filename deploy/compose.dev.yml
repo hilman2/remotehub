@@ -35,6 +35,7 @@ x-rust: &rust
     REMOTEHUB_TEST_DESKTOP_HOST: desktop-target
     REMOTEHUB_TEST_BROWSER: browser:4823
     REMOTEHUB_TEST_WEB_HOST: web-target
+    REMOTEHUB_TEST_SMTP_HOST: mail
 
 services:
   db:
@@ -75,6 +76,8 @@ services:
       #   docker compose -f deploy/compose.dev.yml exec server cargo run -q -p remotehub-server -- setup-code
       REMOTEHUB_KRATOS_URL: http://kratos:4433
       REMOTEHUB_KRATOS_ADMIN_URL: http://kratos:4434
+      # Kratos hands over its mails on port 8081 (#145).
+      REMOTEHUB_COURIER_TOKEN: dev-courier-token
     command: >
       watchexec --poll 1000ms --restart --watch crates --watch migrations --watch Cargo.toml
       --exts rs,toml,sql,ftl -- cargo run --package remotehub-server
@@ -83,6 +86,8 @@ services:
         condition: service_healthy
       dc:
         condition: service_healthy
+      mail:
+        condition: service_started
 
   # Ory Kratos for local accounts (#103, deploy/ops/kratos): its own database on
   # the same server. The browser reaches it only through the server
@@ -125,7 +130,13 @@ services:
         "issuer_url": "http://oidc:5556/dex", "client_id": "remotehub",
         "client_secret": "lab-oidc-secret", "scope": ["openid", "email", "profile"],
         "mapper_url": "file:///etc/config/kratos/oidc.jsonnet"}]
-      # No courier in development: invitations hand out their code.
+      # Mails go to the development server, which sends them through the
+      # mail server of its settings, e.g. the lab's Mailpit (#145).
+      COURIER_HTTP_REQUEST_CONFIG_URL: http://server:8081/courier
+      COURIER_HTTP_REQUEST_CONFIG_AUTH_TYPE: api_key
+      COURIER_HTTP_REQUEST_CONFIG_AUTH_CONFIG_NAME: Authorization
+      COURIER_HTTP_REQUEST_CONFIG_AUTH_CONFIG_VALUE: Bearer dev-courier-token
+      COURIER_HTTP_REQUEST_CONFIG_AUTH_CONFIG_IN: header
       LOG_FORMAT: text
       # No usage reports to Ory.
       SQA_OPT_OUT: "true"
@@ -141,7 +152,7 @@ services:
     environment: *kratos-env
     volumes:
       - ./ops/kratos:/etc/config/kratos:ro
-    command: serve -c /etc/config/kratos/kratos.yml --dev
+    command: serve -c /etc/config/kratos/kratos.yml --dev --watch-courier
     depends_on:
       kratos-migrate:
         condition: service_completed_successfully
@@ -158,6 +169,8 @@ services:
       dc:
         condition: service_healthy
       ssh-target:
+        condition: service_started
+      mail:
         condition: service_started
 
   # End-to-end tests in a real browser against this stack (web/tests/e2e):
@@ -213,6 +226,15 @@ services:
     build: testlab/web
     image: remotehub-testlab-web
     hostname: web-target
+
+  # A mail server that keeps every mail (#145): SMTP on mail:1025 without
+  # TLS, taking any user and password; the mails at http://mail:8025/api/v1/.
+  mail:
+    image: axllent/mailpit:v1.31.2
+    hostname: mail
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
 
   # An OpenID Connect provider for sign-in through Kratos (#109).
   oidc:

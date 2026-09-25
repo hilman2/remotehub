@@ -107,6 +107,11 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   the steps on a plain socket (name, connection, TLS) and then through the LDAP client (bind, search), and
   names the one that fails. Trusted certificates are CA certificates, as roots, and server certificates,
   trusted as they are (`crates/directory/src/trust.rs`).
+- **Mail (`mail.rs`, `api/mail.rs`, `api/courier.rs`, #145):** the SMTP server is stored in the table
+  `mail`, its password sealed. remotehub sends every mail itself (lettre, rustls), with texts from its
+  own catalogs (`crates/i18n/locales/*/mail.ftl`). Kratos' HTTP courier posts its messages to a port of
+  their own (8081, with a bearer token), with the headers of the request that started the flow; the
+  mail goes out in its `Accept-Language`.
 - **Second factor for directory accounts (`second_factor.rs`):** TOTP whose secret is sealed in the vault
   (owner = user). A user sets it up on the account page, or during sign-in when a rule in
   `second_factor_principals` names them or a group of theirs; the password is then sent again with the

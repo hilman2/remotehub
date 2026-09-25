@@ -95,10 +95,13 @@ pub struct Methods {
     local: bool,
     /// OpenID Connect providers for local accounts (#109).
     providers: Vec<Provider>,
+    /// A mail server is set, so a forgotten password's code can be mailed
+    /// (#145).
+    mail: bool,
 }
 
 /// `GET /api/session/methods`, before anyone signs in.
-pub async fn methods(State(state): State<AppState>) -> Json<Methods> {
+pub async fn methods(State(state): State<AppState>) -> Result<Json<Methods>, Problem> {
     let providers = match &state.settings.kratos {
         // Without the list, the password still signs in.
         Some(kratos) => kratos.providers().await.unwrap_or_else(|error| {
@@ -107,11 +110,12 @@ pub async fn methods(State(state): State<AppState>) -> Json<Methods> {
         }),
         None => Vec::new(),
     };
-    Json(Methods {
+    Ok(Json(Methods {
         directory: state.directory.get().is_some(),
         local: state.settings.kratos.is_some(),
         providers,
-    })
+        mail: crate::mail::server(&state.db).await?.is_some(),
+    }))
 }
 
 /// `POST /api/session/local`: a remotehub session for the local account

@@ -25,6 +25,8 @@ services:
       REMOTEHUB_DATABASE_PASSWORD_FILE: /run/secrets/db_password
       REMOTEHUB_MASTER_KEY_FILE: /run/secrets/master_key
       REMOTEHUB_SSH_CA_KEY_FILE: /run/secrets/ssh_ca_key
+      # Kratos hands over its mails on port 8081, with this token (#145).
+      REMOTEHUB_COURIER_TOKEN_FILE: /run/secrets/courier_token
       REMOTEHUB_GUACD: guacd:4822
       REMOTEHUB_BROWSER: browser:4823
       REMOTEHUB_LOG_FORMAT: ${REMOTEHUB_LOG_FORMAT:-text}
@@ -38,7 +40,7 @@ services:
       # The reverse proxy on this host reaches remotehub through the gateway
       # of the network below; it names the client in X-Forwarded-For.
       REMOTEHUB_TRUSTED_PROXIES: ${REMOTEHUB_GATEWAY:-10.213.213.1}
-    secrets: [db_password, master_key, ssh_ca_key]
+    secrets: [db_password, master_key, ssh_ca_key, courier_token]
     ports:
       - "127.0.0.1:${REMOTEHUB_PORT:-8080}:8080"
     networks: [default, database]
@@ -118,8 +120,8 @@ services:
   kratos:
     <<: *hardened
     image: oryd/kratos:v26.2.0
-    # The courier sends the codes of a forgotten password; it needs the SMTP
-    # server in secrets/kratos.yml (docs/install.md#local-accounts).
+    # The courier hands the codes of a forgotten password to remotehub,
+    # which mails them (#145).
     command: serve -c /etc/config/kratos/kratos.yml -c /run/secrets/kratos.yml --watch-courier
     environment: *kratos-env
     tmpfs:
@@ -183,5 +185,7 @@ secrets:
     file: ./secrets/master_key
   ssh_ca_key:
     file: ./secrets/ssh_ca_key
+  courier_token:
+    file: ./secrets/courier_token
   kratos:
     file: ./secrets/kratos.yml

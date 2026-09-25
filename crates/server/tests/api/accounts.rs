@@ -316,7 +316,7 @@ async fn the_proxy_passes_only_the_self_service_flows(pool: PgPool) {
         send(&plain, get_request("/api/session/methods", None))
             .await
             .json(),
-        json!({ "directory": false, "local": false, "providers": [] })
+        json!({ "directory": false, "local": false, "providers": [], "mail": false })
     );
     assert_eq!(
         send(&app, get_request("/api/session/methods", None))
@@ -325,6 +325,7 @@ async fn the_proxy_passes_only_the_self_service_flows(pool: PgPool) {
         json!({
             "directory": true, "local": true,
             "providers": [{ "id": "entra", "label": "Microsoft" }],
+            "mail": false,
         })
     );
 }

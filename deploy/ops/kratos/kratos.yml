@@ -138,11 +138,16 @@ identity:
     - id: user
       url: file:///etc/config/kratos/identity.schema.json
 
+# Kratos hands every mail to remotehub, which sends it through the mail
+# server of its settings, in the language of the request (#145). The token
+# remotehub checks is in secrets/kratos.yml.
 courier:
-  smtp:
-    connection_uri: smtps://mail.example.com:465/
-    from_address: remotehub@example.com
-    from_name: remotehub
+  delivery_strategy: http
+  http:
+    request_config:
+      url: http://remotehub:8081/courier
+      method: POST
+      body: file:///etc/config/kratos/courier.jsonnet
 
 log:
   level: info

@@ -6,12 +6,14 @@ mod audit;
 mod catalog;
 mod connect;
 mod connectors;
+pub mod courier;
 mod directory;
 mod display;
 mod fields;
 mod groups;
 pub mod health;
 mod journal;
+mod mail;
 mod origin;
 mod personal;
 pub mod problem;
@@ -98,6 +100,11 @@ pub fn router(state: AppState) -> Router<AppState> {
                 .delete(directory::remove),
         )
         .route("/settings/directory/check", post(directory::check))
+        .route(
+            "/settings/mail",
+            get(mail::get).put(mail::save).delete(mail::remove),
+        )
+        .route("/settings/mail/test", post(mail::test))
         .route("/roles", get(roles::list))
         .route(
             "/roles/{role}/members/{sid}",

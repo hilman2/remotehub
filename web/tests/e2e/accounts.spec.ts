@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { inbox } from './mailpit';
 import { step, totp } from './totp';
 
 // Local accounts through Ory Kratos (#103): an invited account sets its
@@ -374,4 +375,53 @@ test('a directory account signs in with a security key remotehub keeps', async (
 	await page.getByRole('link', { name: /Erin Keys/ }).click();
 	await keys.getByRole('button', { name: 'Remove Erin’s key' }).click();
 	await expect(keys.getByRole('button', { name: /^Remove / })).toHaveCount(0);
+});
+
+// Mail (#145): the setup test made the lab's Mailpit the mail server.
+
+test('an invitation goes out by mail, and its link and code work', async ({ page, browser }) => {
+	await typeDirectory(page, 'alice', 'Alice-Passw0rd!');
+	await page.getByRole('link', { name: 'Users' }).click();
+	const email = address('mailed');
+	const dialog = page.getByRole('dialog');
+	await page.getByRole('button', { name: 'Invite', exact: true }).click();
+	await dialog.getByLabel('E-mail').fill(email);
+	await dialog.getByLabel('Name').fill('Mia Mailed');
+	await expect(dialog.getByLabel('Send by mail')).toBeChecked();
+	await dialog.getByRole('button', { name: 'Invite', exact: true }).click();
+	await expect(dialog.getByTestId('code-mailed')).toBeVisible();
+
+	const [mail] = await inbox(email);
+	expect(mail.subject).toBe('An account on remotehub');
+	const link = mail.text.match(/https?:\/\/\S+/)![0];
+	const code = mail.text.match(/Code: (\d+)/)![1];
+
+	const own = await browser.newContext();
+	await accept(await own.newPage(), link, code, `Mailed-Passw0rd-${run}`);
+	await own.close();
+});
+
+test('a forgotten password’s code comes by mail, in the browser’s language', async ({
+	browser
+}) => {
+	const email = address('forgot');
+	const context = await browser.newContext({
+		extraHTTPHeaders: { 'Accept-Language': 'de-DE,de;q=0.9' }
+	});
+	const page = await context.newPage();
+	await onboard(page, email, `Forgot-Passw0rd-${run}`);
+	await signOut(page);
+
+	await page.getByRole('link', { name: 'Forgot the password?' }).click();
+	await expect(page).toHaveURL(/\/sign-in\/recovery$/);
+	await page.getByLabel('E-mail', { exact: true }).fill(email);
+	await page.getByRole('button', { name: 'Continue' }).click();
+	const [mail] = await inbox(email);
+	expect(mail.subject).toBe('Code für remotehub');
+	const code = mail.text.match(/\b(\d{6})\b/)![1];
+	await page.getByLabel('Code', { exact: true }).fill(code);
+	await page.getByRole('button', { name: 'Continue' }).click();
+	// Kratos takes the code: the page asks for it no more.
+	await expect(page).not.toHaveURL(/\/sign-in\/recovery/);
+	await context.close();
 });

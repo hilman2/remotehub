@@ -49,8 +49,11 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Request headers a browser's request keeps on its way to Kratos: what it
 /// accepts and sends, and the cookies of Kratos' session and CSRF token.
-const REQUEST_HEADERS: [HeaderName; 4] = [
+const REQUEST_HEADERS: [HeaderName; 5] = [
     header::ACCEPT,
+    // Kratos keeps it with a message, so its mail goes out in the browser's
+    // language (#145).
+    header::ACCEPT_LANGUAGE,
     header::CONTENT_TYPE,
     header::COOKIE,
     header::USER_AGENT,

@@ -253,6 +253,7 @@ async fn only_local_accounts_get_a_recovery_code_or_are_deleted(pool: PgPool) {
             "link": "https://remotehub.test/sign-in/recovery?flow=f",
             "code": "123456",
             "expires_at": "2026-09-27T00:00:00Z",
+            "mailed": false,
         })
     );
     assert_eq!(

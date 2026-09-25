@@ -31,6 +31,7 @@
 	import PrincipalRules from '$lib/components/PrincipalRules.svelte';
 	import { session, setup } from '$lib/session.svelte';
 	import DirectoryForm from '$lib/settings/DirectoryForm.svelte';
+	import MailForm from '$lib/settings/MailForm.svelte';
 	import BreakGlassSheet from '$lib/setup/BreakGlassSheet.svelte';
 	import NewRecoveryKey from '$lib/vault/NewRecoveryKey.svelte';
 
@@ -107,6 +108,7 @@
 	const STEPS = [
 		{ step: STEP.administrator, label: m.wizard_step_administrator },
 		{ step: STEP.directory, label: m.wizard_step_directory },
+		{ step: STEP.mail, label: m.wizard_step_mail },
 		{ step: STEP.breakGlass, label: m.wizard_step_break_glass },
 		{ step: STEP.recoveryKey, label: m.wizard_step_recovery_key },
 		{ step: STEP.done, label: m.wizard_step_done }
@@ -140,6 +142,9 @@
 	// Step 4: the break-glass account.
 	// Step 2: the directory, and who of it administers.
 	let directorySaved = $state(false);
+
+	// Step 3: the mail server.
+	let mailSaved = $state(false);
 
 	let breakGlass = $state<BreakGlassAccount | null>(null);
 	let breakGlassExists = $state(false);
@@ -308,6 +313,27 @@
 				</button>
 			{:else}
 				{@render skip(STEP.directory)}
+			{/if}
+		{:else if settingUp && current === STEP.mail}
+			<h2 class="text-xl font-semibold">{m.wizard_step_mail()}</h2>
+			<p class="text-sm text-ink-2">{m.wizard_mail_hint()}</p>
+			<div class="rounded-card border border-line bg-surface p-6">
+				<MailForm
+					recipient={session.user?.kind === 'local' ? session.user.username : ''}
+					onsaved={() => (mailSaved = true)}
+				/>
+			</div>
+			{#if mailSaved}
+				<button
+					type="button"
+					class="{primary} self-start"
+					disabled={busy}
+					onclick={() => next(STEP.mail)}
+				>
+					{m.setup_continue()}
+				</button>
+			{:else}
+				{@render skip(STEP.mail)}
 			{/if}
 		{:else if settingUp && current === STEP.breakGlass}
 			<h2 class="text-xl font-semibold print:hidden">{m.wizard_step_break_glass()}</h2>

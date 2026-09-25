@@ -17,6 +17,7 @@ export interface SetupStatus {
 export const STEP = {
 	administrator: 1,
 	directory: 2,
+	mail: 3,
 	breakGlass: 4,
 	recoveryKey: 5,
 	done: 6
