@@ -72,8 +72,11 @@
 	}
 </script>
 
-<section class="mt-8 max-w-2xl rounded-card border border-line bg-surface p-6">
-	<h2 class="text-xl font-semibold">{title}</h2>
+<section
+	class="mt-8 max-w-2xl rounded-card border border-line bg-surface p-6"
+	aria-labelledby="{id}-title"
+>
+	<h2 id="{id}-title" class="text-xl font-semibold">{title}</h2>
 	<p class="mt-1 text-sm text-ink-2">{hint}</p>
 
 	{#if rules.length === 0}
