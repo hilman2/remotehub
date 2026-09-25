@@ -4,9 +4,12 @@
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import LogOut from '@lucide/svelte/icons/log-out';
+	import ShieldCheck from '@lucide/svelte/icons/shield-check';
+	import ShieldOff from '@lucide/svelte/icons/shield-off';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import UserPlus from '@lucide/svelte/icons/user-plus';
 	import { errorMessage } from '$lib/api/errors';
+	import { resetFactor } from '$lib/api/secondFactor';
 	import {
 		blockUser,
 		deleteUser,
@@ -28,7 +31,7 @@
 	import { loadMethods, session } from '$lib/session.svelte';
 
 	/** A change that waits for the administrator's confirmation. */
-	type Change = 'block' | 'unblock' | 'sessions' | 'recovery' | 'delete';
+	type Change = 'block' | 'unblock' | 'sessions' | 'recovery' | 'factor' | 'delete';
 
 	type Open =
 		| { type: 'invite' }
@@ -86,6 +89,9 @@
 		if (user.kind === 'local') {
 			items.push({ label: m.users_recovery(), icon: KeyRound, onselect: confirm('recovery') });
 		}
+		if (user.kind === 'directory' && user.second_factor) {
+			items.push({ label: m.users_reset_factor(), icon: ShieldOff, onselect: confirm('factor') });
+		}
 		if (user.blocked) {
 			items.push({ label: m.users_unblock(), icon: CircleCheck, onselect: confirm('unblock') });
 		} else if (!isSelf(user)) {
@@ -122,6 +128,7 @@
 			unblock: unblockUser,
 			sessions: endSessions,
 			recovery: issueRecovery,
+			factor: resetFactor,
 			delete: deleteUser
 		}[change](user.id);
 		busy = false;
@@ -142,6 +149,7 @@
 		unblock: (name) => m.users_unblock_confirm({ name }),
 		sessions: (name) => m.users_end_sessions_confirm({ name }),
 		recovery: (name) => m.users_recovery_confirm({ name }),
+		factor: (name) => m.users_reset_factor_confirm({ name }),
 		delete: (name) => m.users_delete_confirm({ name })
 	};
 
@@ -150,6 +158,7 @@
 		unblock: m.users_unblock,
 		sessions: m.users_end_sessions,
 		recovery: m.users_recovery,
+		factor: m.users_reset_factor,
 		delete: m.catalog_delete
 	};
 
@@ -200,6 +209,7 @@
 					<th class="px-4 py-2 font-medium">{m.field_name()}</th>
 					<th class="px-4 py-2 font-medium">{m.users_col_source()}</th>
 					<th class="px-4 py-2 font-medium">{m.users_col_state()}</th>
+					<th class="px-4 py-2 font-medium">{m.users_col_second_factor()}</th>
 					<th class="px-4 py-2 font-medium">{m.users_col_last_sign_in()}</th>
 					<th class="px-4 py-2 font-medium">{m.users_col_sessions()}</th>
 					<th class="px-4 py-2"><span class="sr-only">{m.users_actions()}</span></th>
@@ -227,6 +237,17 @@
 								{:else}
 									<CircleCheck size={14} class="text-ok" aria-hidden="true" />
 									{m.users_active()}
+								{/if}
+							</span>
+						</td>
+						<td class="px-4 py-2">
+							<span class="inline-flex items-center gap-2 text-ink-2">
+								{#if user.second_factor}
+									<ShieldCheck size={14} class="text-ok" aria-hidden="true" />
+									{m.users_factor_on()}
+								{:else}
+									<ShieldOff size={14} class="text-ink-3" aria-hidden="true" />
+									{m.users_factor_off()}
 								{/if}
 							</span>
 						</td>

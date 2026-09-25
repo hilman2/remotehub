@@ -30,8 +30,17 @@ export async function loadSession(): Promise<void> {
 	session.loaded = true;
 }
 
-export async function signIn(username: string, password: string): Promise<ApiResult<User>> {
-	const result = await api<User>('POST', '/api/session', { username, password });
+/**
+ * Signs in with the directory. `second` carries a code of the authenticator
+ * app once the server asked for one, and the key it offered when the app is
+ * set up now (#107).
+ */
+export async function signIn(
+	username: string,
+	password: string,
+	second: { code?: string; totp_secret?: string } = {}
+): Promise<ApiResult<User>> {
+	const result = await api<User>('POST', '/api/session', { username, password, ...second });
 	if (result.ok) session.user = result.data;
 	return result;
 }

@@ -170,6 +170,61 @@ test('an administrator invites an account on the users page and blocks it', asyn
 	await own.close();
 });
 
+/** Signs in with a directory account of the lab, up to the password. */
+async function typeDirectory(page: Page, user: string, password: string) {
+	await page.goto('/sign-in');
+	await page.getByRole('button', { name: 'Company account (AD)' }).click();
+	await page.getByLabel('User name').fill(user);
+	await page.getByLabel('Password').fill(password);
+	await page.getByRole('button', { name: 'Sign in' }).click();
+}
+
+test('a directory account that needs a second factor sets it up at sign-in', async ({
+	page,
+	browser
+}) => {
+	// alice asks dave for an app; an earlier run may have left one.
+	const admin = await (await browser.newContext()).newPage();
+	await typeDirectory(admin, 'alice', 'Alice-Passw0rd!');
+	await expect(admin.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
+	await admin.evaluate(async () => {
+		const found = await (await fetch('/api/directory/principals?q=dave')).json();
+		const dave = found.find((p: { name: string }) => p.name.startsWith('Dave'));
+		await fetch(`/api/second-factor-principals/${dave.sid}`, {
+			method: 'PUT',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ principal_kind: 'user', principal_name: dave.name })
+		});
+		const users = await (await fetch('/api/users')).json();
+		const known = users.find((u: { username: string }) => u.username === 'dave');
+		if (known) await fetch(`/api/users/${known.id}/second-factor`, { method: 'DELETE' });
+	});
+
+	await typeDirectory(page, 'dave', 'Dave-Passw0rd!');
+	await expect(page.getByText('Your account needs an authenticator app.')).toBeVisible();
+	const secret = (await page.getByTestId('totp-secret').innerText()).trim();
+	await page.getByLabel('Code from the app').fill(totp(secret, step()));
+	await page.getByRole('button', { name: 'Set up' }).click();
+	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
+
+	// From now on, every sign-in asks for a code.
+	await signOut(page);
+	await typeDirectory(page, 'dave', 'Dave-Passw0rd!');
+	await page.getByLabel('Code', { exact: true }).fill(totp(secret, step() + 5));
+	await page.getByRole('button', { name: 'Confirm' }).click();
+	await expect(page.getByRole('alert')).toHaveText('The code is not right. Please try again.');
+	await page.getByLabel('Code', { exact: true }).fill(totp(secret, step() + 1));
+	await page.getByRole('button', { name: 'Confirm' }).click();
+	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
+
+	await admin.evaluate(async () => {
+		const rules = await (await fetch('/api/second-factor-principals')).json();
+		for (const rule of rules) {
+			await fetch(`/api/second-factor-principals/${rule.principal_sid}`, { method: 'DELETE' });
+		}
+	});
+});
+
 test('a Kratos session left in the browser never signs in whoever types', async ({
 	page,
 	context

@@ -13,6 +13,8 @@ export interface UserRow {
 	/** RFC 3339, UTC; null before the first sign-in. */
 	last_sign_in_at: string | null;
 	blocked: boolean;
+	/** Signs in with a second factor (#107). */
+	second_factor: boolean;
 	/** Sessions that have not run out. */
 	sessions: number;
 }
