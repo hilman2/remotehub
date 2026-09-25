@@ -19,8 +19,15 @@ export const DEFAULT_PORTS: Record<Protocol, number> = {
 /** Protocols shown as a picture (through guacd) rather than a terminal. */
 export const isGraphical = (protocol: Protocol) => protocol !== 'ssh';
 
-export type AuthMode = 'stored' | 'ask' | 'own' | 'certificate' | 'laps';
-export const AUTH_MODES: readonly AuthMode[] = ['stored', 'ask', 'own', 'laps', 'certificate'];
+export type AuthMode = 'stored' | 'device' | 'ask' | 'own' | 'certificate' | 'laps';
+export const AUTH_MODES: readonly AuthMode[] = [
+	'stored',
+	'device',
+	'ask',
+	'own',
+	'laps',
+	'certificate'
+];
 
 /**
  * Sign-in modes a protocol offers: certificates are SSH's own, and LAPS
@@ -62,6 +69,16 @@ export interface Device {
 	host_key_fingerprint: string | null;
 	/** The site connector the device is reached through; null: directly. */
 	connector_id: string | null;
+	/**
+	 * Sign-in mode `device`: its own credentials as far as they are shown;
+	 * password and key stay on the server.
+	 */
+	username: string;
+	domain: string;
+	secret_kind: CredentialKind;
+	key_algorithm: string | null;
+	key_fingerprint: string | null;
+	has_certificate: boolean;
 	role: Role;
 }
 
@@ -89,6 +106,8 @@ export interface Tree {
 	may_create_top_level: boolean;
 	/** Folders this user has open in the tree; all others are closed. */
 	open: string[];
+	/** Whether this user states a purpose before every connection (#90). */
+	purpose_required: boolean;
 }
 
 export interface DeviceInput {
@@ -102,6 +121,15 @@ export interface DeviceInput {
 	description: string;
 	keyboard_layout: KeyboardLayout | null;
 	connector_id: string | null;
+	/** Sign-in mode `device` only. */
+	username?: string;
+	domain?: string;
+	secret_kind?: CredentialKind;
+	/** Left out on a change: the stored secret stays, unless the target or its kind changed. */
+	password?: string;
+	private_key?: string;
+	passphrase?: string;
+	certificate?: string;
 }
 
 export interface CredentialInput {

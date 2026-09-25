@@ -16,15 +16,21 @@
 	import { m } from '$lib/paraglide/messages';
 	import TerminalView from '$lib/terminal/TerminalView.svelte';
 	import type { Credentials, ServerEvent } from '$lib/terminal/connection';
+	import { resolve } from '$app/paths';
+	import { unlocked } from '$lib/vault/unlocked.svelte';
+	import { loadVault, readEntries, type EntryContent } from '$lib/vault/vault';
 	import { shown } from './status.svelte';
 	import type { Phase } from './tabs.svelte';
 
 	let {
 		device,
+		askPurpose = false,
 		visible = true,
 		onphase
 	}: {
 		device: Device;
+		/** Asks why before connecting, for the device's journal (#90). */
+		askPurpose?: boolean;
 		/** Hidden tabs keep running, but do not follow the window's size. */
 		visible?: boolean;
 		/** For the tab: how far the session got. */
@@ -52,12 +58,17 @@
 	let credentials = $state<Credentials | null>(null);
 	let username = $state('');
 	let password = $state('');
+	/** Given once; connecting again keeps it. */
+	let purpose = $state<string | null>(null);
+	let purposeText = $state('');
 	let status = $state<Status>({ kind: 'connecting' });
 	// Remounting the view starts a new connection.
 	let attempt = $state(0);
 
 	const graphical = $derived(isGraphical(device.protocol));
 	const needsCredentials = $derived(device.auth_mode === 'ask' && credentials === null);
+	const needsPurpose = $derived(askPurpose && purpose === null);
+	const asking = $derived(needsCredentials || needsPurpose);
 	const phase = $derived<Phase>(
 		status.kind === 'connecting' || status.kind === 'connected' || status.kind === 'closed'
 			? status.kind
@@ -100,10 +111,43 @@
 		onphase?.(phase);
 	});
 
+	/**
+	 * Entries of the unlocked personal vault that have a password (#92). The
+	 * browser opens them and sends the chosen one as if it were typed: the
+	 * server never reads the vault.
+	 */
+	let fromVault = $state<EntryContent[] | null>(null);
+
+	$effect(() => {
+		const key = unlocked.key;
+		if (!needsCredentials || !key) {
+			fromVault = null;
+			return;
+		}
+		let current = true;
+		(async () => {
+			const stored = await loadVault();
+			if (!stored.ok || !current) return;
+			const entries = await readEntries(key, stored.data);
+			if (!current) return;
+			fromVault = entries.flatMap((entry) => (entry.content?.password ? [entry.content] : []));
+		})();
+		return () => {
+			current = false;
+		};
+	});
+
+	function useEntry(index: string) {
+		const entry = fromVault?.[Number(index)];
+		if (!index || !entry) return;
+		username = entry.username;
+		password = entry.password;
+	}
+
 	// The footer tells about this session while it is the one on screen.
 	const owner = shown.claim();
 	$effect(() => {
-		if (visible && !error && !needsCredentials) shown.set(owner, { phase, text });
+		if (visible && !error && !asking) shown.set(owner, { phase, text });
 		else shown.release(owner);
 	});
 	$effect(() => () => shown.release(owner));
@@ -154,8 +198,11 @@
 
 	function signIn(event: SubmitEvent) {
 		event.preventDefault();
-		credentials = { username, password };
-		password = '';
+		if (needsPurpose) purpose = purposeText.trim();
+		if (needsCredentials) {
+			credentials = { username, password };
+			password = '';
+		}
 		status = { kind: 'connecting' };
 	}
 
@@ -169,35 +216,80 @@
 		<CircleAlert size={16} class="text-critical" aria-hidden="true" />
 		{error}
 	</p>
-{:else if needsCredentials}
+{:else if asking}
 	<form
 		class="mx-auto mt-16 w-full max-w-sm rounded-card border border-line bg-surface p-7"
 		onsubmit={signIn}
 		autocomplete="off"
 	>
-		<h2 class="text-2xl font-semibold">{m.terminal_credentials_title({ name: device.name })}</h2>
-		<p class="mt-1 text-sm text-ink-2">{m.terminal_credentials_hint()}</p>
-		<!-- VNC servers mostly know only a password. -->
-		<label class="mt-4 block text-sm font-medium" for="target-username-{device.id}">
-			{device.protocol === 'vnc' ? m.credentials_username_optional() : m.field_username()}
-		</label>
-		<input
-			id="target-username-{device.id}"
-			class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
-			required={device.protocol !== 'vnc'}
-			spellcheck="false"
-			bind:value={username}
-		/>
-		<label class="mt-3 block text-sm font-medium" for="target-password-{device.id}">
-			{m.field_password()}
-		</label>
-		<input
-			id="target-password-{device.id}"
-			type="password"
-			class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
-			required
-			bind:value={password}
-		/>
+		{#if needsPurpose}
+			<h2 class="text-2xl font-semibold">{m.purpose_title({ name: device.name })}</h2>
+			<p class="mt-1 text-sm text-ink-2">{m.purpose_hint()}</p>
+			<label class="mt-4 block text-sm font-medium" for="purpose-{device.id}">
+				{m.purpose_label()}
+			</label>
+			<!-- Only spaces count as nothing, as on the server. -->
+			<textarea
+				id="purpose-{device.id}"
+				class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
+				rows="3"
+				maxlength="500"
+				required
+				bind:value={purposeText}
+				oninput={(event) =>
+					event.currentTarget.setCustomValidity(
+						purposeText.trim() ? '' : m.error_purpose_required()
+					)}></textarea>
+		{:else}
+			<h2 class="text-2xl font-semibold">{m.terminal_credentials_title({ name: device.name })}</h2>
+		{/if}
+		{#if needsCredentials}
+			<p class="mt-1 text-sm text-ink-2" class:mt-5={needsPurpose}>
+				{m.terminal_credentials_hint()}
+			</p>
+			{#if fromVault && fromVault.length > 0}
+				<label class="mt-4 block text-sm font-medium" for="vault-entry-{device.id}">
+					{m.vault_use_entry()}
+				</label>
+				<select
+					id="vault-entry-{device.id}"
+					class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
+					onchange={(event) => useEntry(event.currentTarget.value)}
+				>
+					<option value="">{m.vault_choose_entry()}</option>
+					{#each fromVault as entry, index (index)}
+						<option value={String(index)}>
+							{entry.username ? `${entry.title} · ${entry.username}` : entry.title}
+						</option>
+					{/each}
+				</select>
+			{:else if !unlocked.key}
+				<a class="mt-2 inline-block text-xs text-ink-2 underline" href={resolve('/vault')}>
+					{m.vault_unlock_to_use()}
+				</a>
+			{/if}
+			<!-- VNC servers mostly know only a password. -->
+			<label class="mt-4 block text-sm font-medium" for="target-username-{device.id}">
+				{device.protocol === 'vnc' ? m.credentials_username_optional() : m.field_username()}
+			</label>
+			<input
+				id="target-username-{device.id}"
+				class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
+				required={device.protocol !== 'vnc'}
+				spellcheck="false"
+				bind:value={username}
+			/>
+			<label class="mt-3 block text-sm font-medium" for="target-password-{device.id}">
+				{m.field_password()}
+			</label>
+			<input
+				id="target-password-{device.id}"
+				type="password"
+				class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
+				required
+				bind:value={password}
+			/>
+		{/if}
 		<button
 			type="submit"
 			class="mt-6 h-12 w-full rounded-xl bg-accent font-display text-lg font-semibold text-accent-ink hover:brightness-110"
@@ -213,13 +305,14 @@
 					deviceId={device.id}
 					name={device.name}
 					{credentials}
+					{purpose}
 					{visible}
 					{onevent}
 					{onfailure}
 					{onend}
 				/>
 			{:else}
-				<TerminalView deviceId={device.id} {credentials} {visible} {onevent} {onend} />
+				<TerminalView deviceId={device.id} {credentials} {purpose} {visible} {onevent} {onend} />
 			{/if}
 		{/key}
 

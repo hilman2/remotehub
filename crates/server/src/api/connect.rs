@@ -194,6 +194,70 @@ pub fn entry<'a>(
     }
 }
 
+/// The longest purpose of a connection, in characters.
+const PURPOSE_MAX: usize = 500;
+
+/// Whether the caller states a purpose before every connection (#90): their
+/// own SID or one of their groups is among the `purpose_principals`.
+pub async fn purpose_required(db: &sqlx::PgPool, session: &Session) -> Result<bool, sqlx::Error> {
+    let sids: Vec<&String> = session.groups.iter().chain(&session.sid).collect();
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM purpose_principals WHERE principal_sid = ANY($1))",
+    )
+    .bind(sids)
+    .fetch_one(db)
+    .await
+}
+
+/// The purpose the caller gave, trimmed, or empty if they gave none and need
+/// not. Checked before anything reaches the device.
+pub async fn purpose(
+    state: &AppState,
+    session: &Session,
+    given: Option<String>,
+) -> Result<String, Problem> {
+    let given = given.unwrap_or_default().trim().to_owned();
+    if given.chars().count() > PURPOSE_MAX {
+        return Err(Problem::new(ErrorCode::InvalidRequest).param("field", "purpose"));
+    }
+    if given.is_empty() && purpose_required(&state.db, session).await? {
+        return Err(Problem::new(ErrorCode::PurposeRequired));
+    }
+    Ok(given)
+}
+
+/// Writes an opened connection into the device's journal and returns the
+/// entry, for [`journal_closed`]. A journal that cannot be written does not
+/// stop the session: the audit log has the connection as well.
+pub async fn journal_opened(
+    state: &AppState,
+    session: &Session,
+    target: &Target,
+    purpose: &str,
+) -> Option<Uuid> {
+    sqlx::query_scalar(
+        "INSERT INTO device_journal (device_id, user_id, kind, protocol, text)
+         VALUES ($1, $2, 'connection', $3, $4) RETURNING id",
+    )
+    .bind(target.id)
+    .bind(session.user_id)
+    .bind(&target.protocol)
+    .bind(purpose)
+    .fetch_one(&state.db)
+    .await
+    .inspect_err(|error| tracing::warn!(device = %target.id, %error, "cannot write the journal"))
+    .ok()
+}
+
+/// Notes the end of the session in its journal entry.
+pub async fn journal_closed(state: &AppState, entry: Option<Uuid>) {
+    let Some(entry) = entry else { return };
+    let _ = sqlx::query("UPDATE device_journal SET ended_at = now() WHERE id = $1")
+        .bind(entry)
+        .execute(&state.db)
+        .await;
+}
+
 /// How to sign in to the target, resolved on the server.
 pub enum Login {
     Password(SecretString),
@@ -273,14 +337,15 @@ pub async fn ssh_ca_public_key(State(state): State<AppState>) -> Result<String, 
         .ok_or(Problem::new(ErrorCode::NotFound))
 }
 
-/// A sealed field of the credential's current version as text.
+/// A sealed field of the owner's current version as text: a credential's,
+/// or a device's own credentials'.
 async fn stored_text(
     state: &AppState,
-    credential: Uuid,
+    owner: Uuid,
     version: i32,
     field: &str,
 ) -> Result<Option<SecretString>, Problem> {
-    let secret = secrets::load(&state.db, &state.vault, credential, version, field)
+    let secret = secrets::load(&state.db, &state.vault, owner, version, field)
         .await
         .map_err(|error| {
             tracing::error!(%error, "cannot open a stored secret");
@@ -292,7 +357,38 @@ async fn stored_text(
         .map_err(|_| Problem::new(ErrorCode::Internal))
 }
 
-/// Credentials for the device's sign-in mode `stored`, `laps` or `ask`.
+/// How to sign in with the sealed secrets of `owner`'s `version`: a
+/// password, or (`kind` `ssh_key`) a key with its passphrase and certificate.
+async fn sealed_login(
+    state: &AppState,
+    owner: Uuid,
+    version: i32,
+    kind: &str,
+) -> Result<Login, Problem> {
+    if kind != "ssh_key" {
+        let password = stored_text(state, owner, version, PASSWORD_FIELD)
+            .await?
+            .ok_or(Problem::new(ErrorCode::Internal))?;
+        return Ok(Login::Password(password));
+    }
+    let private_key = stored_text(state, owner, version, PRIVATE_KEY_FIELD)
+        .await?
+        .ok_or(Problem::new(ErrorCode::Internal))?;
+    let passphrase = stored_text(state, owner, version, PASSPHRASE_FIELD).await?;
+    let certificate = stored_text(state, owner, version, CERTIFICATE_FIELD).await?;
+    let key = SshKey::parse(
+        private_key.expose_secret(),
+        passphrase.as_ref().map(|p| p.expose_secret()),
+        certificate.as_ref().map(|c| c.expose_secret()),
+    )
+    .map_err(|error| {
+        tracing::error!(%error, "a stored SSH key does not open");
+        Problem::new(ErrorCode::Internal)
+    })?;
+    Ok(Login::Key(Box::new(key)))
+}
+
+/// Credentials for the device's sign-in mode `stored`, `device`, `laps` or `ask`.
 pub async fn credentials(
     state: &AppState,
     target: &Target,
@@ -310,33 +406,10 @@ pub async fn credentials(
             .bind(credential)
             .fetch_one(&state.db)
             .await?;
-            let login = if kind == "ssh_key" {
-                let private_key = stored_text(state, credential, version, PRIVATE_KEY_FIELD)
-                    .await?
-                    .ok_or(Problem::new(ErrorCode::Internal))?;
-                let passphrase = stored_text(state, credential, version, PASSPHRASE_FIELD).await?;
-                let certificate =
-                    stored_text(state, credential, version, CERTIFICATE_FIELD).await?;
-                let key = SshKey::parse(
-                    private_key.expose_secret(),
-                    passphrase.as_ref().map(|p| p.expose_secret()),
-                    certificate.as_ref().map(|c| c.expose_secret()),
-                )
-                .map_err(|error| {
-                    tracing::error!(%error, "a stored SSH key does not open");
-                    Problem::new(ErrorCode::Internal)
-                })?;
-                Login::Key(Box::new(key))
-            } else {
-                let password = stored_text(state, credential, version, PASSWORD_FIELD)
-                    .await?
-                    .ok_or(Problem::new(ErrorCode::Internal))?;
-                Login::Password(password)
-            };
             Ok(Credentials {
                 username,
                 domain,
-                login,
+                login: sealed_login(state, credential, version, &kind).await?,
             })
         }
         "laps" => {
@@ -361,6 +434,19 @@ pub async fn credentials(
                 username: laps.account,
                 domain: laps.computer,
                 login: Login::Password(laps.password),
+            })
+        }
+        "device" => {
+            let (username, domain, version, kind): (String, String, i32, String) = sqlx::query_as(
+                "SELECT username, domain, secret_version, secret_kind FROM devices WHERE id = $1",
+            )
+            .bind(target.id)
+            .fetch_one(&state.db)
+            .await?;
+            Ok(Credentials {
+                username,
+                domain,
+                login: sealed_login(state, target.id, version, &kind).await?,
             })
         }
         "ask" => {

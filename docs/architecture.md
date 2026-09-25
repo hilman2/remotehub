@@ -89,7 +89,9 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   audited (`access.*`).
 - **Stored credentials only go where their users may send them:** linking a credential to a device, or
   changing protocol, host or port of a device that has one, needs `connect` on that credential. Otherwise
-  anyone with `edit` on a device could point it at their own server and capture the password.
+  anyone with `edit` on a device could point it at their own server and capture the password. A device's
+  own credentials (sign-in mode `device`, password sealed with the device as owner) follow the same rule:
+  another target, connector included, keeps them only if the password is entered again.
 - Objects a user cannot see answer `not_found`, so their existence does not leak; visible objects the user
   may not change answer `forbidden`. Folders on the way to something visible are shown without a role.
 
@@ -112,7 +114,10 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   data) is stored wrapped (AES-KW) once per way to unlock: a passkey's WebAuthn PRF output or the recovery
   key through HKDF, the passphrase through PBKDF2-SHA-256 (600 000 iterations). The server keeps
   ciphertext and wrapped keys for their owner only (`api/personal.rs`); nobody, the operator included, can
-  reset the passphrase. Such entries cannot be injected into connections.
+  reset the passphrase. The server cannot inject such entries into connections; the browser can: while
+  the vault is unlocked (the key stays in memory until it is locked, the user signs out or the page
+  reloads), a device that asks for credentials offers its entries, and the chosen one is sent as if
+  typed.
 - **Search** (`web/src/lib/search/rank.ts`) runs in the browser: parts of words in names, hosts,
   descriptions and paths, ranked by match and by what the user picked for the same or a similar query
   before. Picks from the device list are stored per user on the server (`search_picks`); picks in the
@@ -121,6 +126,10 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - **Session tabs** (`web/src/lib/session/`): sessions open as tabs inside the page and keep running
   while the user moves between its pages; a reload ends them. `/connect/{id}` shows one session alone,
   for a window of its own.
+- **Device journal** (`device_journal`, `api/journal.rs`): every opened connection with its purpose and
+  end, and the notes people leave; only ever added to, readable by who may connect. Users and groups in
+  `purpose_principals` (chosen by administrators, audited) state a purpose before every connection; the
+  server refuses the connection without one, before anything reaches the device.
 - Plaintext lives only in `secrecy`/`zeroize` types and never appears in logs, API responses (except the
   audited `reveal`), environment variables or command lines. Core dumps are disabled.
 

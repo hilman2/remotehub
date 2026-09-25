@@ -6,6 +6,7 @@
 		PROTOCOLS,
 		allows,
 		type Credential,
+		type CredentialKind,
 		type Device,
 		type DeviceInput,
 		type KeyboardLayout,
@@ -15,7 +16,13 @@
 	import { getLocale } from '$lib/i18n';
 	import { untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages';
-	import { AUTH_MODE_LABELS, PROTOCOL_LABELS, keyboardLayoutLabel } from './labels';
+	import {
+		AUTH_MODE_LABELS,
+		CREDENTIAL_KIND_LABELS,
+		PROTOCOL_LABELS,
+		keyboardLayoutLabel
+	} from './labels';
+	import SecretFields, { secretInput } from './SecretFields.svelte';
 
 	let {
 		folderId,
@@ -44,6 +51,28 @@
 	let description = $state(start?.description ?? '');
 	let keyboardLayout = $state<KeyboardLayout | ''>(start?.keyboard_layout ?? '');
 	let connectorId = $state(start?.connector_id ?? '');
+	let username = $state(start?.username ?? '');
+	let domain = $state(start?.domain ?? '');
+	let secretKind = $state<CredentialKind>(start?.secret_kind ?? 'password');
+	let password = $state('');
+	let privateKey = $state('');
+	let passphrase = $state('');
+	let certificate = $state('');
+
+	// Keys are SSH's; the other protocols sign in with passwords.
+	const kind = $derived<CredentialKind>(protocol === 'ssh' ? secretKind : 'password');
+	// The server keeps the device's own secret only for the target it was
+	// entered for; another target, another kind, or a device without one
+	// needs it anew.
+	const retarget = $derived(
+		!start ||
+			start.auth_mode !== 'device' ||
+			start.secret_kind !== kind ||
+			start.protocol !== protocol ||
+			start.host !== host.trim() ||
+			start.port !== Number(port) ||
+			(start.connector_id ?? '') !== connectorId
+	);
 
 	// Layouts by name in the UI's language; Unicode last.
 	const layouts = $derived(
@@ -78,8 +107,17 @@
 			credential_id: authMode === 'stored' ? credentialId || null : null,
 			description,
 			keyboard_layout: protocol === 'rdp' ? keyboardLayout || null : null,
-			connector_id: connectorId || null
+			connector_id: connectorId || null,
+			...(authMode === 'device'
+				? {
+						username,
+						domain,
+						secret_kind: kind,
+						...secretInput(kind, !retarget, { password, privateKey, passphrase, certificate })
+					}
+				: {})
 		});
+		password = passphrase = '';
 	}
 
 	const field = 'mt-1 w-full rounded-lg border border-line bg-page px-3 py-2';
@@ -168,6 +206,56 @@
 		<p class="mt-1 text-xs break-words text-ink-3">
 			{m.auth_certificate_hint({ url: new URL('/api/ssh-ca.pub', window.location.href).href })}
 		</p>
+	{/if}
+
+	{#if authMode === 'device'}
+		<div class="grid grid-cols-2 gap-3">
+			<div>
+				<label class={label} for="device-username">
+					{protocol === 'vnc' ? m.credentials_username_optional() : m.field_username()}
+				</label>
+				<input
+					id="device-username"
+					class={field}
+					required={protocol !== 'vnc'}
+					maxlength="256"
+					autocomplete="off"
+					spellcheck="false"
+					bind:value={username}
+				/>
+			</div>
+			<div>
+				<label class={label} for="device-domain">{m.field_domain()}</label>
+				<input
+					id="device-domain"
+					class={field}
+					maxlength="256"
+					autocomplete="off"
+					spellcheck="false"
+					bind:value={domain}
+				/>
+			</div>
+		</div>
+		{#if protocol === 'ssh'}
+			<label class={label} for="device-secret-kind">{m.credential_kind()}</label>
+			<select id="device-secret-kind" class={field} bind:value={secretKind}>
+				{#each Object.entries(CREDENTIAL_KIND_LABELS) as [value, text] (value)}
+					<option {value}>{text()}</option>
+				{/each}
+			</select>
+		{/if}
+		<SecretFields
+			id="device"
+			{kind}
+			keep={!retarget}
+			bind:password
+			bind:privateKey
+			bind:passphrase
+			bind:certificate
+		/>
+		{#if retarget && start?.auth_mode === 'device'}
+			<p class="mt-1 text-xs text-ink-3">{m.auth_device_target_changed()}</p>
+		{/if}
 	{/if}
 
 	{#if authMode === 'stored'}

@@ -53,6 +53,8 @@ export function connect(
 	deviceId: string,
 	size: Size,
 	credentials: Credentials | null,
+	/** Why the user connects; null if they were not asked (#90). */
+	purpose: string | null,
 	handlers: Handlers
 ): TerminalConnection {
 	const socket = new WebSocket(terminalUrl(deviceId));
@@ -60,7 +62,7 @@ export function connect(
 	const encoder = new TextEncoder();
 
 	socket.onopen = () => {
-		socket.send(JSON.stringify({ type: 'start', ...size, ...(credentials ?? {}) }));
+		socket.send(JSON.stringify({ type: 'start', ...size, ...(credentials ?? {}), purpose }));
 	};
 	socket.onmessage = (message) => {
 		if (message.data instanceof ArrayBuffer) {

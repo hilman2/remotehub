@@ -19,6 +19,12 @@ function device(id: string, name: string, host: string): Device {
 		certificate_fingerprint: null,
 		host_key_fingerprint: null,
 		connector_id: null,
+		username: '',
+		domain: '',
+		secret_kind: 'password',
+		key_algorithm: null,
+		key_fingerprint: null,
+		has_certificate: false,
 		role: 'edit'
 	};
 }
@@ -26,6 +32,7 @@ function device(id: string, name: string, host: string): Device {
 const tree: Tree = {
 	may_create_top_level: true,
 	open: [],
+	purpose_required: false,
 	folders: [
 		{ id: 'l', parent_id: 's', name: 'Linux', role: 'edit' },
 		{ id: 's', parent_id: null, name: 'Servers', role: 'connect' },

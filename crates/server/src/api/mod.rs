@@ -6,6 +6,7 @@ mod connect;
 mod connectors;
 mod display;
 pub mod health;
+mod journal;
 mod origin;
 mod personal;
 pub mod problem;
@@ -47,6 +48,15 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/devices/{id}/terminal", get(terminal::terminal))
         .route("/devices/{id}/display", get(display::display))
         .route("/devices/{id}/host-key", delete(catalog::reset_host_key))
+        .route(
+            "/devices/{id}/journal",
+            get(journal::journal).post(journal::add_note),
+        )
+        .route("/purpose-principals", get(journal::purpose_principals))
+        .route(
+            "/purpose-principals/{sid}",
+            put(journal::require_purpose).delete(journal::waive_purpose),
+        )
         .route("/credentials", post(catalog::create_credential))
         .route(
             "/credentials/{id}",

@@ -30,6 +30,7 @@ export const ERROR_CODES = [
 	'last_unlock',
 	'connector_in_use',
 	'connector_offline',
+	'purpose_required',
 	'directory_unavailable',
 	'database_unavailable',
 	'internal'

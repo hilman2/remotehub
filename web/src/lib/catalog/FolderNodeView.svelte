@@ -15,7 +15,8 @@
 		expanded,
 		selected,
 		onselect,
-		ontoggle
+		ontoggle,
+		onopen
 	}: {
 		node: FolderNode;
 		depth?: number;
@@ -23,6 +24,8 @@
 		selected: { kind: ObjectKind; id: string } | null;
 		onselect: (kind: ObjectKind, id: string) => void;
 		ontoggle: (id: string) => void;
+		/** A device was double-clicked. */
+		onopen: (deviceId: string) => void;
 	} = $props();
 
 	const open = $derived(expanded(node.folder.id));
@@ -74,6 +77,7 @@
 					{selected}
 					{onselect}
 					{ontoggle}
+					{onopen}
 				/>
 			{/each}
 			{#each node.devices as device (device.id)}
@@ -84,6 +88,7 @@
 						style={indent(depth + 1.4)}
 						data-selected={isSelected('device', device.id)}
 						onclick={() => onselect('device', device.id)}
+						ondblclick={() => onopen(device.id)}
 					>
 						<ProtocolChip protocol={device.protocol} />
 						<span class="truncate">{device.name}</span>

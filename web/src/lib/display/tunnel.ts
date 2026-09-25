@@ -45,6 +45,8 @@ export function createTunnel(
 	deviceId: string,
 	start: () => Start,
 	credentials: Credentials | null,
+	/** Why the user connects; null if they were not asked (#90). */
+	purpose: string | null,
 	onevent: (event: ServerEvent) => void
 ): Guacamole.Tunnel {
 	const tunnel = new Guacamole.Tunnel();
@@ -59,7 +61,7 @@ export function createTunnel(
 
 		socket = new WebSocket(displayUrl(deviceId));
 		socket.onopen = () => {
-			socket?.send(JSON.stringify({ type: 'start', ...start(), ...(credentials ?? {}) }));
+			socket?.send(JSON.stringify({ type: 'start', ...start(), ...(credentials ?? {}), purpose }));
 		};
 		socket.onmessage = (message) => {
 			if (typeof message.data !== 'string') return;

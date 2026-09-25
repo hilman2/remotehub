@@ -7,12 +7,14 @@
 	let {
 		deviceId,
 		credentials,
+		purpose,
 		visible = true,
 		onevent,
 		onend
 	}: {
 		deviceId: string;
 		credentials: Credentials | null;
+		purpose: string | null;
 		/** Takes the keyboard whenever it is shown again. */
 		visible?: boolean;
 		onevent: (event: ServerEvent) => void;
@@ -52,6 +54,7 @@
 			deviceId,
 			{ cols: terminal.cols, rows: terminal.rows },
 			credentials,
+			purpose,
 			{
 				onoutput: (data) => terminal.write(data),
 				onevent,

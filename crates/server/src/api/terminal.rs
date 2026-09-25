@@ -5,7 +5,8 @@
 //!
 //! Browser → server:
 //! - first text frame: `{"type":"start","cols":…,"rows":…}`, plus
-//!   `"username"` and `"password"` when the device asks for credentials
+//!   `"username"` and `"password"` when the device asks for credentials, and
+//!   `"purpose"` when the user must state one (#90)
 //! - binary frames: keystrokes
 //! - text frames `{"type":"resize","cols":…,"rows":…}`
 //!
@@ -47,6 +48,7 @@ enum ClientMessage {
         rows: u32,
         username: Option<String>,
         password: Option<SecretString>,
+        purpose: Option<String>,
     },
     Resize {
         cols: u32,
@@ -92,10 +94,18 @@ async fn run(
         rows,
         username,
         password,
+        purpose,
     }) = start
     else {
         send_problem(&mut socket, &Problem::new(ErrorCode::InvalidRequest)).await;
         return;
+    };
+    let purpose = match connect::purpose(&state, &session, purpose).await {
+        Ok(purpose) => purpose,
+        Err(problem) => {
+            send_problem(&mut socket, &problem).await;
+            return;
+        }
     };
     let size = Size {
         cols: cols.clamp(10, 1000),
@@ -190,11 +200,13 @@ async fn run(
             json!({
                 "protocol": "ssh", "host": target.host, "port": port, "username": username,
                 "auth_mode": target.auth_mode, "credential_id": target.credential_id,
+                "purpose": purpose,
             }),
             &address,
         ),
     )
     .await;
+    let journal = connect::journal_opened(&state, &session, &target, &purpose).await;
     tracing::info!(device = %target.id, name = %target.name, user = %session.username, "SSH session opened");
     send_json(
         &mut socket,
@@ -248,6 +260,7 @@ async fn run(
     }
     shell.close().await;
     let _ = socket.send(Message::Close(None)).await;
+    connect::journal_closed(&state, journal).await;
 
     let _ = audit::record(
         &state.db,

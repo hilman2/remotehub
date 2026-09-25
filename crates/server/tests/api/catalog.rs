@@ -858,3 +858,208 @@ async fn ssh_keys_are_checked_sealed_and_shown_only_by_fingerprint(pool: PgPool)
         (Some(2), Some(false))
     );
 }
+
+/// The sealed versions of a device's own password, oldest first.
+async fn device_secrets(pool: &PgPool, device: &str) -> Vec<i32> {
+    sqlx::query_scalar(
+        "SELECT version FROM secret_fields WHERE owner_id = $1::uuid AND field = 'password'
+         ORDER BY version",
+    )
+    .bind(device)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_device_keeps_credentials_of_its_own(pool: PgPool) {
+    let f = fixture(pool.clone()).await;
+    let device = |host: &str, password: Option<&str>| {
+        let mut body = json!({
+            "folder_id": f.linux, "name": "db01", "protocol": "ssh", "host": host, "port": 22,
+            "auth_mode": "device", "credential_id": null, "username": " admin ", "domain": "LAB",
+        });
+        if let Some(p) = password {
+            body["password"] = json!(p);
+        }
+        body
+    };
+    let refused = call(
+        &f.app,
+        &f.alice,
+        "POST",
+        "/api/devices",
+        Some(device("db01", None)),
+    )
+    .await;
+    assert_eq!(refused.json()["params"]["field"], "password");
+    let db01 = create(
+        &f.app,
+        &f.alice,
+        "/api/devices",
+        device("db01", Some("Own-S3cret!")),
+    )
+    .await;
+
+    let shown = tree(&f.app, &f.alice).await;
+    let row = shown["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["id"] == db01.as_str())
+        .unwrap();
+    assert_eq!(
+        (row["username"].as_str(), row["domain"].as_str()),
+        (Some("admin"), Some("LAB"))
+    );
+    assert!(!shown.to_string().contains("Own-S3cret!"));
+    assert_eq!(device_secrets(&pool, &db01).await, [1]);
+
+    // The same target keeps its password; another target needs it again.
+    let uri = format!("/api/devices/{db01}");
+    let put = |body: Value| call(&f.app, &f.alice, "PUT", &uri, Some(body));
+    assert_eq!(
+        put(device("db01", None)).await.status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(device_secrets(&pool, &db01).await, [1]);
+    assert_eq!(
+        put(device("evil.example", None)).await.json()["params"]["field"],
+        "password"
+    );
+    assert_eq!(
+        put(device("db01.lab", Some("N3w-S3cret!"))).await.status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(device_secrets(&pool, &db01).await, [2]);
+    let sealed: Vec<Vec<u8>> =
+        sqlx::query_scalar("SELECT ciphertext FROM secret_fields WHERE owner_id = $1::uuid")
+            .bind(&db01)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert!(sealed.iter().all(|c| !c.windows(4).any(|w| w == b"N3w-")));
+
+    // Another way to sign in drops them; coming back needs the password.
+    let mut asking = device("db01.lab", None);
+    asking["auth_mode"] = json!("ask");
+    assert_eq!(put(asking).await.status, StatusCode::NO_CONTENT);
+    assert!(device_secrets(&pool, &db01).await.is_empty());
+    assert_eq!(
+        put(device("db01.lab", None)).await.json()["params"]["field"],
+        "password"
+    );
+    assert_eq!(
+        put(device("db01.lab", Some("Th1rd!"))).await.status,
+        StatusCode::NO_CONTENT
+    );
+
+    let log = call(&f.app, &f.alice, "GET", "/api/audit", None)
+        .await
+        .json()
+        .to_string();
+    assert!(
+        !log.contains("Own-S3cret!") && !log.contains("N3w-S3cret!") && !log.contains("Th1rd!")
+    );
+
+    // Deleting the device deletes its password.
+    assert_eq!(
+        call(&f.app, &f.alice, "DELETE", &uri, None).await.status,
+        StatusCode::NO_CONTENT
+    );
+    assert!(device_secrets(&pool, &db01).await.is_empty());
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_device_keeps_an_ssh_key_of_its_own(pool: PgPool) {
+    let f = fixture(pool.clone()).await;
+    let device = |protocol: &str, secret: Value| {
+        let mut body = json!({
+            "folder_id": f.linux, "name": "git01", "protocol": protocol, "host": "git01",
+            "port": 22, "auth_mode": "device", "credential_id": null, "username": "tester",
+        });
+        body.as_object_mut()
+            .unwrap()
+            .extend(secret.as_object().unwrap().clone());
+        body
+    };
+    let key = json!({ "secret_kind": "ssh_key", "private_key": lab_key("tester_ed25519") });
+
+    // Keys are SSH's; a broken one is refused before anything is stored.
+    let rdp = call(
+        &f.app,
+        &f.alice,
+        "POST",
+        "/api/devices",
+        Some(device("rdp", key.clone())),
+    )
+    .await;
+    assert_eq!(rdp.json()["params"]["field"], "secret_kind");
+    let broken = json!({ "secret_kind": "ssh_key", "private_key": "not a key" });
+    let refused = call(
+        &f.app,
+        &f.alice,
+        "POST",
+        "/api/devices",
+        Some(device("ssh", broken)),
+    )
+    .await;
+    assert_eq!(refused.json()["params"]["field"], "private_key");
+    let keyless = json!({ "secret_kind": "ssh_key" });
+    let refused = call(
+        &f.app,
+        &f.alice,
+        "POST",
+        "/api/devices",
+        Some(device("ssh", keyless.clone())),
+    )
+    .await;
+    assert_eq!(refused.json()["params"]["field"], "private_key");
+
+    let git01 = create(&f.app, &f.alice, "/api/devices", device("ssh", key)).await;
+    let shown = tree(&f.app, &f.alice).await;
+    let row = shown["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["id"] == git01.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(row["secret_kind"], "ssh_key");
+    assert!(
+        row["key_fingerprint"]
+            .as_str()
+            .unwrap()
+            .starts_with("SHA256:")
+    );
+    assert!(!shown.to_string().contains("PRIVATE KEY"));
+    let fields: Vec<String> = sqlx::query_scalar(
+        "SELECT field FROM secret_fields WHERE owner_id = $1::uuid ORDER BY field",
+    )
+    .bind(&git01)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(fields, ["private_key"]);
+
+    // The key stays for the same target; a password instead needs one.
+    let uri = format!("/api/devices/{git01}");
+    let put = |body: Value| call(&f.app, &f.alice, "PUT", &uri, Some(body));
+    assert_eq!(
+        put(device("ssh", keyless)).await.status,
+        StatusCode::NO_CONTENT
+    );
+    let kept = tree(&f.app, &f.alice).await["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["id"] == git01.as_str())
+        .unwrap()["key_fingerprint"]
+        .clone();
+    assert_eq!(kept, row["key_fingerprint"]);
+    let password = json!({ "secret_kind": "password" });
+    assert_eq!(
+        put(device("ssh", password)).await.json()["params"]["field"],
+        "password"
+    );
+}

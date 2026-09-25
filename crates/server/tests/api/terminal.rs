@@ -700,3 +700,171 @@ async fn without_a_laps_password_there_is_no_connection(pool: PgPool) {
         );
     }
 }
+
+/// Makes alice state a purpose before every connection (#90).
+pub async fn require_purpose(app: &Router, token: &str) {
+    let response = send(
+        app,
+        authed(
+            "PUT",
+            &format!("/api/purpose-principals/{}", crate::common::ALICE_SID),
+            Some(json!({ "principal_kind": "user", "principal_name": "Alice" })),
+            token,
+        ),
+    )
+    .await;
+    assert_eq!(response.status, 204);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn without_a_purpose_nothing_reaches_the_device(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let device = create(
+        &app,
+        &token,
+        "/api/devices",
+        json!({
+            "folder_id": folder, "name": "nowhere", "protocol": "ssh", "host": "nowhere.invalid",
+            "port": 22, "auth_mode": "ask", "credential_id": null,
+        }),
+    )
+    .await;
+    require_purpose(&app, &token).await;
+    let address = serve(state).await;
+    let login = json!({ "username": "tester", "password": "x" });
+
+    for purpose in [json!(null), json!("   ")] {
+        let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+        let mut extra = login.clone();
+        extra["purpose"] = purpose;
+        start(&mut socket, extra).await;
+        assert_eq!(event(&mut socket).await["code"], "purpose_required");
+    }
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({ "purpose": "x".repeat(501) })).await;
+    assert_eq!(event(&mut socket).await["params"]["field"], "purpose");
+
+    // With a purpose, the connection goes on and fails at the device.
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    let mut extra = login.clone();
+    extra["purpose"] = json!("Rotate the logs");
+    start(&mut socket, extra).await;
+    assert_eq!(event(&mut socket).await["code"], "target_unreachable");
+    let journal = send(
+        &app,
+        crate::common::get(&format!("/api/devices/{device}/journal"), Some(&token)),
+    )
+    .await
+    .json();
+    assert_eq!(
+        journal,
+        json!([]),
+        "a failed connection is no journal entry"
+    );
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn a_session_goes_into_the_journal_with_its_purpose(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let device = stored_device(&app, &token, &folder, "journal", "Tester-Passw0rd!").await;
+    require_purpose(&app, &token).await;
+    let address = serve(state).await;
+
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({ "purpose": "  Rotate the logs " })).await;
+    expect_connected(&mut socket).await;
+    let path = format!("/api/devices/{device}/journal");
+    let running = send(&app, crate::common::get(&path, Some(&token)))
+        .await
+        .json();
+    assert_eq!(running[0]["kind"], "connection", "{running}");
+    assert_eq!(running[0]["text"], "Rotate the logs");
+    assert_eq!(running[0]["protocol"], "ssh");
+    assert_eq!(running[0]["ended_at"], Value::Null);
+
+    socket
+        .send(Message::Binary(b"exit 0\n".to_vec().into()))
+        .await
+        .unwrap();
+    assert_eq!(event(&mut socket).await["type"], "closed");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let ended = send(&app, crate::common::get(&path, Some(&token)))
+        .await
+        .json();
+    assert!(ended[0]["ended_at"].is_string(), "{ended}");
+
+    let log = send(&app, crate::common::get("/api/audit", Some(&token)))
+        .await
+        .json();
+    let opened = log
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["action"] == "connection.opened")
+        .unwrap();
+    assert_eq!(opened["details"]["purpose"], "Rotate the logs");
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn a_device_signs_in_with_credentials_of_its_own(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let device = create(
+        &app,
+        &token,
+        "/api/devices",
+        json!({
+            "folder_id": folder, "name": "own", "protocol": "ssh", "host": ssh_host(),
+            "port": 22, "auth_mode": "device", "credential_id": null,
+            "username": "tester", "password": "Tester-Passw0rd!",
+        }),
+    )
+    .await;
+    let address = serve(state).await;
+
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({})).await;
+    expect_connected(&mut socket).await;
+    socket
+        .send(Message::Binary(
+            b"echo \"own says $(whoami)\"\n".to_vec().into(),
+        ))
+        .await
+        .unwrap();
+    output_until(&mut socket, "own says tester").await;
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+#[ignore = "needs the test lab"]
+async fn a_device_signs_in_with_a_key_of_its_own(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let key = std::fs::read_to_string(
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("../../deploy/testlab/ssh/tester_ed25519_passphrase"),
+    )
+    .unwrap();
+    let device = create(
+        &app,
+        &token,
+        "/api/devices",
+        json!({
+            "folder_id": folder, "name": "own key", "protocol": "ssh", "host": ssh_host(),
+            "port": 22, "auth_mode": "device", "credential_id": null, "username": "tester",
+            "secret_kind": "ssh_key", "private_key": key, "passphrase": "Key-Passw0rd!",
+        }),
+    )
+    .await;
+    let address = serve(state).await;
+
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({})).await;
+    expect_connected(&mut socket).await;
+    socket
+        .send(Message::Binary(
+            b"echo \"key says $(whoami)\"\n".to_vec().into(),
+        ))
+        .await
+        .unwrap();
+    output_until(&mut socket, "key says tester").await;
+}

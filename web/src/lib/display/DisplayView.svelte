@@ -8,6 +8,7 @@
 		deviceId,
 		name,
 		credentials,
+		purpose,
 		visible = true,
 		onevent,
 		onfailure,
@@ -16,6 +17,7 @@
 		deviceId: string;
 		name: string;
 		credentials: Credentials | null;
+		purpose: string | null;
 		/** Takes the keyboard whenever it is shown again. */
 		visible?: boolean;
 		onevent: (event: ServerEvent) => void;
@@ -40,6 +42,7 @@
 			deviceId,
 			() => ({ ...size(), dpi: 96, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
 			credentials,
+			purpose,
 			onevent
 		);
 		const client = new Guacamole.Client(tunnel);
