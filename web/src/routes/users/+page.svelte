@@ -21,6 +21,7 @@
 	} from '$lib/api/users';
 	import Dialog from '$lib/components/Dialog.svelte';
 	import Groups from '$lib/users/Groups.svelte';
+	import Roles from '$lib/users/Roles.svelte';
 	import SettingsMenu, { type MenuItem } from '$lib/components/SettingsMenu.svelte';
 	import { formatLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
@@ -249,6 +250,7 @@
 		</table>
 	</div>
 	<Groups />
+	<Roles />
 {/if}
 
 <Dialog bind:open={dialogOpen} {title}>

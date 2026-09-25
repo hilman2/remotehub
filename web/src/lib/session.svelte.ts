@@ -9,7 +9,15 @@ export interface User {
 	kind: 'directory' | 'break_glass' | 'local';
 	/** May manage remotehub: folders at the top, grants, the audit log. */
 	admin: boolean;
+	/** Roles for remotehub itself (#106). */
+	roles: Role[];
 }
+
+export type Role = 'administrator' | 'auditor' | 'security_officer';
+
+/** Reads the audit log: auditors and administrators. */
+export const isAuditor = (user: User | null) =>
+	!!user && (user.admin || user.roles.includes('auditor'));
 
 export const session = $state<{ user: User | null; loaded: boolean }>({
 	user: null,

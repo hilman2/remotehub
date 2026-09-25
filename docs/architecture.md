@@ -81,7 +81,11 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - **Groups of remotehub's own (`/users`, `api/groups.rs`):** for installations without a directory and for
   teams it does not know. Members are directory users, directory groups and local accounts; groups do not
   nest. The session lookup adds a user's groups at every request, so a change holds at once. Deleting a
-  group removes its grants and purpose rules.
+  group removes its grants, purpose rules and roles.
+- **Roles for remotehub itself (`api/roles.rs`):** administrator, auditor (reads and checks the audit log)
+  and security officer (approves vault recoveries), given to users and groups in `role_assignments`. The
+  session lookup reads them with the groups. `REMOTEHUB_ADMIN_GROUPS` and `REMOTEHUB_ADMIN_ACCOUNTS` stay
+  the administrators an installation starts with, and break-glass accounts are administrators.
 - **Sessions:** server-side in PostgreSQL; cookie HttpOnly, Secure, SameSite=Strict; CSRF protection.
 - **User management (`/users`, `api/users.rs`):** administrators invite local accounts, block and unblock
   anyone, end sessions, issue a new sign-in code and delete local accounts. A block is `users.blocked_at`:

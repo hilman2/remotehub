@@ -71,6 +71,9 @@ Kratos and sets both variables; its own settings are in `kratos/kratos.yml` and 
 | `REMOTEHUB_ADMIN_GROUPS` | – | Groups whose members administer remotehub, separated by commas or semicolons: SIDs, or group names that are looked up in the directory at startup. |
 | `REMOTEHUB_ADMIN_ACCOUNTS` | – | Local accounts that administer remotehub: their e-mail addresses, separated by commas or semicolons. |
 
+Both name the administrators an installation starts with. They give the role further under *Users*, where the
+auditor and security officer roles are given too; those are not settings.
+
 ## Connections
 
 | Variable | Default | Meaning |

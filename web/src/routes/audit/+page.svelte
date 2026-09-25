@@ -12,7 +12,7 @@
 	import { errorMessage } from '$lib/api/errors';
 	import { formatLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
-	import { session } from '$lib/session.svelte';
+	import { isAuditor, session } from '$lib/session.svelte';
 
 	let records = $state<AuditRecord[]>([]);
 	let error = $state<string | null>(null);
@@ -51,7 +51,7 @@
 	}
 
 	$effect(() => {
-		if (session.user?.admin) load();
+		if (isAuditor(session.user)) load();
 	});
 </script>
 
@@ -59,7 +59,7 @@
 	<div>
 		<h1 class="text-4xl font-semibold">{m.audit_title()}</h1>
 	</div>
-	{#if session.user?.admin}
+	{#if isAuditor(session.user)}
 		<button
 			type="button"
 			disabled={verifying}
@@ -84,7 +84,7 @@
 	</p>
 {/if}
 
-{#if !session.user?.admin}
+{#if !isAuditor(session.user)}
 	<p class="mt-8 flex items-center gap-2 text-sm" role="alert">
 		<CircleAlert size={16} class="text-critical" aria-hidden="true" />
 		{errorMessage('forbidden')}
