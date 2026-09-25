@@ -327,15 +327,18 @@ async fn manage_accounts(action: AccountAction) -> anyhow::Result<()> {
         .invite(&email, name.trim(), INVITATION)
         .await
         .with_context(|| format!("cannot invite {email}"))?;
+    let mut tx = pool.begin().await?;
+    let user =
+        remotehub_server::kratos::add_invited(&mut *tx, &invitation, &email, name.trim()).await?;
     audit::record(
-        &pool,
+        &mut *tx,
         Entry {
             actor: Actor {
                 id: None,
                 name: "cli",
             },
             action: Action::AccountInvited,
-            object: None,
+            object: Some(("user", user)),
             details: serde_json::json!({
                 "email": email, "identity_id": invitation.identity_id,
             }),
@@ -343,6 +346,7 @@ async fn manage_accounts(action: AccountAction) -> anyhow::Result<()> {
         },
     )
     .await?;
+    tx.commit().await?;
     say(Message::AccountInvited {
         email,
         expires: invitation.expires_at.clone(),

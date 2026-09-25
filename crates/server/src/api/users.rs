@@ -28,7 +28,7 @@ use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
 use crate::AppState;
 use crate::audit::{self, Action, Actor, Entry};
-use crate::kratos::{Invitation, Kratos, KratosError};
+use crate::kratos::{self, Invitation, Kratos, KratosError};
 use crate::session::Session;
 
 /// How long an invitation's or a recovery's code lasts.
@@ -198,20 +198,23 @@ pub async fn invite(
             } => Problem::new(ErrorCode::NameTaken),
             other => unavailable(other),
         })?;
+    let mut tx = state.db.begin().await?;
+    let user = kratos::add_invited(&mut *tx, &invitation, &email, name).await?;
     audit::record(
-        &state.db,
+        &mut *tx,
         Entry {
             actor: Actor {
                 id: Some(session.user_id),
                 name: &session.username,
             },
             action: Action::AccountInvited,
-            object: None,
+            object: Some(("user", user)),
             details: json!({ "email": email, "identity_id": invitation.identity_id }),
             address: Some(&address),
         },
     )
     .await?;
+    tx.commit().await?;
     Ok((StatusCode::CREATED, Json(invitation.into())))
 }
 

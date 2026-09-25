@@ -20,6 +20,29 @@ use uuid::Uuid;
 
 use crate::config::KratosConfig;
 
+/// Adds an invited account to remotehub's users, so that administrators see
+/// it before its first sign-in. Returns its user ID. The first sign-in fills
+/// in the rest (`api::accounts`).
+pub async fn add_invited<'e>(
+    db: impl sqlx::PgExecutor<'e>,
+    invitation: &Invitation,
+    email: &str,
+    name: &str,
+) -> Result<Uuid, sqlx::Error> {
+    let name = if name.is_empty() { email } else { name };
+    sqlx::query_scalar(
+        "INSERT INTO users (kind, identity_id, username, display_name, email)
+         VALUES ('local', $1, $2, $3, $2)
+         ON CONFLICT (identity_id) DO UPDATE SET identity_id = EXCLUDED.identity_id
+         RETURNING id",
+    )
+    .bind(invitation.identity_id)
+    .bind(email)
+    .bind(name)
+    .fetch_one(db)
+    .await
+}
+
 /// Kratos answers on the internal network; a request that takes longer is
 /// as good as lost.
 const TIMEOUT: Duration = Duration::from_secs(10);

@@ -336,4 +336,20 @@ async fn an_invitation_hands_out_its_code_once(pool: PgPool) {
         !log.to_string().contains("123456"),
         "the code is not logged"
     );
+
+    // The account is listed before its first sign-in, under its address.
+    let invited: Vec<Value> = users(&app, &alice)
+        .await
+        .into_iter()
+        .filter(|u| u["kind"] == "local")
+        .collect();
+    assert_eq!(invited.len(), 1);
+    assert_eq!(
+        (
+            &invited[0]["username"],
+            &invited[0]["display_name"],
+            &invited[0]["last_sign_in_at"]
+        ),
+        (&json!("eve@example.com"), &json!("Eve"), &Value::Null)
+    );
 }
