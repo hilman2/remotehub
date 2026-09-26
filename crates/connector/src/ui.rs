@@ -6,7 +6,7 @@
 //! only script the page runs. Served over HTTPS only (see [`serve`]).
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -20,13 +20,16 @@ use axum::{Router, extract::Request};
 use data_encoding::BASE64URL_NOPAD;
 use remotehub_i18n::{self as i18n, Locale, Message};
 use serde::Deserialize;
+use time::format_description::well_known::Rfc3339;
 use time::macros::format_description;
 use time::{OffsetDateTime, PrimitiveDateTime, UtcOffset};
+use uuid::Uuid;
 
 use crate::access::{self, Access, ChangeError, Changer, Scope, Snapshot, Stored};
 use crate::agent::Site;
-use crate::inventory::{self, Device, InventoryError, Ports};
+use crate::inventory::{self, Address, Device, InventoryError, Ports};
 use crate::journal::{Entry, Event};
+use crate::protocol::{Answer, RequestTarget};
 use crate::users::Users;
 
 /// Failed sign-ins in a row that lock a name, and for how long.
@@ -136,6 +139,8 @@ pub fn router(ui: Arc<Ui>) -> Router {
         .route("/devices/remove", post(remove_device))
         .route("/groups", post(add_group))
         .route("/groups/remove", post(remove_group))
+        .route("/requests/approve", post(approve_request))
+        .route("/requests/refuse", post(refuse_request))
         .route("/app.css", get(stylesheet))
         .route("/app.js", get(script))
         .layer(middleware::from_fn(guard))
@@ -290,6 +295,7 @@ fn page(locale: Locale, body: &str) -> Html<String> {
 }
 
 const ICON_CLOSED: &str = "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"4\" y=\"11\" width=\"16\" height=\"10\" rx=\"2\"/><path d=\"M8 11V7a4 4 0 0 1 8 0v4\"/></svg>";
+const ICON_WARNING: &str = "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3 2 21h20L12 3z\"/><path d=\"M12 10v5M12 18v.5\"/></svg>";
 const ICON_OPEN: &str = "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"4\" y=\"11\" width=\"16\" height=\"10\" rx=\"2\"/><path d=\"M8 11V7a4 4 0 0 1 7.9-1\"/></svg>";
 
 // ── Signing in ───────────────────────────────────────────────────────────
@@ -469,6 +475,10 @@ async fn change_access(
         None | Some("network") => Some(Scope::Network),
         Some("device") => Some(Scope::Device { name }),
         Some("group") => Some(Scope::Group { name }),
+        // An approved request only closes; a longer time is a new request.
+        Some("request") if access == Some(Access::Closed) => {
+            name.parse().ok().map(|id| Scope::Request { id })
+        }
         Some(_) => None,
     };
     let (Some(access), Some(scope)) = (access, scope) else {
@@ -629,6 +639,85 @@ async fn remove_group(
     after_change(&ui, locale(&headers), &user, changed)
 }
 
+#[derive(Deserialize)]
+struct Answering {
+    id: Uuid,
+}
+
+/// The page saying that a request no longer waits for an answer.
+fn gone(ui: &Ui, locale: Locale, user: &str) -> Response {
+    let text = t(locale, Message::ConnectorUiErrorRequestGone {});
+    (
+        StatusCode::CONFLICT,
+        status_page(ui, locale, user, Some(text)),
+    )
+        .into_response()
+}
+
+/// Opens exactly the request's targets for the time asked (#181). Only here,
+/// by a signed-in user: nothing remotehub sends opens anything.
+async fn approve_request(
+    State(ui): State<Arc<Ui>>,
+    headers: HeaderMap,
+    Form(form): Form<Answering>,
+) -> Response {
+    let Some(user) = ui.user(&headers) else {
+        return Redirect::to("/sign-in").into_response();
+    };
+    let locale = locale(&headers);
+    let Some(request) = ui.site.requests.get(form.id) else {
+        return gone(&ui, locale, &user);
+    };
+    let now = OffsetDateTime::now_utc();
+    let until = (now + time::Duration::minutes(i64::from(request.minutes)))
+        .replace_nanosecond(0)
+        .unwrap_or(now);
+    let site = &ui.site;
+    let approved = access::approve(
+        site.gate.dir(),
+        site.gate.journal(),
+        &request,
+        until,
+        Changer::Web { user: user.clone() },
+    );
+    site.gate.reload();
+    if approved.is_ok() {
+        site.requests.answer(Answer {
+            id: request.id,
+            approved: true,
+            by: user.clone(),
+            until: until.format(&Rfc3339).ok(),
+        });
+    }
+    after_change(&ui, locale, &user, approved)
+}
+
+async fn refuse_request(
+    State(ui): State<Arc<Ui>>,
+    headers: HeaderMap,
+    Form(form): Form<Answering>,
+) -> Response {
+    let Some(user) = ui.user(&headers) else {
+        return Redirect::to("/sign-in").into_response();
+    };
+    let locale = locale(&headers);
+    let Some(request) = ui.site.requests.get(form.id) else {
+        return gone(&ui, locale, &user);
+    };
+    access::refuse(
+        &ui.site.journal,
+        &request,
+        Changer::Web { user: user.clone() },
+    );
+    ui.site.requests.answer(Answer {
+        id: request.id,
+        approved: false,
+        by: user,
+        until: None,
+    });
+    Redirect::to("/").into_response()
+}
+
 /// A `datetime-local` value at `offset` minutes east of UTC.
 fn local_time(text: &str, offset: i32) -> Option<OffsetDateTime> {
     let minutes = format_description!("[year]-[month]-[day]T[hour]:[minute]");
@@ -716,7 +805,7 @@ fn status_page(ui: &Ui, locale: Locale, user: &str, error: Option<String>) -> Ht
          <button type=\"submit\">{until_button}</button></form>\
          <form method=\"post\" action=\"/access\" class=\"permanent\"><input type=\"hidden\" name=\"action\" value=\"permanent\">\
          <button type=\"submit\">{permanent}</button><span class=\"hint\">{permanent_hint}</span></form>{close}</section>\
-         {groups}{devices}{connections}{log}",
+         {requests}{approved}{groups}{devices}{connections}{log}",
         title = t(locale, Message::ConnectorUiTitle {}),
         access_for = t(
             locale,
@@ -733,6 +822,8 @@ fn status_page(ui: &Ui, locale: Locale, user: &str, error: Option<String>) -> Ht
         sign_out = t(locale, Message::ConnectorUiSignOut {}),
         network = t(locale, Message::ConnectorUiNetwork {}),
         network_hint = t(locale, Message::ConnectorUiNetworkHint {}),
+        requests = requests(ui, &snapshot, locale),
+        approved = approved(&snapshot, locale),
         groups = groups(&snapshot, locale),
         devices = devices(&snapshot, locale),
         until_field = t(locale, Message::ConnectorUiUntilField {}),
@@ -817,6 +908,143 @@ fn row_cells(
         open_label = t(locale, Message::ConnectorUiOpen {}),
         without_end = t(locale, Message::ConnectorUiWithoutEnd {}),
         remove = t(locale, Message::ConnectorUiRemove {}),
+    )
+}
+
+/// The device of the customer's list that covers `target`, if one does,
+/// without resolving host names: only an equal name or an address in a
+/// range counts.
+fn listed_as<'a>(snapshot: &'a Snapshot, target: &RequestTarget) -> Option<&'a str> {
+    let ip = target.host.parse::<IpAddr>().ok();
+    snapshot
+        .inventory
+        .devices
+        .iter()
+        .find(|device| {
+            device.ports.iter().any(|ports| ports.contains(target.port))
+                && match (&device.address, ip) {
+                    (Address::Host(name), _) => name.eq_ignore_ascii_case(&target.host),
+                    (Address::Range(network), Some(ip)) => network.contains(ip),
+                    (Address::Range(_), None) => false,
+                }
+        })
+        .map(|device| device.name.as_str())
+}
+
+/// A request's targets: remotehub's name, and the address and port an
+/// approval opens, marked where the customer's list does not know them.
+fn targets_table(snapshot: &Snapshot, targets: &[RequestTarget], locale: Locale) -> String {
+    let rows: String = targets
+        .iter()
+        .map(|target| {
+            let listed = match listed_as(snapshot, target) {
+                Some(name) => format!(
+                    "<span class=\"row-state open\">{}</span>",
+                    t(
+                        locale,
+                        Message::ConnectorUiListedAs {
+                            name: name.to_owned()
+                        }
+                    )
+                ),
+                None => format!(
+                    "<span class=\"row-state unlisted\">{ICON_WARNING}<span>{}</span></span>",
+                    t(locale, Message::ConnectorUiNotListed {})
+                ),
+            };
+            format!(
+                "<tr><td>{}</td><td><code>{}</code></td><td>{}</td><td>{listed}</td></tr>",
+                escape(&target.name),
+                escape(&target.host),
+                target.port,
+            )
+        })
+        .collect();
+    format!(
+        "<table><thead><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr></thead><tbody>{rows}</tbody></table>",
+        t(locale, Message::ConnectorUiColTarget {}),
+        t(locale, Message::ConnectorUiColAddress {}),
+        t(locale, Message::ConnectorUiColPort {}),
+        t(locale, Message::ConnectorUiColListed {}),
+    )
+}
+
+/// remotehub's requests waiting for an answer (#181); nothing while there
+/// are none.
+fn requests(ui: &Ui, snapshot: &Snapshot, locale: Locale) -> String {
+    let waiting = ui.site.requests.waiting();
+    if waiting.is_empty() {
+        return String::new();
+    }
+    let items: String = waiting
+        .iter()
+        .map(|request| {
+            let id = request.id;
+            format!(
+                "<article class=\"request\"><p><strong>{asks}</strong></p><p class=\"reason\">{reason}</p>{targets}\
+                 <div class=\"actions\">\
+                 <form method=\"post\" action=\"/requests/approve\"><input type=\"hidden\" name=\"id\" value=\"{id}\">\
+                 <button type=\"submit\">{approve}</button></form>\
+                 <form method=\"post\" action=\"/requests/refuse\"><input type=\"hidden\" name=\"id\" value=\"{id}\">\
+                 <button type=\"submit\" class=\"danger\">{refuse}</button></form></div></article>",
+                asks = t(
+                    locale,
+                    Message::ConnectorUiRequestAsks {
+                        requester: request.requester.clone(),
+                        minutes: i64::from(request.minutes),
+                    }
+                ),
+                reason = t(
+                    locale,
+                    Message::ConnectorUiRequestReason {
+                        reason: request.reason.clone()
+                    }
+                ),
+                targets = targets_table(snapshot, &request.targets, locale),
+                approve = t(locale, Message::ConnectorUiApprove {}),
+                refuse = t(locale, Message::ConnectorUiRefuse {}),
+            )
+        })
+        .collect();
+    format!(
+        "<section class=\"card requests\"><h2>{}</h2><p class=\"hint\">{}</p>{items}</section>",
+        t(locale, Message::ConnectorUiRequests {}),
+        t(locale, Message::ConnectorUiRequestsHint {}),
+    )
+}
+
+/// The approved requests still open, each with its end and a way to close
+/// it early.
+fn approved(snapshot: &Snapshot, locale: Locale) -> String {
+    let open = snapshot.open_requests(OffsetDateTime::now_utc());
+    if open.is_empty() {
+        return String::new();
+    }
+    let items: String = open
+        .iter()
+        .map(|(id, grant)| {
+            let (_, state) = row_state(&grant.stored, None, locale);
+            format!(
+                "<article class=\"request\"><p><strong>{who}</strong></p>\
+                 <p><span class=\"row-state open\">{ICON_OPEN}<span>{state}</span></span></p>{targets}\
+                 <form method=\"post\" action=\"/access\"><input type=\"hidden\" name=\"scope\" value=\"request\">\
+                 <input type=\"hidden\" name=\"name\" value=\"{id}\"><input type=\"hidden\" name=\"action\" value=\"close\">\
+                 <button type=\"submit\" class=\"danger\">{close}</button></form></article>",
+                who = t(
+                    locale,
+                    Message::ConnectorUiApprovedFor {
+                        requester: grant.requester.clone(),
+                        reason: grant.reason.clone(),
+                    }
+                ),
+                targets = targets_table(snapshot, &grant.targets, locale),
+                close = t(locale, Message::ConnectorUiCloseRow {}),
+            )
+        })
+        .collect();
+    format!(
+        "<section class=\"card\"><h2>{}</h2>{items}</section>",
+        t(locale, Message::ConnectorUiApproved {}),
     )
 }
 
@@ -1029,8 +1257,15 @@ fn what(locale: Locale, scope: &Scope) -> String {
             Scope::Network => Message::ConnectorLogWhatNetwork {},
             Scope::Device { name } => Message::ConnectorLogWhatDevice { name: name.clone() },
             Scope::Group { name } => Message::ConnectorLogWhatGroup { name: name.clone() },
+            Scope::Request { id } => Message::ConnectorLogWhatRequest { id: short(*id) },
         },
     )
+}
+
+/// A request's id as the journal shows it: long enough to tell requests
+/// apart, short enough to read out on the phone.
+fn short(id: Uuid) -> String {
+    id.simple().to_string()[..8].to_owned()
 }
 
 /// Who changed the list, as the subject of a sentence.
@@ -1122,6 +1357,55 @@ fn describe(locale: Locale, entry: &Entry) -> String {
             Message::ConnectorLogGroupRemoved {
                 who: who(locale, by),
                 name: name.clone(),
+            },
+        ),
+        Event::RequestReceived {
+            id,
+            requester,
+            reason,
+            minutes,
+            targets,
+        } => t(
+            locale,
+            Message::ConnectorLogRequestReceived {
+                id: short(*id),
+                requester: requester.clone(),
+                targets: targets.join(", "),
+                minutes: i64::from(*minutes),
+                reason: reason.clone(),
+            },
+        ),
+        Event::RequestApproved {
+            by,
+            id,
+            requester,
+            targets,
+            until,
+            ..
+        } => rich(
+            locale,
+            Message::ConnectorLogRequestApproved {
+                who: who(locale, by),
+                id: short(*id),
+                requester: requester.clone(),
+                targets: targets.join(", "),
+                until: slot(0),
+            },
+            &[time_element(*until)],
+        ),
+        Event::RequestRefused {
+            by,
+            id,
+            requester,
+            targets,
+            ..
+        } => t(
+            locale,
+            Message::ConnectorLogRequestRefused {
+                who: who(locale, by),
+                id: short(*id),
+                requester: requester.clone(),
+                targets: targets.join(", "),
             },
         ),
         Event::ConnectionStarted {

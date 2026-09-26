@@ -292,6 +292,10 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   a closed one gets `connector_target_closed`. `GET /api/devices/{id}/connector-access` asks the same for a
   device's page and the warning in a session; the answer carries the device's end. The connector decides
   again for every stream and ends running connections to devices that close.
+- **Requests to the customer** (ADR 0013): `/api/connector-requests` (`api/connector_requests.rs`) stores a
+  user's request with its targets. The answer to each state report carries the pending ones; the connector
+  parses them strictly (`crates/connector/src/requests.rs`) and shows them. A user there approves, which
+  opens the targets as an entry of its own in `access.json`, and the next report carries the answer back.
 - All engines sit behind the trait `ProtocolEngine`, so an own RDP engine (IronRDP) can replace guacd later
   without changing API or UI.
 

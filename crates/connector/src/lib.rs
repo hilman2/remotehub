@@ -12,6 +12,8 @@
 //!   (`windows`, #166) start it
 //! - [`protocol`]: what the connector and remotehub say to each other; the
 //!   server uses the same types
+//! - [`requests`]: remotehub's requests for access, which the customer
+//!   approves or refuses (#181)
 //! - [`network`]: address ranges, for `REMOTEHUB_CONNECTOR_ALLOW` here and
 //!   the trusted proxies in the server
 
@@ -24,6 +26,7 @@ pub mod inventory;
 pub mod journal;
 pub mod network;
 pub mod protocol;
+pub mod requests;
 pub mod settings;
 pub mod ui;
 pub mod users;

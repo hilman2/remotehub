@@ -76,6 +76,12 @@ audit_actions! {
     // connector reported it.
     ConnectorOpened = "connector.opened",
     ConnectorClosed = "connector.closed",
+    // A user asked the customer for access through the connector (#181); the
+    // customer's answer as the connector reported it.
+    ConnectorAccessRequested = "connector.access_requested",
+    ConnectorAccessApproved = "connector.access_approved",
+    ConnectorAccessRefused = "connector.access_refused",
+    ConnectorAccessWithdrawn = "connector.access_withdrawn",
     PurposeRequired = "purpose.required",
     PurposeWaived = "purpose.waived",
     AccountInvited = "account.invited",

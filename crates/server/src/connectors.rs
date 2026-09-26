@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use remotehub_connector::protocol::{self, Control, State};
+use remotehub_connector::protocol::{Control, State};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
@@ -97,9 +97,10 @@ pub fn utc(text: &str) -> Option<String> {
         .and_then(|at| at.to_offset(UtcOffset::UTC).format(&Rfc3339).ok())
 }
 
-/// A report older than this counts as none: the connector reports every
-/// [`protocol::STATE_EVERY`], so it missed three.
-const REPORT_STALE: Duration = Duration::from_secs(3 * protocol::STATE_EVERY.as_secs());
+/// A report older than this counts as none. The connector reports every
+/// `protocol::STATE_EVERY`; a short outage of its network should not make
+/// its state flicker to "not reported".
+const REPORT_STALE: Duration = Duration::from_secs(180);
 
 /// Counts one carried stream while it is held.
 struct Carrying<'a> {

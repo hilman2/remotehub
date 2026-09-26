@@ -61,6 +61,31 @@ pub enum Event {
         by: Changer,
         name: String,
     },
+    /// remotehub asked for access (#181). `requester` and `reason` are as
+    /// remotehub states them; `targets` read `name (host:port)`.
+    RequestReceived {
+        id: Uuid,
+        requester: String,
+        reason: String,
+        minutes: u32,
+        targets: Vec<String>,
+    },
+    RequestApproved {
+        by: Changer,
+        id: Uuid,
+        requester: String,
+        reason: String,
+        targets: Vec<String>,
+        #[serde(with = "time::serde::rfc3339")]
+        until: OffsetDateTime,
+    },
+    RequestRefused {
+        by: Changer,
+        id: Uuid,
+        requester: String,
+        reason: String,
+        targets: Vec<String>,
+    },
     /// `device` is the device's name in remotehub and `user` the remotehub
     /// user, both as remotehub reports them; the connector cannot check
     /// them. `target` is what it connected to.

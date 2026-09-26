@@ -32,6 +32,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::catalog::{body, name};
+use super::connector_requests;
 use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
 use crate::AppState;
@@ -316,13 +317,16 @@ pub async fn report_state(
     if let Some(refusal) = other_protocol(&headers) {
         return Ok(refusal);
     }
-    let reported = checked_state(body(input)?)?;
+    let mut reported = checked_state(body(input)?)?;
+    // The answers are records of their own, not part of the access.
+    let answers = std::mem::take(&mut reported.answers);
+    let name: String = sqlx::query_scalar("SELECT name FROM connectors WHERE id = $1")
+        .bind(connector)
+        .fetch_one(&state.db)
+        .await?;
+    connector_requests::answer(&state.db, connector, &name, &answers).await?;
     let before = state.connectors.report(connector, reported.clone());
     if before.is_some_and(|before| before != reported) {
-        let name: String = sqlx::query_scalar("SELECT name FROM connectors WHERE id = $1")
-            .bind(connector)
-            .fetch_one(&state.db)
-            .await?;
         audit::record(
             &state.db,
             Entry {
@@ -351,7 +355,10 @@ pub async fn report_state(
         )
         .await?;
     }
-    Ok(StatusCode::NO_CONTENT.into_response())
+    // The requests waiting for this customer (#181): data for the connector
+    // to show, never a command.
+    let pending = connector_requests::pending(&state.db, connector).await?;
+    Ok(Json(pending).into_response())
 }
 
 /// Longest name, address or port list a report may carry.
@@ -392,6 +399,16 @@ fn checked_state(mut reported: protocol::State) -> Result<protocol::State, Probl
             return Err(invalid("devices"));
         }
         point(&mut device.until, "devices")?;
+    }
+    // An approval names its end, a refusal none.
+    if reported.answers.len() > protocol::MAX_REQUESTS {
+        return Err(invalid("answers"));
+    }
+    for answer in &mut reported.answers {
+        if !plain(&answer.by) || answer.approved != answer.until.is_some() {
+            return Err(invalid("answers"));
+        }
+        point(&mut answer.until, "answers")?;
     }
     Ok(reported)
 }

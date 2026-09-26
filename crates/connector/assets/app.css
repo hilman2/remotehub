@@ -124,6 +124,33 @@ h2 {
 	color: var(--closed);
 }
 
+/* A request's target the customer's list does not know (#181). */
+.row-state.unlisted {
+	color: var(--closed);
+	font-weight: 600;
+}
+
+/* Requests from remotehub wait for an answer: they stand out. */
+.card.requests {
+	border-color: var(--accent);
+	border-width: 2px;
+}
+
+.request {
+	border-top: 1px solid var(--line);
+	padding-top: 0.75rem;
+	margin-top: 0.75rem;
+}
+
+.request p {
+	margin: 0.25rem 0;
+}
+
+/* A reason without spaces still wraps instead of widening the page. */
+.request .reason {
+	overflow-wrap: anywhere;
+}
+
 .row-actions,
 .add {
 	display: flex;

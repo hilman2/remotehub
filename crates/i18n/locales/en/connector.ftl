@@ -80,9 +80,28 @@ connector-ui-error-no-ports = A device needs at least one port.
 connector-ui-error-exists = { $name } exists already.
 connector-ui-error-unknown = There is no { $name }.
 
+connector-ui-requests = Requests from remotehub
+connector-ui-requests-hint = Approving opens exactly the addresses and ports listed, for the time asked. Names and reasons are as remotehub states them.
+connector-ui-request-asks = { $requester } asks for access for { $minutes ->
+    [one] 1 minute
+   *[other] { $minutes } minutes
+}.
+connector-ui-request-reason = Reason: { $reason }
+connector-ui-col-target = Name in remotehub
+connector-ui-col-port = Port
+connector-ui-col-listed = Your list
+connector-ui-listed-as = listed as { $name }
+connector-ui-not-listed = not on your list
+connector-ui-approve = Approve
+connector-ui-refuse = Refuse
+connector-ui-approved = Approved requests
+connector-ui-approved-for = For { $requester }: { $reason }
+connector-ui-error-request-gone = The request is no longer waiting: remotehub withdrew it, or someone answered it already.
+
 connector-log-what-network = access
 connector-log-what-device = the device { $name }
 connector-log-what-group = the group { $name }
+connector-log-what-request = the request { $id }
 connector-log-opened-until = { $who } opened { $what } until { $until }.
 connector-log-opened-until-cli = On the command line, opened { $what } until { $until }.
 connector-log-opened-permanent = { $who } opened { $what } without end.
@@ -95,6 +114,12 @@ connector-log-device-added = { $who } added the device { $name }: { $address }, 
 connector-log-device-removed = { $who } removed the device { $name }.
 connector-log-group-added = { $who } added the group { $name }.
 connector-log-group-removed = { $who } removed the group { $name }.
+connector-log-request-received = remotehub asks, request { $id }: { $requester } wants { $targets } for { $minutes ->
+    [one] 1 minute
+   *[other] { $minutes } minutes
+}. Reason: { $reason }
+connector-log-request-approved = { $who } approved request { $id } of { $requester }: { $targets } until { $until }.
+connector-log-request-refused = { $who } refused request { $id } of { $requester }: { $targets }.
 connector-log-connection-started = { $user } connected to { $target }.
 connector-log-connection-ended = { $user } disconnected from { $target } after { $minutes ->
     [one] 1 minute

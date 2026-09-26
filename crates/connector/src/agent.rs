@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::Bytes;
 use hyper_util::rt::TokioIo;
 use rustls::{ClientConfig, RootCertStore};
@@ -39,11 +39,12 @@ use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::access::{Gate, Snapshot, later};
+use crate::access::{self, Gate, Snapshot, later};
 use crate::inventory::{self, Address};
 use crate::journal::{Event, Journal};
 use crate::network::Network;
-use crate::protocol::{self, Control, OpenDevice, OpenGroup, Report, State};
+use crate::protocol::{self, Control, CustomerRequest, OpenDevice, OpenGroup, Report, State};
+use crate::requests::{self, Requests};
 use crate::settings::{ConfigError, invalid, read_setting};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -60,6 +61,9 @@ pub struct AgentSettings {
     pub tls: Arc<ClientConfig>,
     /// Where the connector may connect to; empty allows everything.
     pub allow: Vec<Network>,
+    /// How often it reports without a change: [`protocol::STATE_EVERY`],
+    /// shorter in tests.
+    pub report_every: Duration,
 }
 
 impl AgentSettings {
@@ -96,6 +100,7 @@ impl AgentSettings {
             token: SecretString::from(token),
             tls,
             allow,
+            report_every: protocol::STATE_EVERY,
         })
     }
 }
@@ -129,6 +134,8 @@ pub struct Site {
     pub gate: Arc<Gate>,
     pub journal: Arc<Journal>,
     pub connections: Arc<Connections>,
+    /// remotehub's requests for access and the customer's answers (#181).
+    pub requests: Arc<Requests>,
 }
 
 /// A connection the connector carries now.
@@ -182,7 +189,7 @@ impl Connections {
 pub async fn run(settings: AgentSettings, site: Site) {
     tokio::join!(
         supervise(&settings, &site),
-        report(&settings, &site.gate),
+        report(&settings, &site),
         site.gate.clone().follow(),
     );
 }
@@ -278,6 +285,18 @@ async fn open_until(
         };
         if device.address.covers(host, ip, &resolved) {
             until = later(until, snapshot.device_until(device, now));
+        }
+    }
+    // An approved request opens its targets, each on its one port (#181).
+    for (_, grant) in snapshot.open_requests(now) {
+        for device in grant.devices().filter(|d| d.ports[0].contains(port)) {
+            let resolved = match &device.address {
+                Address::Host(name) => resolve(name).await,
+                Address::Range(_) => Vec::new(),
+            };
+            if device.address.covers(host, ip, &resolved) {
+                until = later(until, Some(grant.stored.access.closes_at()));
+            }
         }
     }
     until
@@ -642,14 +661,21 @@ fn refusal(status: StatusCode, theirs: Option<&HeaderValue>) -> String {
     }
 }
 
-/// Reports the access to remotehub on every change and every
-/// [`protocol::STATE_EVERY`], until the future is dropped.
-async fn report(settings: &AgentSettings, gate: &Gate) {
-    let mut access = gate.subscribe();
+/// Reports the access to remotehub on every change, every answer to a
+/// request and every [`AgentSettings::report_every`], until the future is
+/// dropped; takes the requests remotehub lists in return (#181).
+async fn report(settings: &AgentSettings, site: &Site) {
+    let mut access = site.gate.subscribe();
     loop {
-        let state = state(&access.borrow_and_update(), OffsetDateTime::now_utc());
-        if let Err(error) = post_state(settings, &state).await {
-            tracing::warn!(%error, "cannot report the access to remotehub");
+        let mut state = state(&access.borrow_and_update(), OffsetDateTime::now_utc());
+        state.answers = site.requests.answers();
+        match post_state(settings, &state).await {
+            Ok(requests) => {
+                for request in site.requests.listed(requests) {
+                    access::received(&site.journal, &request);
+                }
+            }
+            Err(error) => tracing::warn!(%error, "cannot report the access to remotehub"),
         }
         tokio::select! {
             changed = access.changed() => {
@@ -657,17 +683,29 @@ async fn report(settings: &AgentSettings, gate: &Gate) {
                     std::future::pending::<()>().await;
                 }
             }
-            () = tokio::time::sleep(protocol::STATE_EVERY) => {}
+            () = site.requests.answered.notified() => {}
+            () = tokio::time::sleep(settings.report_every) => {}
         }
     }
 }
 
 /// What the connector reports about `snapshot` at `now`: the whole network,
-/// and the open groups and devices of the list, at most
-/// [`protocol::MAX_LISTED`] of each.
+/// the open groups and devices of the list and the targets of approved
+/// requests, at most [`protocol::MAX_LISTED`] of each.
 fn state(snapshot: &Snapshot, now: OffsetDateTime) -> State {
     let text = |at: Option<OffsetDateTime>| at.and_then(|at| at.format(&Rfc3339).ok());
     let open = snapshot.network_open(now);
+    let approved = snapshot
+        .open_requests(now)
+        .into_iter()
+        .flat_map(|(_, grant)| {
+            grant.targets.iter().map(|target| OpenDevice {
+                name: target.name.clone(),
+                address: target.host.clone(),
+                ports: target.port.to_string(),
+                until: text(grant.stored.access.closes_at()),
+            })
+        });
     State {
         open,
         until: snapshot.network_until(now).and_then(text),
@@ -684,18 +722,25 @@ fn state(snapshot: &Snapshot, now: OffsetDateTime) -> State {
         devices: snapshot
             .open_devices(now)
             .into_iter()
-            .take(protocol::MAX_LISTED)
             .map(|device| OpenDevice {
                 name: device.name.clone(),
                 address: device.address.to_string(),
                 ports: inventory::ports_text(&device.ports),
                 until: text(snapshot.device_until(device, now).flatten()),
             })
+            .chain(approved)
+            .take(protocol::MAX_LISTED)
             .collect(),
+        answers: Vec::new(),
     }
 }
 
-async fn post_state(settings: &AgentSettings, state: &State) -> Result<(), String> {
+/// Posts the state; returns the requests remotehub lists in its answer, or
+/// why there are none to take.
+async fn post_state(
+    settings: &AgentSettings,
+    state: &State,
+) -> Result<Vec<CustomerRequest>, String> {
     let io = connect(settings).await?;
     let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(io))
         .await
@@ -719,14 +764,28 @@ async fn post_state(settings: &AgentSettings, state: &State) -> Result<(), Strin
         .await
         .map_err(|_| "timed out".to_owned())?
         .map_err(|e| e.to_string())?;
-    if response.status().is_success() {
-        Ok(())
-    } else {
-        Err(refusal(
+    if !response.status().is_success() {
+        return Err(refusal(
             response.status(),
             response.headers().get(protocol::HEADER),
-        ))
+        ));
     }
+    // One byte more than allowed tells a long answer from a full one.
+    let limited = Limited::new(response.into_body(), protocol::MAX_PENDING_BYTES + 1);
+    let body = tokio::time::timeout(CONNECT_TIMEOUT, limited.collect())
+        .await
+        .map_err(|_| "timed out".to_owned())?
+        .map_err(|_| {
+            format!(
+                "the answer is longer than {} bytes",
+                protocol::MAX_PENDING_BYTES
+            )
+        })?
+        .to_bytes();
+    requests::parse(&body).map_err(|error| {
+        // Nothing of it is taken; the requests listed before stay.
+        format!("dropped remotehub's answer: {error}")
+    })
 }
 
 /// Copies bytes both ways between the device and remotehub until both sides
@@ -851,6 +910,52 @@ mod tests {
         assert!(!not_open(
             reach(&["10.0.0.0/8".parse().unwrap()], &snapshot, &target).await
         ));
+    }
+
+    /// An approved request opens its targets on their ports and nothing
+    /// else, until its end (#181).
+    #[tokio::test]
+    async fn an_approved_request_opens_only_its_targets() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let other = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let other_port = other.local_addr().unwrap().port();
+        let now = OffsetDateTime::now_utc();
+        let grant = |until: OffsetDateTime| crate::access::Grant {
+            requester: "alice".into(),
+            reason: "ERP update".into(),
+            targets: vec![protocol::RequestTarget {
+                name: "sql".into(),
+                host: "127.0.0.1".into(),
+                port,
+            }],
+            stored: Stored {
+                access: Access::Open { until: Some(until) },
+                ..Stored::default()
+            },
+        };
+        let mut snapshot = Snapshot::default();
+        snapshot
+            .access
+            .requests
+            .insert(Uuid::nil(), grant(now + time::Duration::hours(1)));
+        assert!(
+            reach(&[], &snapshot, &format!("127.0.0.1:{port}"))
+                .await
+                .is_ok()
+        );
+        let refused = reach(&[], &snapshot, &format!("127.0.0.1:{other_port}")).await;
+        assert!(refused.err().is_some_and(|r| r.not_open));
+        assert_eq!(state(&snapshot, now).devices[0].name, "sql");
+        assert!(state(&snapshot, now).partly);
+
+        snapshot
+            .access
+            .requests
+            .insert(Uuid::nil(), grant(now - time::Duration::minutes(1)));
+        assert!(!snapshot.any_open(now));
+        let refused = reach(&[], &snapshot, &format!("127.0.0.1:{port}")).await;
+        assert!(refused.err().is_some_and(|r| r.not_open));
     }
 
     /// The report and the answer to a check name the latest end of what

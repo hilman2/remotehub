@@ -6,6 +6,7 @@ mod audit;
 mod catalog;
 pub mod certificate;
 mod connect;
+mod connector_requests;
 mod connectors;
 pub mod courier;
 mod directory;
@@ -203,6 +204,14 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/connectors/control", get(connectors::control))
         .route("/connectors/state", post(connectors::report_state))
         .route("/connectors/streams/{id}", get(connectors::stream))
+        .route(
+            "/connector-requests",
+            get(connector_requests::list).post(connector_requests::create),
+        )
+        .route(
+            "/connector-requests/{id}",
+            delete(connector_requests::withdraw),
+        )
         .route("/search/picks", get(search::picks).post(search::pick))
         .route("/personal/search", put(personal::save_search))
         .route(
