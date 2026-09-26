@@ -308,6 +308,7 @@
 	"field_connector": "Reached through",
 	"error_connector_in_use": "Devices are still reached through this connector.",
 	"error_connector_offline": "The device's connector is not connected.",
+	"error_connector_protocol": "The connector speaks another protocol version than remotehub. Run the connector of remotehub's release.",
 	"error_purpose_required": "State the purpose of the connection.",
 	"error_accounts_unavailable": "The service for local accounts is not reachable.",
 	"error_second_factor_required": "Confirm the sign-in with the second factor.",

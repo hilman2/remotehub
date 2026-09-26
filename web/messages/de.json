@@ -308,6 +308,7 @@
 	"field_connector": "Erreichbar über",
 	"error_connector_in_use": "Über diesen Konnektor werden noch Geräte erreicht.",
 	"error_connector_offline": "Der Konnektor des Geräts ist nicht verbunden.",
+	"error_connector_protocol": "Der Konnektor spricht eine andere Protokollversion als remotehub. Nimm den Konnektor aus dem Release von remotehub.",
 	"error_purpose_required": "Bitte den Zweck der Verbindung angeben.",
 	"error_accounts_unavailable": "Der Dienst für lokale Konten ist nicht erreichbar.",
 	"error_second_factor_required": "Die Anmeldung mit dem zweiten Faktor bestätigen.",

@@ -73,6 +73,7 @@ error_codes! {
     RecoveryNotReady = ("recovery_not_ready", CONFLICT, "The recovery is not approved, or its day has passed"),
     ConnectorInUse = ("connector_in_use", CONFLICT, "Devices are still reached through this connector"),
     ConnectorOffline = ("connector_offline", BAD_GATEWAY, "The device's connector is not connected"),
+    ConnectorProtocol = ("connector_protocol", UPGRADE_REQUIRED, "The connector speaks another protocol version than remotehub"),
     PurposeRequired = ("purpose_required", BAD_REQUEST, "State the purpose of the connection"),
     AccountsUnavailable = ("accounts_unavailable", SERVICE_UNAVAILABLE, "The service for local accounts is not reachable"),
     SecondFactorRequired = ("second_factor_required", FORBIDDEN, "Confirm the sign-in with the second factor"),

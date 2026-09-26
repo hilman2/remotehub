@@ -13,6 +13,7 @@ repository = "https://github.com/hilman2/remotehub"
 
 [workspace.dependencies]
 remotehub-browser = { path = "crates/browser" }
+remotehub-connector = { path = "crates/connector" }
 remotehub-directory = { path = "crates/directory" }
 remotehub-gateway = { path = "crates/gateway" }
 remotehub-i18n = { path = "crates/i18n" }

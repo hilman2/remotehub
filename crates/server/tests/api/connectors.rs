@@ -5,8 +5,9 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 
 use axum::Router;
+use remotehub_connector::agent::{self, AgentSettings};
+use remotehub_connector::protocol;
 use remotehub_server::AppState;
-use remotehub_server::connector_agent::{self, AgentSettings};
 use remotehub_server::connectors::{Forward, STREAM_TIMEOUT};
 use secrecy::SecretString;
 use serde_json::{Value, json};
@@ -53,14 +54,14 @@ pub async fn run_connector(
     let settings = AgentSettings {
         url: format!("http://{address}").parse().unwrap(),
         token: SecretString::from(token.to_owned()),
-        tls: connector_agent::tls_config(None).unwrap(),
+        tls: agent::tls_config(None).unwrap(),
         allow: allow
             .split(',')
             .filter(|n| !n.is_empty())
             .map(|n| n.parse().unwrap())
             .collect(),
     };
-    let task = AbortOnDrop(tokio::spawn(connector_agent::run(settings)));
+    let task = AbortOnDrop(tokio::spawn(agent::run(settings)));
     for _ in 0..100 {
         if state.connectors.is_online(id) {
             return task;
@@ -322,35 +323,70 @@ async fn a_wrong_token_opens_nothing(pool: PgPool) {
     let settings = AgentSettings {
         url: format!("http://{address}").parse().unwrap(),
         token: SecretString::from("rhc_wrong".to_owned()),
-        tls: connector_agent::tls_config(None).unwrap(),
+        tls: agent::tls_config(None).unwrap(),
         allow: Vec::new(),
     };
-    let _task = AbortOnDrop(tokio::spawn(connector_agent::run(settings)));
+    let _task = AbortOnDrop(tokio::spawn(agent::run(settings)));
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(!state.connectors.is_online(id));
 
     // Streams: only with the token, and only one that was asked for.
-    let stream = |bearer: Option<&str>| {
-        let mut request = format!("ws://{address}/api/connectors/streams/{}", Uuid::nil())
-            .into_client_request()
-            .unwrap();
-        if let Some(bearer) = bearer {
-            request
-                .headers_mut()
-                .insert("authorization", format!("Bearer {bearer}").parse().unwrap());
-        }
-        tokio_tungstenite::connect_async(request)
-    };
+    let version = protocol::VERSION.to_string();
     for (bearer, status) in [
         (None, 401),
         (Some("rhc_wrong"), 401),
         (Some(secret.as_str()), 404),
     ] {
-        match stream(bearer).await {
-            Err(tungstenite::Error::Http(response)) => {
-                assert_eq!(response.status().as_u16(), status, "{bearer:?}");
-            }
-            other => panic!("{bearer:?}: {:?}", other.map(|_| ())),
+        let path = format!("/api/connectors/streams/{}", Uuid::nil());
+        let refused = refusal(address, &path, bearer, Some(&version)).await;
+        assert_eq!(refused.status().as_u16(), status, "{bearer:?}");
+    }
+}
+
+/// A connector of another release learns which protocol version remotehub
+/// speaks, on the control socket and on streams alike.
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn a_connector_of_another_protocol_version_is_refused(pool: PgPool) {
+    let (state, app, token, _folder) = setup(pool).await;
+    let (id, secret) = new_connector(&app, &token, "lab").await;
+    let address = serve(state.clone()).await;
+    let stream = format!("/api/connectors/streams/{}", Uuid::nil());
+    for path in ["/api/connectors/control", stream.as_str()] {
+        for theirs in [None, Some("0"), Some("99")] {
+            let refused = refusal(address, path, Some(&secret), theirs).await;
+            assert_eq!(refused.status().as_u16(), 426, "{path} {theirs:?}");
+            assert_eq!(
+                refused.headers()[protocol::HEADER],
+                protocol::VERSION.to_string().as_str()
+            );
         }
+    }
+    assert!(!state.connectors.is_online(id));
+}
+
+/// The answer to a WebSocket request that remotehub refuses, signed in with
+/// `bearer` and claiming the protocol version `theirs`.
+async fn refusal(
+    address: std::net::SocketAddr,
+    path: &str,
+    bearer: Option<&str>,
+    theirs: Option<&str>,
+) -> tungstenite::http::Response<Option<Vec<u8>>> {
+    let mut request = format!("ws://{address}{path}")
+        .into_client_request()
+        .unwrap();
+    if let Some(bearer) = bearer {
+        request
+            .headers_mut()
+            .insert("authorization", format!("Bearer {bearer}").parse().unwrap());
+    }
+    if let Some(theirs) = theirs {
+        request
+            .headers_mut()
+            .insert(protocol::HEADER, theirs.parse().unwrap());
+    }
+    match tokio_tungstenite::connect_async(request).await {
+        Err(tungstenite::Error::Http(response)) => *response,
+        other => panic!("{path}: {:?}", other.map(|_| ())),
     }
 }

@@ -344,22 +344,27 @@ All sessions of the service run as one Unix user. Why, and what that means: [ADR
 ## Reach devices in other networks
 
 A site connector runs in a network that remotehub cannot reach and opens the way from there. It needs outbound
-HTTPS to `REMOTEHUB_PUBLIC_URL` and nothing inbound. It is the remotehub image, started as `connector`.
+HTTPS to `REMOTEHUB_PUBLIC_URL` and nothing inbound. It is the image `ghcr.io/hilman2/remotehub-connector`.
 
 Create the connector under *Connectors* in remotehub. Its token is shown once. On a Linux host in that network,
-put the token into a file and start the connector:
+put the token into a file and start the connector of your remotehub's release:
 
 ```bash
+version=0.3.0 # your remotehub's release: REMOTEHUB_VERSION in its .env
 sudo install -d -m 700 /opt/remotehub-connector
 sudo sh -c 'cat > /opt/remotehub-connector/token' # paste the token, then Ctrl+D
 sudo chown 65532 /opt/remotehub-connector/token && sudo chmod 400 /opt/remotehub-connector/token
-sudo docker run -d --name remotehub-connector --restart unless-stopped --read-only --no-healthcheck \
+sudo docker run -d --name remotehub-connector --restart unless-stopped --read-only \
   --cap-drop ALL --security-opt no-new-privileges \
   -v /opt/remotehub-connector/token:/run/secrets/token:ro \
   -e REMOTEHUB_URL=https://remotehub.example.com \
   -e REMOTEHUB_CONNECTOR_TOKEN_FILE=/run/secrets/token \
-  ghcr.io/hilman2/remotehub:0.1.0 connector
+  "ghcr.io/hilman2/remotehub-connector:${version}"
 ```
+
+remotehub refuses a connector of a release that speaks another protocol version; the connector's log
+(`docker logs remotehub-connector`) then names the version remotehub wants. After upgrading remotehub, start
+the connector again with the new release.
 
 The connectors page shows it as connected. Devices in that network then name it under *Reached through*. To
 keep the connector away from parts of its network, list the ranges it may reach in `REMOTEHUB_CONNECTOR_ALLOW`.

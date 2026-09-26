@@ -24,6 +24,7 @@ REGISTRY="ghcr.io/hilman2"
 IMAGE="${REGISTRY}/remotehub"
 GUACD_IMAGE="${REGISTRY}/remotehub-guacd"
 BROWSER_IMAGE="${REGISTRY}/remotehub-browser"
+CONNECTOR_IMAGE="${REGISTRY}/remotehub-connector"
 
 version="${1:-}"
 dry_run=0
@@ -76,7 +77,7 @@ ci_umgebung
 echo "── Build and try the images"
 tools="$(ci_image scripts/ci/tools.Dockerfile)"
 # --pull: the base images as they are today, not as the build cache has them.
-ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" "$IMAGE" "$GUACD_IMAGE" "$BROWSER_IMAGE" \
+ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" "$IMAGE" "$GUACD_IMAGE" "$BROWSER_IMAGE" "$CONNECTOR_IMAGE" \
   "$version" --pull
 
 ops="${CI_ABLAGE}/remotehub-ops-${version}.tar.gz"
@@ -91,7 +92,7 @@ assets="${CI_ABLAGE}/assets-${version}"
 bash "$(dirname "${BASH_SOURCE[0]}")/release-assets.sh" "$ops" "$version" "$assets"
 
 if [ "$dry_run" = 1 ]; then
-  echo "✓ dry run: ${IMAGE}:${version}, ${GUACD_IMAGE}:${version} and ${BROWSER_IMAGE}:${version} built and tried, nothing published"
+  echo "✓ dry run: ${IMAGE}:${version}, ${GUACD_IMAGE}:${version}, ${BROWSER_IMAGE}:${version} and ${CONNECTOR_IMAGE}:${version} built and tried, nothing published"
   exit 0
 fi
 
@@ -99,15 +100,16 @@ echo "── Publish"
 docker push -q "${IMAGE}:${version}"
 docker push -q "${GUACD_IMAGE}:${version}"
 docker push -q "${BROWSER_IMAGE}:${version}"
+docker push -q "${CONNECTOR_IMAGE}:${version}"
 notes="Install on a Debian or Ubuntu host: \`curl -fsSL https://github.com/${CI_GITHUB}/releases/download/${tag}/install.sh | sudo sh -s -- --version ${version}\`
-Images: \`${IMAGE}:${version}\`, \`${GUACD_IMAGE}:${version}\`, \`${BROWSER_IMAGE}:${version}\`.
+Images: \`${IMAGE}:${version}\`, \`${GUACD_IMAGE}:${version}\`, \`${BROWSER_IMAGE}:${version}\`, site connector \`${CONNECTOR_IMAGE}:${version}\`.
 Install: [docs/install.md](https://github.com/${CI_GITHUB}/blob/${tag}/docs/install.md), upgrade: [docs/install.md#upgrade](https://github.com/${CI_GITHUB}/blob/${tag}/docs/install.md#upgrade)."
 gh release create "$tag" "${assets}"/* --target "$CI_SHA" --title "remotehub ${version}" \
   --notes "$notes" --generate-notes
 
 # GHCR makes a new package private; installations pull without signing in.
 # An anonymous pull of the manifest shows whether they can.
-for repository in remotehub remotehub-guacd remotehub-browser; do
+for repository in remotehub remotehub-guacd remotehub-browser remotehub-connector; do
   token="$(curl -fsS "https://ghcr.io/token?scope=repository:hilman2/${repository}:pull" 2>/dev/null |
     sed -n 's/.*"token":"\([^"]*\)".*/\1/p' || true)"
   if ! curl -fsS -o /dev/null -H "Authorization: Bearer ${token}" \

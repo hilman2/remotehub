@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use remotehub_connector::protocol::Control;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -26,22 +26,6 @@ use uuid::Uuid;
 pub const STREAM_TIMEOUT: Duration = Duration::from_secs(15);
 /// Bytes per WebSocket message from an engine to the device.
 const CHUNK: usize = 64 * 1024;
-
-/// What remotehub sends on the control socket.
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum Control {
-    /// Connect to `target` (`host:port`) and open the stream `id`.
-    Open { id: Uuid, target: String },
-}
-
-/// What a connector sends on the control socket.
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum Report {
-    /// The stream `id` could not be opened.
-    Failed { id: Uuid, reason: String },
-}
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConnectorError {
@@ -314,7 +298,7 @@ impl Forward {
 }
 
 /// Copies bytes both ways between an engine's connection and a stream until
-/// both sides have finished.
+/// both sides have finished; the connector's `agent::carry` is the other end.
 pub async fn carry(engine: TcpStream, stream: WebSocket) {
     let (mut to_device, mut from_device) = stream.split();
     let (mut read, mut write) = engine.into_split();
@@ -377,31 +361,6 @@ pub async fn towards(service: &str) -> std::io::Result<(IpAddr, Vec<IpAddr>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn control_messages_are_json_lines_the_connector_reads() {
-        let id = Uuid::nil();
-        let open = serde_json::to_value(Control::Open {
-            id,
-            target: "ssh-target:22".into(),
-        })
-        .unwrap();
-        assert_eq!(
-            open,
-            serde_json::json!({ "type": "open", "id": id, "target": "ssh-target:22" })
-        );
-        let failed: Report = serde_json::from_str(&format!(
-            r#"{{"type":"failed","id":"{id}","reason":"refused"}}"#
-        ))
-        .unwrap();
-        assert_eq!(
-            failed,
-            Report::Failed {
-                id,
-                reason: "refused".into()
-            }
-        );
-    }
 
     #[tokio::test]
     async fn an_offline_connector_opens_nothing() {

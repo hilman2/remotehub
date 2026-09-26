@@ -2415,6 +2415,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "remotehub-connector"
+version = "0.2.2"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures-util",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pki-types",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite 0.30.0",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "remotehub-directory"
 version = "0.2.2"
 dependencies = [
@@ -2492,6 +2514,7 @@ dependencies = [
  "p256",
  "rcgen",
  "remotehub-browser",
+ "remotehub-connector",
  "remotehub-directory",
  "remotehub-gateway",
  "remotehub-i18n",

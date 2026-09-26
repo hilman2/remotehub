@@ -81,7 +81,8 @@ Settings of the `remotehub-browser` container, which opens web interfaces in Chr
 
 ## Site connector
 
-Settings of `remotehub connector`, which runs in another network and reaches devices there for remotehub.
+Settings of `remotehub-connector` (image `ghcr.io/hilman2/remotehub-connector`), which runs in another network
+and reaches devices there for remotehub.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -109,5 +110,4 @@ verify-audit`.
 | `setup-code` | Prints the link to the setup wizard with a new one-time code, which replaces the previous one. Exits with 1 once setup is complete. |
 | `account invite EMAIL [--name NAME]` | Creates a local account and prints the link and one-time code, valid for 48 hours, with which its owner sets a password and an authenticator app. |
 | `verify-audit` | Checks the audit log's hash chain; exits with 1 if it is broken. |
-| `connector` | Runs as a site connector (see above) instead of the server. |
 | `healthcheck` | Asks the running server for `/api/health`; exits with 1 unless it answers 200. |

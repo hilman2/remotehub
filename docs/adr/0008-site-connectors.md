@@ -15,8 +15,11 @@ engines.
 
 ## Decision
 
-- **The connector only carries TCP.** It is the remotehub binary itself, `remotehub connector`, in the same
-  image. It keeps a control WebSocket open to remotehub's public address, signed in with a token. When an
+- **The connector only carries TCP.** It is a binary of its own, `remotehub-connector` (crate
+  `crates/connector`, image `ghcr.io/hilman2/remotehub-connector`), that depends on no other remotehub crate,
+  so it builds without the server and for Windows too (#164). It started as `remotehub connector` in the
+  server's image. It keeps a control WebSocket open to remotehub's public address, signed in with a token and
+  its protocol version; remotehub refuses any other version. When an
   engine needs a device behind it, remotehub sends `open` with the device's host and port; the connector
   connects there and opens a second WebSocket to remotehub for this connection's bytes.
 - **One WebSocket per TCP connection**, not a multiplexer: every connection keeps TCP's own flow control, and a

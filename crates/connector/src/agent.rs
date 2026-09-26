@@ -1,6 +1,5 @@
-//! The site connector, `remotehub connector` (ADR 0008): runs in a network
-//! remotehub cannot reach, keeps a control WebSocket open to remotehub, and
-//! connects to devices there when remotehub asks. Each such connection gets
+//! The connector: keeps a control WebSocket open to remotehub, and connects
+//! to devices in its network when remotehub asks. Each such connection gets
 //! a WebSocket of its own to remotehub for its bytes.
 //!
 //! Configuration from the environment (each also as `NAME_FILE`):
@@ -18,7 +17,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::http::Uri;
 use futures_util::{SinkExt, StreamExt};
 use rustls::{ClientConfig, RootCertStore};
 use rustls_pki_types::{CertificateDer, ServerName, pem::PemObject};
@@ -27,19 +25,33 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::{StatusCode, Uri};
+use tokio_tungstenite::tungstenite::{self, Message};
 use uuid::Uuid;
 
-use crate::config::{ConfigError, read_setting};
-use crate::connectors::{Control, Report};
-use crate::proxy::Network;
+use crate::network::Network;
+use crate::protocol::{self, Control, Report};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const PING: Duration = Duration::from_secs(30);
 /// Waits between attempts to reach remotehub, growing up to the last one.
 const BACKOFF: [u64; 5] = [1, 2, 5, 10, 30];
 const CHUNK: usize = 64 * 1024;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("{0} is not set (also possible as {0}_FILE)")]
+    Missing(&'static str),
+    #[error("{name}_FILE: cannot read {path}: {reason}")]
+    File {
+        name: &'static str,
+        path: String,
+        reason: String,
+    },
+    #[error("{name}: invalid value {value:?}")]
+    Invalid { name: &'static str, value: String },
+}
 
 #[derive(Clone)]
 pub struct AgentSettings {
@@ -88,6 +100,23 @@ impl AgentSettings {
             allow,
         })
     }
+}
+
+/// `NAME_FILE` (trimmed file content) takes precedence over `NAME`; empty
+/// values count as unset. The same rule as the server's settings.
+fn read_setting(
+    lookup: &impl Fn(&str) -> Option<String>,
+    name: &'static str,
+) -> Result<Option<String>, ConfigError> {
+    if let Some(path) = lookup(&format!("{name}_FILE")).filter(|p| !p.is_empty()) {
+        let content = std::fs::read_to_string(&path).map_err(|e| ConfigError::File {
+            name,
+            path: path.clone(),
+            reason: e.to_string(),
+        })?;
+        return Ok(Some(content.trim().to_owned()).filter(|v| !v.is_empty()));
+    }
+    Ok(lookup(name).filter(|v| !v.is_empty()))
 }
 
 fn invalid(name: &'static str, value: &str) -> ConfigError {
@@ -229,12 +258,14 @@ async fn open_socket(
             .replacen("http://", "ws://", 1)
     );
     let mut request = url.into_client_request().map_err(|e| e.to_string())?;
-    request.headers_mut().insert(
+    let headers = request.headers_mut();
+    headers.insert(
         "authorization",
         format!("Bearer {}", settings.token.expose_secret())
             .parse()
             .map_err(|_| "the token is not a valid header value".to_owned())?,
     );
+    headers.insert(protocol::HEADER, protocol::VERSION.into());
     let tcp = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect((host.as_str(), port)))
         .await
         .map_err(|_| "timed out".to_owned())?
@@ -253,12 +284,36 @@ async fn open_socket(
     };
     let (socket, _) = tokio_tungstenite::client_async(request, io)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(refusal)?;
     Ok(socket)
 }
 
+/// Why remotehub did not take the WebSocket, in words an administrator can
+/// act on.
+fn refusal(error: tungstenite::Error) -> String {
+    let tungstenite::Error::Http(response) = &error else {
+        return error.to_string();
+    };
+    match response.status() {
+        StatusCode::UPGRADE_REQUIRED => {
+            let theirs = response
+                .headers()
+                .get(protocol::HEADER)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("unknown");
+            format!(
+                "remotehub speaks connector protocol version {theirs}, this connector {}: \
+                 run the connector of remotehub's release",
+                protocol::VERSION
+            )
+        }
+        StatusCode::UNAUTHORIZED => "remotehub does not know the token".to_owned(),
+        status => format!("remotehub answered {status}"),
+    }
+}
+
 /// Copies bytes both ways between the device and remotehub until both sides
-/// have finished; the counterpart of [`crate::connectors::carry`].
+/// have finished; the server's `connectors::carry` is the other end.
 async fn carry(device: TcpStream, socket: WebSocketStream<Box<dyn Io>>) {
     let (mut to_remotehub, mut from_remotehub) = socket.split();
     let (mut read, mut write) = device.into_split();
@@ -318,6 +373,20 @@ mod tests {
                 .err()
                 .as_deref(),
             Some("not allowed")
+        );
+    }
+
+    #[test]
+    fn a_refusal_says_which_protocol_remotehub_wants() {
+        let response = tungstenite::http::Response::builder()
+            .status(426)
+            .header(protocol::HEADER, "2")
+            .body(None)
+            .unwrap();
+        let reason = refusal(tungstenite::Error::Http(response.into()));
+        assert!(
+            reason.starts_with("remotehub speaks connector protocol version 2, this connector 1"),
+            "{reason}"
         );
     }
 }

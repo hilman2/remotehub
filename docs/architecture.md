@@ -32,7 +32,7 @@ remotehub server (Rust, one binary: axum on tokio)
 PostgreSQL (sqlx, migrations at start)    guacd 1.6 (own image with FreeRDP 3)
                                           browser service (Chromium on Xvnc, one per HTTPS session)
 
-Other networks: site connector (remotehub connector) ──WebSocket, outbound──▶ remotehub
+Other networks: site connector (remotehub-connector) ──WebSocket, outbound──▶ remotehub
 ```
 
 | Crate | Role |
@@ -43,6 +43,7 @@ Other networks: site connector (remotehub connector) ──WebSocket, outbound�
 | `crates/directory` | `IdentityProvider` with the LDAP implementation |
 | `crates/gateway` | `ProtocolEngine`: SSH engine, Guacamole tunnel to guacd, certificates of devices |
 | `crates/browser` | The browser service's agent (`remotehub-browser`) and remotehub's client for it |
+| `crates/connector` | The site connector (`remotehub-connector`) and its protocol, which the server uses too |
 | `crates/i18n` | `Message`, Fluent catalogs, locale negotiation |
 
 Crates are created with the issue that first needs them.
@@ -271,7 +272,7 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   Protocol; remotehub opens the display through guacd with the VNC password the service made up. One TCP
   connection to the service is the session: closing it ends Chromium.
 - **Site connectors** (ADR 0008) reach devices in networks remotehub cannot reach. A connector
-  (`remotehub connector`, `crates/server/src/connector_agent.rs`) keeps a control WebSocket open to
+  (`remotehub-connector`, `crates/connector`) keeps a control WebSocket open to
   `/api/connectors/control`; for each connection remotehub asks for, it connects to the device and opens a
   WebSocket of its own under `/api/connectors/streams/{id}`. The engines do not know: for a device with a
   connector, `connect::route` opens a forward (`crates/server/src/connectors.rs`) that only the engine in
@@ -298,10 +299,11 @@ English is the base locale, German the second; more can follow (ADR 0002).
   target with RDP and VNC, a web target with a sign-in page), guacd and the browser service on the compose
   network.
 - **CI** runs locally (`scripts/ci/lokal.sh`) and reports the commit status `lokal`; `main` requires it.
-- **Operations:** three images on GHCR, `ghcr.io/hilman2/remotehub` (`deploy/Dockerfile`: the binary and the
-  built UI on distroless, user 65532, read-only), `ghcr.io/hilman2/remotehub-guacd` (`deploy/guacd`) and
+- **Operations:** four images on GHCR, `ghcr.io/hilman2/remotehub` (`deploy/Dockerfile`: the binary and the
+  built UI on distroless, user 65532, read-only), `ghcr.io/hilman2/remotehub-guacd` (`deploy/guacd`),
   `ghcr.io/hilman2/remotehub-browser` (`deploy/browser`: Chromium, Xvnc and the agent, user 10001,
-  read-only). The ops package `deploy/ops` runs them with PostgreSQL, Kratos and, on a host of its own,
+  read-only) and, for other sites, `ghcr.io/hilman2/remotehub-connector` (`deploy/connector`: the connector on
+  distroless, user 65532, read-only). The ops package `deploy/ops` runs them with PostgreSQL, Kratos and, on a host of its own,
   Caddy (profile `caddy`): `compose.yml`, `init.sh` for `.env` and the secrets as files. PostgreSQL sits on
   an internal network that only remotehub reaches. `install.sh` (#142) sets it all up with one command and
   attaches remotehub to a reverse proxy already on the host. Installing, backup and upgrades:
