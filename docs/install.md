@@ -346,6 +346,13 @@ All sessions of the service run as one Unix user. Why, and what that means: [ADR
 A site connector runs in a network that remotehub cannot reach and opens the way from there. It needs outbound
 HTTPS to `REMOTEHUB_PUBLIC_URL` and nothing inbound. It is the image `ghcr.io/hilman2/remotehub-connector`.
 
+The customer decides when remotehub may enter. Access starts closed: the connector does not connect to
+remotehub until someone opens it, for some hours, until a point in time, or without end. Closing, or the
+time running out, ends running connections at once. The connector keeps its own log of every change and every
+connection. Why the switch sits at the connector: [ADR 0011](adr/0011-customer-controls-access.md).
+
+### Start the connector
+
 Create the connector under *Connectors* in remotehub. Its token is shown once. On a Linux host in that network,
 put the token into a file and start the connector of your remotehub's release:
 
@@ -357,17 +364,63 @@ sudo chown 65532 /opt/remotehub-connector/token && sudo chmod 400 /opt/remotehub
 sudo docker run -d --name remotehub-connector --restart unless-stopped --read-only \
   --cap-drop ALL --security-opt no-new-privileges \
   -v /opt/remotehub-connector/token:/run/secrets/token:ro \
+  -v remotehub-connector-data:/var/lib/remotehub-connector \
+  -p 127.0.0.1:8480:8480 \
   -e REMOTEHUB_URL=https://remotehub.example.com \
   -e REMOTEHUB_CONNECTOR_TOKEN_FILE=/run/secrets/token \
   "ghcr.io/hilman2/remotehub-connector:${version}"
 ```
 
-remotehub refuses a connector of a release that speaks another protocol version; the connector's log
-(`docker logs remotehub-connector`) then names the version remotehub wants. After upgrading remotehub, start
-the connector again with the new release.
+The volume `remotehub-connector-data` holds the access state, the log, the users of the web interface and its
+certificate. Keep it when you replace the container.
 
-The connectors page shows it as connected. Devices in that network then name it under *Reached through*. To
-keep the connector away from parts of its network, list the ranges it may reach in `REMOTEHUB_CONNECTOR_ALLOW`.
+The connectors page in remotehub shows the connector as *closed by the customer*. Devices in that network name
+it under *Reached through*. To keep the connector away from parts of its network, list the ranges it may reach
+in `REMOTEHUB_CONNECTOR_ALLOW`.
+
+### Open and close access
+
+The connector's web interface is at `https://localhost:8480` on its host. `-p 127.0.0.1:8480:8480` keeps it
+there; `-p 8480:8480` makes it reachable from the network. It uses a self-signed certificate, whose
+fingerprint the connector logs at start (`docker logs remotehub-connector`), so the browser warns once. To use
+a certificate of your own, see `REMOTEHUB_CONNECTOR_TLS_CERT_FILE` in
+[configuration](configuration.md#site-connector).
+
+Create a user for each person who opens and closes access. The password is shown once; `--totp` adds a
+second factor for an authenticator app:
+
+```bash
+sudo docker exec remotehub-connector remotehub-connector user add anna --totp
+```
+
+`user list`, `user reset NAME` and `user delete NAME` manage them. Five wrong attempts lock a name for five
+minutes.
+
+After signing in, the page shows whether access is open, and offers to open it for 1, 4 or 8 hours, until a
+chosen time, or without end, and to close it. Below are the running connections and the latest log entries.
+
+The same works on the command line, e.g. from a script or a scheduled task:
+
+```bash
+sudo docker exec remotehub-connector remotehub-connector open --hours 4
+sudo docker exec remotehub-connector remotehub-connector open --until 2026-10-01T18:00:00+02:00
+sudo docker exec remotehub-connector remotehub-connector open --permanent
+sudo docker exec remotehub-connector remotehub-connector close
+sudo docker exec remotehub-connector remotehub-connector status
+```
+
+### The log
+
+Every opening and closing, and every connection with its device, the remotehub user, its duration and the bytes
+transferred, go to `access.log` in the volume, one JSON object per line, and to the container's log output.
+The remotehub user is the name remotehub reports; the connector cannot check it. remotehub records openings
+and closings in its own audit log, too.
+
+### Upgrade and tokens
+
+remotehub refuses a connector of a release that speaks another protocol version; the connector's log then
+names the version remotehub wants. After upgrading remotehub, start the connector again with the new release
+and the same volume.
 
 A token cannot be shown again. If it is lost or leaked, delete the connector and create a new one; its
 devices must be moved to the new one first. Why the connector only carries connections and the engines stay

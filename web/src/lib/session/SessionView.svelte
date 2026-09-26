@@ -19,6 +19,7 @@
 	import { resolve } from '$app/paths';
 	import { unlocked } from '$lib/vault/unlocked.svelte';
 	import { loadVault, readEntries, type EntryContent } from '$lib/vault/vault';
+	import ConnectorClosing from './ConnectorClosing.svelte';
 	import { shown } from './status.svelte';
 	import type { Phase } from './tabs.svelte';
 
@@ -315,6 +316,10 @@
 				<TerminalView deviceId={device.id} {credentials} {purpose} {visible} {onevent} {onend} />
 			{/if}
 		{/key}
+
+		{#if phase === 'connected' && device.connector_id}
+			<ConnectorClosing connectorId={device.connector_id} />
+		{/if}
 
 		{#if phase === 'closed' || phase === 'failed'}
 			<div class="absolute inset-0 flex items-center justify-center bg-page/75 p-6">

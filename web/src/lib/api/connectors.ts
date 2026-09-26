@@ -10,6 +10,10 @@ export interface Connector {
 	streams: number;
 	/** Connections it has carried since remotehub started. */
 	streams_carried: number;
+	/** Whether the customer lets remotehub in (#165); null without a recent report. */
+	access: 'open' | 'closed' | null;
+	/** RFC 3339, while open until a point in time. */
+	open_until: string | null;
 	/** RFC 3339, UTC; null before its first connection. */
 	last_seen_at: string | null;
 }

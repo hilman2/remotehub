@@ -19,6 +19,7 @@ remotehub-directory.workspace = true
 remotehub-gateway.workspace = true
 remotehub-i18n.workspace = true
 remotehub-model.workspace = true
+remotehub-totp.workspace = true
 remotehub-vault.workspace = true
 
 anyhow.workspace = true
@@ -29,7 +30,6 @@ clap.workspace = true
 data-encoding.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
-hmac.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
@@ -40,7 +40,6 @@ x509-parser.workspace = true
 rustls-native-certs.workspace = true
 rustls-pki-types.workspace = true
 secrecy.workspace = true
-sha1.workspace = true
 sha2.workspace = true
 # Security keys of directory users (#129): ES256 signatures and SPKI keys.
 p256 = { workspace = true, features = ["ecdsa", "pkcs8"] }
@@ -48,6 +47,8 @@ serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+# The end of a site connector's open access, as it reports it (#165).
+time = { workspace = true, features = ["parsing", "formatting"] }
 tokio.workspace = true
 tokio-rustls.workspace = true
 tokio-tungstenite.workspace = true
@@ -60,7 +61,6 @@ zeroize.workspace = true
 [dev-dependencies]
 rcgen.workspace = true
 tempfile.workspace = true
-time.workspace = true
 # Checks that Caddy's root signed what it serves (#146).
 x509-parser = { workspace = true, features = ["verify"] }
 tower.workspace = true

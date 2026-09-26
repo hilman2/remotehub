@@ -293,7 +293,7 @@ pub struct KeyAnswer {
 /// A new secret to show, and the URI an authenticator app reads.
 pub fn offer(account: &str) -> (Zeroizing<String>, Zeroizing<String>) {
     let secret = totp::encode(totp::random_secret().as_slice());
-    let uri = totp::uri(account, &secret);
+    let uri = totp::uri("remotehub", account, &secret);
     (secret, uri)
 }
 

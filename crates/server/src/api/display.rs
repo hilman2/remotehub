@@ -224,13 +224,15 @@ async fn run(
     // pinned one, or becomes it (trust on first use, like SSH host keys).
     let port = u16::try_from(target.port).unwrap_or_default();
     let probe_route = match target.protocol.as_str() {
-        "rdp" | "https" => match connect::route(&state, &target, Engine::Server).await {
-            Ok(route) => Some(route),
-            Err(problem) => {
-                fail(&mut socket, &state, &session, &target, &problem, &address).await;
-                return;
+        "rdp" | "https" => {
+            match connect::route(&state, &target, Engine::Server, &session.username).await {
+                Ok(route) => Some(route),
+                Err(problem) => {
+                    fail(&mut socket, &state, &session, &target, &problem, &address).await;
+                    return;
+                }
             }
-        },
+        }
         _ => None,
     };
     let probed = match (target.protocol.as_str(), &probe_route) {
@@ -286,13 +288,14 @@ async fn run(
     } else {
         &state.settings.guacd
     };
-    let route = match connect::route(&state, &target, Engine::Service(engine)).await {
-        Ok(route) => route,
-        Err(problem) => {
-            fail(&mut socket, &state, &session, &target, &problem, &address).await;
-            return;
-        }
-    };
+    let route =
+        match connect::route(&state, &target, Engine::Service(engine), &session.username).await {
+            Ok(route) => route,
+            Err(problem) => {
+                fail(&mut socket, &state, &session, &target, &problem, &address).await;
+                return;
+            }
+        };
 
     // 5. HTTPS: a browser on the device, signing in with the credentials.
     let mut browser = match &spki {

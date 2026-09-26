@@ -43,8 +43,9 @@ Other networks: site connector (remotehub-connector) ──WebSocket, outbound�
 | `crates/directory` | `IdentityProvider` with the LDAP implementation |
 | `crates/gateway` | `ProtocolEngine`: SSH engine, Guacamole tunnel to guacd, certificates of devices |
 | `crates/browser` | The browser service's agent (`remotehub-browser`) and remotehub's client for it |
-| `crates/connector` | The site connector (`remotehub-connector`) and its protocol, which the server uses too |
+| `crates/connector` | The site connector (`remotehub-connector`) with its web interface, and its protocol, which the server uses too |
 | `crates/i18n` | `Message`, Fluent catalogs, locale negotiation |
+| `crates/totp` | TOTP codes, for the server and the connector |
 
 Crates are created with the issue that first needs them.
 
@@ -277,6 +278,10 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   WebSocket of its own under `/api/connectors/streams/{id}`. The engines do not know: for a device with a
   connector, `connect::route` opens a forward (`crates/server/src/connectors.rs`) that only the engine in
   question may use, and hands its address to SSH, the certificate probes, guacd or the browser service.
+- **The customer's access** (ADR 0011): a connector connects only while its customer keeps access open, in
+  its own web interface or on its command line (`crates/connector/src/access.rs`, `ui.rs`). Closed, it has no
+  control socket and posts its state to `/api/connectors/state`; `connect::route` then answers
+  `connector_closed`. The connector keeps its own journal (`access.log`) of changes and connections.
 - All engines sit behind the trait `ProtocolEngine`, so an own RDP engine (IronRDP) can replace guacd later
   without changing API or UI.
 

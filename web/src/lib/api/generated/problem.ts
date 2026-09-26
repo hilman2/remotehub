@@ -34,6 +34,7 @@ export const ERROR_CODES = [
 	'recovery_not_ready',
 	'connector_in_use',
 	'connector_offline',
+	'connector_closed',
 	'connector_protocol',
 	'purpose_required',
 	'accounts_unavailable',

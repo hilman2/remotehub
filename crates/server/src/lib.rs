@@ -22,7 +22,7 @@ pub mod second_factor;
 pub mod secrets;
 pub mod session;
 pub mod setup;
-pub mod totp;
+pub use remotehub_totp as totp;
 pub mod webauthn;
 
 use std::path::Path;

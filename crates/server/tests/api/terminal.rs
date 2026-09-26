@@ -297,6 +297,42 @@ async fn a_device_behind_a_connector_opens_only_while_it_is_connected(pool: PgPo
     assert_eq!(crate::connectors::carried(&app, &token, 1).await, 1);
 }
 
+/// Behind a connector whose customer closed access, the user learns that,
+/// not that the connector is gone (#165).
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn a_closed_connector_says_the_customer_closed_it(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let (connector, secret) = crate::connectors::new_connector(&app, &token, "lab").await;
+    let credential = create(
+        &app,
+        &token,
+        "/api/credentials",
+        json!({ "folder_id": folder, "name": "tester", "username": "tester", "password": "x" }),
+    )
+    .await;
+    let device = create(
+        &app,
+        &token,
+        "/api/devices",
+        json!({
+            "folder_id": folder, "name": "behind", "protocol": "ssh", "host": "10.1.1.1",
+            "port": 22, "auth_mode": "stored", "credential_id": credential, "connector_id": connector,
+        }),
+    )
+    .await;
+    let address = serve(state.clone()).await;
+    let _agent = crate::connectors::start_connector(
+        address,
+        &secret,
+        "",
+        remotehub_connector::access::Access::Closed,
+    );
+    crate::connectors::wait_for(|| state.connectors.access(connector).is_some(), "a report").await;
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({})).await;
+    assert_eq!(event(&mut socket).await["code"], "connector_closed");
+}
+
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
 async fn a_changed_host_key_stops_the_connection(pool: PgPool) {

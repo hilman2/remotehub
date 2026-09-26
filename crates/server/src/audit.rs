@@ -72,6 +72,10 @@ audit_actions! {
     PersonalVaultReset = "personal.vault_reset",
     ConnectorCreated = "connector.created",
     ConnectorDeleted = "connector.deleted",
+    // The customer opened or closed access at the connector (#165), as the
+    // connector reported it.
+    ConnectorOpened = "connector.opened",
+    ConnectorClosed = "connector.closed",
     PurposeRequired = "purpose.required",
     PurposeWaived = "purpose.waived",
     AccountInvited = "account.invited",

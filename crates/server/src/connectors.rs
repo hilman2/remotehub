@@ -10,11 +10,11 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use remotehub_connector::protocol::Control;
+use remotehub_connector::protocol::{self, Control, State};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -60,7 +60,14 @@ pub struct Connectors {
     carrying: Mutex<HashMap<Uuid, usize>>,
     /// Streams carried since remotehub started, per connector.
     carried: Mutex<HashMap<Uuid, u64>>,
+    /// Whether the customer lets remotehub in (#165), as each connector last
+    /// reported it.
+    access: Mutex<HashMap<Uuid, (State, Instant)>>,
 }
+
+/// A report older than this counts as none: the connector reports every
+/// [`protocol::STATE_EVERY`], so it missed three.
+const REPORT_STALE: Duration = Duration::from_secs(3 * protocol::STATE_EVERY.as_secs());
 
 /// Counts one carried stream while it is held.
 struct Carrying<'a> {
@@ -180,11 +187,35 @@ impl Connectors {
         }
     }
 
-    /// A stream to `target` through the connector.
+    /// Stores what the connector reports about its access, and returns what
+    /// it reported before, if that is recent enough to compare with.
+    pub fn report(&self, connector: Uuid, state: State) -> Option<State> {
+        self.access
+            .lock()
+            .expect("no panics while locked")
+            .insert(connector, (state, Instant::now()))
+            .filter(|(_, at)| at.elapsed() < REPORT_STALE)
+            .map(|(state, _)| state)
+    }
+
+    /// Whether the customer lets remotehub in, as the connector reported it
+    /// lately; none if it has not.
+    pub fn access(&self, connector: Uuid) -> Option<State> {
+        self.access
+            .lock()
+            .expect("no panics while locked")
+            .get(&connector)
+            .filter(|(_, at)| at.elapsed() < REPORT_STALE)
+            .map(|(state, _)| state.clone())
+    }
+
+    /// A stream to `target` through the connector, for the remotehub user
+    /// `user`, whom the connector names in its journal.
     pub async fn stream(
         &self,
         connector: Uuid,
         target: &str,
+        user: Option<&str>,
         timeout: Duration,
     ) -> Result<WebSocket, ConnectorError> {
         let control = self
@@ -204,6 +235,7 @@ impl Connectors {
             .send(Control::Open {
                 id,
                 target: target.to_owned(),
+                user: user.map(str::to_owned),
             })
             .await;
         let result = match asked {
@@ -262,11 +294,13 @@ impl Drop for Forward {
 impl Forward {
     /// Listens on `bind`, port chosen by the system, and accepts connections
     /// only from `peers`: the engine that needs the device, and nobody else
-    /// on remotehub's networks.
+    /// on remotehub's networks. `user` is the remotehub user the connections
+    /// are for.
     pub async fn open(
         connectors: Arc<Connectors>,
         connector: Uuid,
         target: String,
+        user: String,
         bind: IpAddr,
         peers: Vec<IpAddr>,
     ) -> std::io::Result<Self> {
@@ -280,8 +314,10 @@ impl Forward {
                 }
                 let connectors = connectors.clone();
                 let target = target.clone();
+                let user = user.clone();
                 tokio::spawn(async move {
-                    match connectors.stream(connector, &target, STREAM_TIMEOUT).await {
+                    let stream = connectors.stream(connector, &target, Some(&user), STREAM_TIMEOUT);
+                    match stream.await {
                         Ok(stream) => {
                             let _counted = connectors.count(connector);
                             carry(engine, stream).await;
@@ -368,7 +404,7 @@ mod tests {
         let connector = random_id();
         assert_eq!(
             connectors
-                .stream(connector, "x:1", Duration::from_secs(1))
+                .stream(connector, "x:1", None, Duration::from_secs(1))
                 .await
                 .err(),
             Some(ConnectorError::Offline)
@@ -401,15 +437,21 @@ mod tests {
             let connectors = connectors.clone();
             tokio::spawn(async move {
                 connectors
-                    .stream(connector, "ssh-target:22", Duration::from_secs(5))
+                    .stream(
+                        connector,
+                        "ssh-target:22",
+                        Some("alice"),
+                        Duration::from_secs(5),
+                    )
                     .await
                     .err()
             })
         };
-        let Some(Control::Open { id, target }) = control.recv().await else {
+        let Some(Control::Open { id, target, user }) = control.recv().await else {
             panic!("no open");
         };
         assert_eq!(target, "ssh-target:22");
+        assert_eq!(user.as_deref(), Some("alice"));
         assert!(connectors.claim(random_id(), id).is_none());
         connectors.fail(connector, id, "refused".into());
         assert_eq!(

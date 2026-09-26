@@ -18,6 +18,7 @@ remotehub-directory = { path = "crates/directory" }
 remotehub-gateway = { path = "crates/gateway" }
 remotehub-i18n = { path = "crates/i18n" }
 remotehub-model = { path = "crates/model" }
+remotehub-totp = { path = "crates/totp" }
 remotehub-vault = { path = "crates/vault" }
 
 anyhow = "1.0.104"
@@ -68,9 +69,12 @@ tokio-tungstenite = "0.30.0"
 x509-parser = "0.18.1"
 # A certificate of your own for Caddy, as a PFX file (#146).
 p12-keystore = "0.3.2"
-# Tests only: certificates to check (#146).
+# Certificates to check in the server's tests (#146); the site connector's
+# self-signed certificate and its times (#165).
 rcgen = "0.14"
 time = "0.3"
+# The site connector (#165): ends running connections when access closes.
+tokio-util = "0.7.19"
 futures-util = "0.3.31"
 
 [workspace.lints.rust]

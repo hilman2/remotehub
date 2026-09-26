@@ -767,6 +767,9 @@ name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "des"
@@ -2419,21 +2422,37 @@ name = "remotehub-connector"
 version = "0.2.2"
 dependencies = [
  "anyhow",
+ "argon2",
+ "axum",
  "clap",
+ "data-encoding",
  "futures-util",
+ "getrandom 0.4.3",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "rcgen",
+ "remotehub-i18n",
+ "remotehub-totp",
  "rustls",
  "rustls-native-certs",
  "rustls-pki-types",
  "secrecy",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
  "thiserror",
+ "time",
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite 0.30.0",
+ "tokio-util",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -2505,7 +2524,6 @@ dependencies = [
  "data-encoding",
  "futures-util",
  "getrandom 0.4.3",
- "hmac",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -2519,6 +2537,7 @@ dependencies = [
  "remotehub-gateway",
  "remotehub-i18n",
  "remotehub-model",
+ "remotehub-totp",
  "remotehub-vault",
  "rustls",
  "rustls-native-certs",
@@ -2526,7 +2545,6 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
- "sha1 0.11.0",
  "sha2 0.11.0",
  "sqlx",
  "tempfile",
@@ -2541,6 +2559,17 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "x509-parser",
+ "zeroize",
+]
+
+[[package]]
+name = "remotehub-totp"
+version = "0.2.2"
+dependencies = [
+ "data-encoding",
+ "getrandom 0.4.3",
+ "hmac",
+ "sha1 0.11.0",
  "zeroize",
 ]
 

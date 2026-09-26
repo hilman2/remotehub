@@ -1,5 +1,6 @@
 //! TOTP (RFC 6238, HMAC-SHA1, six digits, 30 seconds) for break-glass
-//! accounts and the second factor of directory users (#107).
+//! accounts, the second factor of directory users (#107) and the users of a
+//! site connector's web interface (#165).
 
 use data_encoding::BASE32_NOPAD;
 use hmac::{Hmac, KeyInit, Mac};
@@ -67,10 +68,11 @@ pub fn decode(secret: &str) -> Option<Zeroizing<Vec<u8>>> {
     (bytes.len() == SECRET_BYTES).then_some(bytes)
 }
 
-/// The `otpauth://` URI an authenticator app reads from a QR code.
-pub fn uri(account: &str, secret_base32: &str) -> Zeroizing<String> {
+/// The `otpauth://` URI an authenticator app reads from a QR code; the app
+/// lists the account under `issuer`.
+pub fn uri(issuer: &str, account: &str, secret_base32: &str) -> Zeroizing<String> {
     Zeroizing::new(format!(
-        "otpauth://totp/remotehub:{account}?secret={secret_base32}&issuer=remotehub&algorithm=SHA1&digits={DIGITS}&period={PERIOD}"
+        "otpauth://totp/{issuer}:{account}?secret={secret_base32}&issuer={issuer}&algorithm=SHA1&digits={DIGITS}&period={PERIOD}"
     ))
 }
 
