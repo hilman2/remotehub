@@ -26,6 +26,16 @@ docker build --quiet "$@" --file deploy/browser/Dockerfile --build-arg VERSION="
   --tag "${browser_image}:${tag}" .
 docker build --quiet "$@" --file deploy/connector/Dockerfile --build-arg VERSION="$version" \
   --tag "${connector_image}:${tag}" .
+# The connector for Windows (#166), as release.sh builds it: clippy checks
+# its code, only a build shows that it links.
+windows="${PWD}/.windows-check"
+rm -rf "$windows"
+docker build --quiet "$@" --file deploy/connector/windows.Dockerfile --output "type=local,dest=${windows}" .
+[ "$(head -c 2 "${windows}/remotehub-connector.exe")" = MZ ] || {
+  echo "FAILED: no Windows program in ${windows}"
+  exit 1
+}
+rm -rf "$windows"
 
 dir="${PWD}/.image-check"
 rm -rf "$dir"

@@ -308,7 +308,9 @@ English is the base locale, German the second; more can follow (ADR 0002).
   built UI on distroless, user 65532, read-only), `ghcr.io/hilman2/remotehub-guacd` (`deploy/guacd`),
   `ghcr.io/hilman2/remotehub-browser` (`deploy/browser`: Chromium, Xvnc and the agent, user 10001,
   read-only) and, for other sites, `ghcr.io/hilman2/remotehub-connector` (`deploy/connector`: the connector on
-  distroless, user 65532, read-only). The ops package `deploy/ops` runs them with PostgreSQL, Kratos and, on a host of its own,
+  distroless, user 65532, read-only). The connector also comes as `remotehub-connector.exe`, a Windows service
+  (`crates/connector/src/windows.rs`), cross-built with mingw-w64 (`deploy/connector/windows.Dockerfile`) and
+  attached to each release. The ops package `deploy/ops` runs them with PostgreSQL, Kratos and, on a host of its own,
   Caddy (profile `caddy`): `compose.yml`, `init.sh` for `.env` and the secrets as files. PostgreSQL sits on
   an internal network that only remotehub reaches. `install.sh` (#142) sets it all up with one command and
   attaches remotehub to a reverse proxy already on the host. Installing, backup and upgrades:

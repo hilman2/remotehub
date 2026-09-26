@@ -90,7 +90,7 @@ job_base() {
     wanted="$(sed -n "s/^channel = \"\(.*\)\"/\1/p" rust-toolchain.toml)"
     echo "rust-toolchain.toml: ${wanted}"
     for file in scripts/ci/tools.Dockerfile deploy/dev/rust.Dockerfile deploy/Dockerfile deploy/browser/Dockerfile \
-      deploy/connector/Dockerfile; do
+      deploy/connector/Dockerfile deploy/connector/windows.Dockerfile; do
       grep -q "^FROM rust:${wanted}-" "$file" || {
         echo "${file} does not use rust:${wanted}"
         exit 1
@@ -190,6 +190,11 @@ part_rust() { # tools lab(0|1)
 
     echo "── cargo clippy"
     cargo clippy --workspace --all-targets --locked -- -D warnings
+
+    # The site connector also runs as a Windows service (#166); its Windows
+    # code compiles only for that target.
+    echo "── cargo clippy (connector for Windows)"
+    cargo clippy --package remotehub-connector --target x86_64-pc-windows-gnu --locked -- -D warnings
 
     echo "── cargo nextest"
     cargo nextest run --workspace --locked --no-tests=warn

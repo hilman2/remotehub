@@ -2,8 +2,8 @@
 //! it, and every connection remotehub made through the connector.
 //!
 //! One JSON object per line in `access.log` in the data directory, and the
-//! same on the log output (stdout, `docker logs`). The web interface shows
-//! the latest entries.
+//! same on the log output (stdout, `docker logs`) and, on Windows, in the
+//! event log. The web interface shows the latest entries.
 
 use std::fs::OpenOptions;
 use std::io::{self, Write};
@@ -100,6 +100,8 @@ impl Journal {
         };
         let line = serde_json::to_string(&entry).expect("entries serialize");
         tracing::info!(target: "journal", "{line}");
+        #[cfg(windows)]
+        crate::windows::eventlog::journal(&entry.event, &line);
         let _writing = self.writing.lock().expect("no panics while locked");
         if let Err(error) = self.write(&line) {
             tracing::error!(%error, path = %self.path.display(), "cannot write the journal");

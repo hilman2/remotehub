@@ -7,6 +7,8 @@
 //!   the customer's record of it
 //! - [`ui`], [`https`], [`users`]: the web interface where the customer
 //!   opens and closes access
+//! - [`daemon`]: all of it running, as `run` and the Windows service
+//!   (`windows`, #166) start it
 //! - [`protocol`]: what the connector and remotehub say to each other; the
 //!   server uses the same types
 //! - [`network`]: address ranges, for `REMOTEHUB_CONNECTOR_ALLOW` here and
@@ -14,6 +16,7 @@
 
 pub mod access;
 pub mod agent;
+pub mod daemon;
 pub mod files;
 pub mod https;
 pub mod journal;
@@ -22,6 +25,8 @@ pub mod protocol;
 pub mod settings;
 pub mod ui;
 pub mod users;
+#[cfg(windows)]
+pub mod windows;
 
 /// The release, from the workspace's `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

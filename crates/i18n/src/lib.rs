@@ -218,6 +218,12 @@ messages! {
     ConnectorCliUserDeleted = "connector-cli-user-deleted" { name: String }
     ConnectorCliNoUsers = "connector-cli-no-users" {}
     ConnectorCliWithTotp = "connector-cli-with-totp" {}
+    /// Installing the connector as a Windows service (#166).
+    ConnectorCliTokenPrompt = "connector-cli-token-prompt" {}
+    ConnectorCliInstalled = "connector-cli-installed" { url: String }
+    ConnectorCliUpdated = "connector-cli-updated" { version: String }
+    ConnectorCliUninstalled = "connector-cli-uninstalled" {}
+    ConnectorCliDataKept = "connector-cli-data-kept" { path: String }
 }
 
 /// The catalog files of a locale, embedded in the binary.

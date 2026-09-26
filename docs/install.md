@@ -351,7 +351,7 @@ remotehub until someone opens it, for some hours, until a point in time, or with
 time running out, ends running connections at once. The connector keeps its own log of every change and every
 connection. Why the switch sits at the connector: [ADR 0011](adr/0011-customer-controls-access.md).
 
-### Start the connector
+### Start the connector on Linux
 
 Create the connector under *Connectors* in remotehub. Its token is shown once. On a Linux host in that network,
 put the token into a file and start the connector of your remotehub's release:
@@ -378,6 +378,42 @@ The connectors page in remotehub shows the connector as *closed by the customer*
 it under *Reached through*. To keep the connector away from parts of its network, list the ranges it may reach
 in `REMOTEHUB_CONNECTOR_ALLOW`.
 
+### Start the connector on a Windows server
+
+Each release has `remotehub-connector.exe`, a Windows service in one file. It is not signed yet. Download it
+with PowerShell, which marks nothing as coming from the internet, and compare its hash with the release's
+`SHA256SUMS`:
+
+```powershell
+$version = "0.3.0"  # your remotehub's release
+$base = "https://github.com/hilman2/remotehub/releases/download/v$version"
+Invoke-WebRequest "$base/remotehub-connector.exe" -OutFile remotehub-connector.exe
+Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
+(Get-FileHash remotehub-connector.exe -Algorithm SHA256).Hash
+Select-String "remotehub-connector.exe" SHA256SUMS
+```
+
+Both hashes must match (`Get-FileHash` writes it in capitals). Then, in a PowerShell as administrator, install
+the service and paste the token when asked. It never goes on the command line:
+
+```powershell
+.\remotehub-connector.exe install --url https://remotehub.example.com
+```
+
+`--allow 10.20.0.0/16` limits the ranges it may reach. The installer puts the program into
+`C:\Program Files\remotehub-connector`, and the token, the settings (`connector.conf`), the access state, the
+log and the users into `C:\ProgramData\remotehub-connector`, which only SYSTEM, the Administrators and the
+service's account `LocalService` can read. The service `remotehub-connector` starts with Windows and restarts
+after a failure. Its own log is `connector.log` in the data directory.
+
+The web interface is at `https://localhost:8480` on the server. To reach it from the network, set
+`REMOTEHUB_CONNECTOR_LISTEN=0.0.0.0:8480` in `connector.conf`, allow the port in the Windows firewall, and
+restart the service (`Restart-Service remotehub-connector`).
+
+`.\remotehub-connector.exe update`, run as administrator from the new release's file, replaces the program and
+restarts the service. `uninstall` removes the service and the program and keeps the data; `uninstall --purge`
+removes that too. Run both from a copy outside `C:\Program Files\remotehub-connector`.
+
 ### Open and close access
 
 The connector's web interface is at `https://localhost:8480` on its host. `-p 127.0.0.1:8480:8480` keeps it
@@ -392,6 +428,9 @@ second factor for an authenticator app:
 ```bash
 sudo docker exec remotehub-connector remotehub-connector user add anna --totp
 ```
+
+On Windows, run the same commands in a PowerShell as administrator, e.g.
+`& "C:\Program Files\remotehub-connector\remotehub-connector.exe" user add anna --totp`.
 
 `user list`, `user reset NAME` and `user delete NAME` manage them. Five wrong attempts lock a name for five
 minutes.
@@ -412,15 +451,17 @@ sudo docker exec remotehub-connector remotehub-connector status
 ### The log
 
 Every opening and closing, and every connection with its device, the remotehub user, its duration and the bytes
-transferred, go to `access.log` in the volume, one JSON object per line, and to the container's log output.
-The remotehub user is the name remotehub reports; the connector cannot check it. remotehub records openings
-and closings in its own audit log, too.
+transferred, go to `access.log` in the data directory, one JSON object per line, and to the container's log
+output. On Windows, the same lines also go to the event log (*Application*, source `remotehub-connector`): ID 1
+for openings and closings, 2 for connections, 3 for sign-ins to the web interface; refused connections and
+failed sign-ins are warnings. The remotehub user is the name remotehub reports; the connector cannot check it.
+remotehub records openings and closings in its own audit log, too.
 
 ### Upgrade and tokens
 
 remotehub refuses a connector of a release that speaks another protocol version; the connector's log then
 names the version remotehub wants. After upgrading remotehub, start the connector again with the new release
-and the same volume.
+and the same volume, or on Windows run `update` from the new release's file.
 
 A token cannot be shown again. If it is lost or leaked, delete the connector and create a new one; its
 devices must be moved to the new one first. Why the connector only carries connections and the engines stay

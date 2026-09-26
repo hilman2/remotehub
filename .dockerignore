@@ -10,3 +10,4 @@ web/test-results
 deploy/testlab
 spikes
 .image-check
+.windows-check
