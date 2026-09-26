@@ -1522,3 +1522,212 @@ async fn a_device_keeps_an_ssh_key_of_its_own(pool: PgPool) {
         "password"
     );
 }
+
+// ── Connectors on folders (#176) ────────────────────────────────────────────
+
+/// The connector each device is reached through, by name of the device.
+async fn reached(f: &Fixture) -> std::collections::BTreeMap<String, Value> {
+    tree(&f.app, &f.alice).await["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| {
+            (
+                d["name"].as_str().unwrap().to_owned(),
+                d["reached_through"].clone(),
+            )
+        })
+        .collect()
+}
+
+async fn pinned(pool: &PgPool, name: &str) -> bool {
+    sqlx::query_scalar("SELECT host_key IS NOT NULL FROM devices WHERE name = $1")
+        .bind(name)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn folders_pass_their_connector_down(pool: PgPool) {
+    let f = fixture(pool.clone()).await;
+    let site_a = create(&f.app, &f.alice, "/api/connectors", json!({ "name": "A" })).await;
+    let site_b = create(&f.app, &f.alice, "/api/connectors", json!({ "name": "B" })).await;
+    // In Linux next to web01: one directly, one through its own connector.
+    for (name, mode, connector) in [
+        ("direct01", "direct", Value::Null),
+        ("own01", "connector", json!(site_b)),
+    ] {
+        create(
+            &f.app,
+            &f.alice,
+            "/api/devices",
+            json!({
+                "folder_id": f.linux, "name": name, "protocol": "ssh", "host": name, "port": 22,
+                "auth_mode": "ask", "credential_id": null,
+                "connector_mode": mode, "connector_id": connector,
+            }),
+        )
+        .await;
+    }
+    sqlx::query("UPDATE devices SET host_key = 'ssh-ed25519 AAAA', host_key_pinned_at = now()")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let set = |folder: &str, connector: Value| {
+        let uri = format!("/api/folders/{folder}");
+        let (app, alice) = (&f.app, &f.alice);
+        async move {
+            call(
+                app,
+                alice,
+                "PATCH",
+                &uri,
+                Some(json!({ "connector_id": connector })),
+            )
+            .await
+        }
+    };
+
+    // Servers names A: everything below that inherits takes it.
+    assert_eq!(
+        set(&f.servers, json!(site_a)).await.status,
+        StatusCode::NO_CONTENT
+    );
+    let now = reached(&f).await;
+    assert_eq!(now["web01"], json!(site_a));
+    assert_eq!(now["dc01"], json!(site_a));
+    assert_eq!(now["direct01"], Value::Null);
+    assert_eq!(now["own01"], json!(site_b));
+    // Their target changed, so their pins went; the others' stayed.
+    assert!(!pinned(&pool, "web01").await && !pinned(&pool, "dc01").await);
+    assert!(pinned(&pool, "direct01").await && pinned(&pool, "own01").await);
+
+    // The nearest folder wins, and its parent's comes back without it.
+    set(&f.linux, json!(site_b)).await;
+    let now = reached(&f).await;
+    assert_eq!(
+        (&now["web01"], &now["dc01"]),
+        (&json!(site_b), &json!(site_a))
+    );
+    set(&f.linux, Value::Null).await;
+    assert_eq!(reached(&f).await["web01"], json!(site_a));
+
+    // A connector a folder names stays until the folder lets go of it.
+    let in_use = call(
+        &f.app,
+        &f.alice,
+        "DELETE",
+        &format!("/api/connectors/{site_a}"),
+        None,
+    )
+    .await;
+    assert_eq!(in_use.json()["code"], "connector_in_use");
+
+    let log = call(&f.app, &f.alice, "GET", "/api/audit", None)
+        .await
+        .json();
+    let retargeted = log
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["action"] == "folder.updated")
+        .map(|e| e["details"]["retargeted"].as_array().unwrap().len())
+        .collect::<Vec<_>>();
+    // Newest first: Linux back to A, Linux to B, Servers to A.
+    assert_eq!(retargeted, [1, 1, 2]);
+}
+
+/// Changing a folder's connector sends the credentials of the devices below
+/// to another target: whoever does it must be allowed to use them.
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn a_folder_connector_needs_the_credentials_below(pool: PgPool) {
+    let f = fixture(pool).await;
+    let site = create(&f.app, &f.alice, "/api/connectors", json!({ "name": "A" })).await;
+    let vault = create(
+        &f.app,
+        &f.alice,
+        "/api/folders",
+        json!({ "parent_id": null, "name": "Vault" }),
+    )
+    .await;
+    let elsewhere = create(
+        &f.app,
+        &f.alice,
+        "/api/credentials",
+        json!({ "folder_id": vault, "name": "db", "username": "db", "password": "Els3where!" }),
+    )
+    .await;
+    create(
+        &f.app,
+        &f.alice,
+        "/api/devices",
+        json!({
+            "folder_id": f.linux, "name": "db01", "protocol": "ssh", "host": "db01", "port": 22,
+            "auth_mode": "stored", "credential_id": elsewhere,
+        }),
+    )
+    .await;
+    grant(
+        &f.app, &f.alice, "folder", &f.servers, BOB_SID, "user", "manage",
+    )
+    .await;
+    let bob = sign_in(&f.app, "bob").await;
+    let change = |folder: &str, body: Value| {
+        let uri = format!("/api/folders/{folder}");
+        let (app, bob) = (&f.app, &bob);
+        async move { call(app, bob, "PATCH", &uri, Some(body)).await }
+    };
+    let refused = change(&f.servers, json!({ "connector_id": site })).await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN);
+    assert_eq!(refused.json()["code"], "retarget_forbidden");
+    assert_eq!(refused.json()["params"]["devices"], "db01");
+    assert_eq!(reached(&f).await["db01"], Value::Null);
+
+    // Moving the device into a folder with a connector is the same change.
+    let moved = call(
+        &f.app,
+        &f.alice,
+        "PATCH",
+        &format!("/api/folders/{}", f.windows),
+        Some(json!({ "connector_id": site })),
+    )
+    .await;
+    assert_eq!(moved.status, StatusCode::NO_CONTENT);
+    let db01 = tree(&f.app, &f.alice).await["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["name"] == "db01")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let into_windows = call(
+        &f.app,
+        &bob,
+        "PUT",
+        &format!("/api/devices/{db01}"),
+        Some(json!({
+            "folder_id": f.windows, "name": "db01", "protocol": "ssh", "host": "db01", "port": 22,
+            "auth_mode": "stored", "credential_id": elsewhere,
+        })),
+    )
+    .await;
+    // The credential stays the same; only the new target asks for it, and bob
+    // cannot even see it.
+    assert_eq!(into_windows.status, StatusCode::NOT_FOUND);
+
+    // With the right to use the credential, both go through.
+    grant(
+        &f.app, &f.alice, "folder", &vault, BOB_SID, "user", "connect",
+    )
+    .await;
+    assert_eq!(
+        change(&f.servers, json!({ "connector_id": site }))
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(reached(&f).await["db01"], json!(site));
+}

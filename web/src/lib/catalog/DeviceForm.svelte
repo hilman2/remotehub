@@ -29,6 +29,7 @@
 		device = null,
 		credentials,
 		connectors = [],
+		inherited = null,
 		onsubmit,
 		oncancel
 	}: {
@@ -36,6 +37,8 @@
 		device?: Device | null;
 		credentials: Credential[];
 		connectors?: Connector[];
+		/** The connector the folder passes on (#176); null: none. */
+		inherited?: Connector | null;
 		onsubmit: (input: DeviceInput) => void;
 		oncancel: () => void;
 	} = $props();
@@ -50,7 +53,12 @@
 	let credentialId = $state(start?.credential_id ?? '');
 	let description = $state(start?.description ?? '');
 	let keyboardLayout = $state<KeyboardLayout | ''>(start?.keyboard_layout ?? '');
-	let connectorId = $state(start?.connector_id ?? '');
+	// `inherit`, `direct`, or the id of the device's own connector.
+	const startReach =
+		start?.connector_mode === 'connector'
+			? (start.connector_id ?? 'inherit')
+			: (start?.connector_mode ?? 'inherit');
+	let reach = $state(startReach);
 	let username = $state(start?.username ?? '');
 	let domain = $state(start?.domain ?? '');
 	let secretKind = $state<CredentialKind>(start?.secret_kind ?? 'password');
@@ -69,7 +77,7 @@
 			(start.protocol !== protocol ||
 				start.host !== host.trim() ||
 				start.port !== Number(port) ||
-				(start.connector_id ?? '') !== connectorId)
+				startReach !== reach)
 	);
 	const retarget = $derived(
 		!start ||
@@ -111,7 +119,8 @@
 			credential_id: authMode === 'stored' ? credentialId || null : null,
 			description,
 			keyboard_layout: protocol === 'rdp' ? keyboardLayout || null : null,
-			connector_id: connectorId || null,
+			connector_mode: reach === 'inherit' || reach === 'direct' ? reach : 'connector',
+			connector_id: reach === 'inherit' || reach === 'direct' ? null : reach,
 			...(authMode === 'device'
 				? {
 						username,
@@ -171,16 +180,19 @@
 		bind:value={host}
 	/>
 
-	{#if connectors.length > 0 || connectorId}
+	{#if connectors.length > 0 || inherited || reach !== 'inherit'}
 		<label class={label} for="device-connector">{m.field_connector()}</label>
-		<select id="device-connector" class={field} bind:value={connectorId}>
-			<option value="">{m.connector_direct()}</option>
+		<select id="device-connector" class={field} bind:value={reach}>
+			<option value="inherit">
+				{m.connector_inherited({ name: inherited?.name ?? m.connector_direct() })}
+			</option>
+			<option value="direct">{m.connector_direct()}</option>
 			{#each connectors as connector (connector.id)}
 				<option value={connector.id}>{connector.name}</option>
 			{/each}
 			<!-- Kept as it is if the list did not load: saving must not move the device. -->
-			{#if connectorId && !connectors.some((c) => c.id === connectorId)}
-				<option value={connectorId}>{connectorId}</option>
+			{#if reach !== 'inherit' && reach !== 'direct' && !connectors.some((c) => c.id === reach)}
+				<option value={reach}>{reach}</option>
 			{/if}
 		</select>
 	{/if}

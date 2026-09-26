@@ -49,7 +49,12 @@ export interface Folder {
 	name: string;
 	/** null: only shown as the way to something visible inside */
 	role: Role | null;
+	/** The site connector it names for what is in it (#176); null: its parent's. */
+	connector_id: string | null;
 }
+
+/** How a device is reached (#176): its folder's connector, none, or its own. */
+export type ConnectorMode = 'inherit' | 'direct' | 'connector';
 
 export interface Device {
 	id: string;
@@ -67,8 +72,11 @@ export interface Device {
 	certificate_fingerprint: string | null;
 	/** SHA-256 fingerprint of the pinned host key (SSH), if pinned. */
 	host_key_fingerprint: string | null;
-	/** The site connector the device is reached through; null: directly. */
+	connector_mode: ConnectorMode;
+	/** Its own connector, with `connector_mode` `connector`. */
 	connector_id: string | null;
+	/** The connector it is reached through, however chosen; null: directly. */
+	reached_through: string | null;
 	/**
 	 * Sign-in mode `device`: its own credentials as far as they are shown;
 	 * password and key stay on the server.
@@ -127,6 +135,8 @@ export interface DeviceInput {
 	credential_id: string | null;
 	description: string;
 	keyboard_layout: KeyboardLayout | null;
+	connector_mode: ConnectorMode;
+	/** Set exactly with `connector_mode` `connector`. */
 	connector_id: string | null;
 	/** Sign-in mode `device` only. */
 	username?: string;
@@ -192,10 +202,11 @@ export function allows(role: Role | null, needed: Role): boolean {
 
 export const loadTree = () => api<Tree>('GET', '/api/tree');
 
-export const createFolder = (parent_id: string | null, name: string) =>
-	api<{ id: string }>('POST', '/api/folders', { parent_id, name });
-export const renameFolder = (id: string, name: string) =>
-	api('PATCH', `/api/folders/${id}`, { name });
+/** `connector_id`: the site connector for what is in the folder; null: its parent's. */
+export const createFolder = (parent_id: string | null, name: string, connector_id: string | null) =>
+	api<{ id: string }>('POST', '/api/folders', { parent_id, name, connector_id });
+export const updateFolder = (id: string, name: string, connector_id: string | null) =>
+	api('PATCH', `/api/folders/${id}`, { name, connector_id });
 export const deleteFolder = (id: string) => api('DELETE', `/api/folders/${id}`);
 
 export const createDevice = (input: DeviceInput) =>

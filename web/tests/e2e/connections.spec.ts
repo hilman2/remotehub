@@ -923,6 +923,25 @@ test('an administrator sets up a site connector and a device names it', async ({
 	await dialog.getByRole('button', { name: 'Create' }).click();
 	await expect(page.getByRole('heading', { name: `router ${run}` })).toBeVisible();
 	await expect(page.getByText(`${site} · not connected`)).toBeVisible();
+
+	// A folder names the connector for what is in it; a new device takes it
+	// without naming it (#176).
+	const customer = `E2E customer ${run}`;
+	await page.getByRole('button', { name: 'New folder' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(customer);
+	await dialog.getByLabel('Reached through').selectOption({ label: site });
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name: customer })).toBeVisible();
+	await page.getByRole('button', { name: 'New device' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(`switch ${run}`);
+	await dialog.getByLabel('Host name or IP address').fill('10.20.0.2');
+	await expect(dialog.getByLabel('Reached through')).toHaveValue('inherit');
+	await expect(
+		dialog.getByLabel('Reached through').locator('option[value="inherit"]')
+	).toHaveText(`From the folder: ${site}`);
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name: `switch ${run}` })).toBeVisible();
+	await expect(page.getByText(`${site} · not connected`)).toBeVisible();
 });
 
 test('a web interface opens signed in, in a browser on the server', async ({ page }) => {

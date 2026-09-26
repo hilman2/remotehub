@@ -33,7 +33,9 @@ engines.
   and only connects elsewhere.
 - **Devices name their connector** (`devices.connector_id`). Changing it counts as changing the target: the pins
   are forgotten, and a linked credential needs `connect`, because the same address behind another connector
-  may be another machine.
+  may be another machine. Since #176 a folder names one for the devices below it; a device takes the nearest
+  one above it unless it names its own or says `direct`. Changing a folder's connector, or moving a folder or
+  device under another one, changes the target of every device affected, with the same consequences.
 - **Tokens** are 32 random bytes, shown once, stored as SHA-256. Administrators create and delete connectors;
   a connector with devices cannot be deleted. The connector may be limited to address ranges
   (`REMOTEHUB_CONNECTOR_ALLOW`).

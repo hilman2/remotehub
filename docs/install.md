@@ -374,9 +374,10 @@ sudo docker run -d --name remotehub-connector --restart unless-stopped --read-on
 The volume `remotehub-connector-data` holds the access state, the log, the users of the web interface and its
 certificate. Keep it when you replace the container.
 
-The connectors page in remotehub shows the connector as *closed by the customer*. Devices in that network name
-it under *Reached through*. To keep the connector away from parts of its network, list the ranges it may reach
-in `REMOTEHUB_CONNECTOR_ALLOW`.
+The connectors page in remotehub shows the connector as *closed by the customer*. Choose it under *Reached
+through* on the customer's folder: every device in it and below it takes it, unless the device says *Directly*
+or names another connector. A single device can name it the same way. To keep the connector away from parts of
+its network, list the ranges it may reach in `REMOTEHUB_CONNECTOR_ALLOW`.
 
 ### Open and close access
 
