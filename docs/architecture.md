@@ -168,8 +168,9 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - **Stored credentials only go where their users may send them:** linking a credential to a device, or
   changing protocol, host or port of a device that has one, needs `connect` on that credential. Otherwise
   anyone with `edit` on a device could point it at their own server and capture the password. A device's
-  own credentials (sign-in mode `device`, password sealed with the device as owner) follow the same rule:
-  another target, connector included, keeps them only if the password is entered again.
+  own credentials (sign-in mode `device`, password sealed with the device as owner) go to another target,
+  connector included, with whoever may `reveal` them, which `edit` includes; the audit entry of the change
+  marks it (`secret_kept`, #174). Anyone else enters the password again.
 - Objects a user cannot see answer `not_found`, so their existence does not leak; visible objects the user
   may not change answer `forbidden`. Folders on the way to something visible are shown without a role.
 
