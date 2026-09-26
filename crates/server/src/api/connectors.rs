@@ -6,11 +6,13 @@
 //!   `open` requests, the connector reports streams it could not open
 //! - `GET /api/connectors/streams/{id}`: the WebSocket for one stream that
 //!   remotehub asked for
+//! - `POST /api/connectors/state`: whether the customer lets remotehub in
+//!   (#165); a closed connector has no control socket and reports only here
 //!
 //! For people:
-//! - `GET /api/connectors`: names, whether they are online and how many
-//!   connections they carry, for everyone signed in (the device form offers
-//!   them)
+//! - `GET /api/connectors`: names, whether they are online, whether the
+//!   customer keeps access open, and how many connections they carry, for
+//!   everyone signed in (the device form offers them)
 //! - `POST /api/connectors`: administrators create one; the answer holds its
 //!   token, which is shown this once
 //! - `DELETE /api/connectors/{id}`: administrators delete one no device uses
@@ -27,6 +29,8 @@ use data_encoding::BASE64URL_NOPAD;
 use remotehub_connector::protocol::{self, Report};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use time::format_description::well_known::Rfc3339;
+use time::{OffsetDateTime, UtcOffset};
 use uuid::Uuid;
 
 use super::catalog::{body, name};
@@ -52,6 +56,13 @@ pub struct ConnectorView {
     /// Connections it has carried since remotehub started.
     #[sqlx(skip)]
     streams_carried: u64,
+    /// `open` or `closed`, as the connector reports it; none without a
+    /// recent report.
+    #[sqlx(skip)]
+    access: Option<&'static str>,
+    /// RFC 3339; while open until a point in time.
+    #[sqlx(skip)]
+    open_until: Option<String>,
     /// RFC 3339 in UTC; none before the first connection.
     last_seen_at: Option<String>,
 }
@@ -91,6 +102,10 @@ pub async fn list(
         connector.online = state.connectors.is_online(connector.id);
         connector.streams = state.connectors.streams(connector.id);
         connector.streams_carried = state.connectors.streams_carried(connector.id);
+        if let Some(access) = state.connectors.access(connector.id) {
+            connector.access = Some(if access.open { "open" } else { "closed" });
+            connector.open_until = access.until;
+        }
     }
     Ok(Json(connectors))
 }
@@ -258,6 +273,58 @@ async fn seen(state: &AppState, connector: Uuid) {
         .bind(connector)
         .execute(&state.db)
         .await;
+}
+
+/// The connector reports whether its customer lets remotehub in. A change
+/// against its previous report goes to the audit log; after a restart of
+/// remotehub, the first report has nothing to compare with.
+pub async fn report_state(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    input: Result<Json<protocol::State>, JsonRejection>,
+) -> Result<Response, Problem> {
+    let connector = signed_in(&state, &headers).await?;
+    if let Some(refusal) = other_protocol(&headers) {
+        return Ok(refusal);
+    }
+    let mut reported = body(input)?;
+    // Only a point in time reaches the audit log and the UI, written the
+    // same way whatever the connector sent.
+    reported.until = match reported.until.as_deref() {
+        None => None,
+        Some(text) => Some(
+            OffsetDateTime::parse(text, &Rfc3339)
+                .ok()
+                .and_then(|at| at.to_offset(UtcOffset::UTC).format(&Rfc3339).ok())
+                .ok_or_else(|| Problem::new(ErrorCode::InvalidRequest).param("field", "until"))?,
+        ),
+    };
+    let before = state.connectors.report(connector, reported.clone());
+    if before.is_some_and(|before| before != reported) {
+        let name: String = sqlx::query_scalar("SELECT name FROM connectors WHERE id = $1")
+            .bind(connector)
+            .fetch_one(&state.db)
+            .await?;
+        audit::record(
+            &state.db,
+            Entry {
+                actor: Actor {
+                    id: None,
+                    name: &name,
+                },
+                action: if reported.open {
+                    Action::ConnectorOpened
+                } else {
+                    Action::ConnectorClosed
+                },
+                object: Some(("connector", connector)),
+                details: json!({ "name": name, "until": reported.until }),
+                address: None,
+            },
+        )
+        .await?;
+    }
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 pub async fn stream(

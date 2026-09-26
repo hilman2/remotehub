@@ -104,27 +104,46 @@ docker compose -p "$project" exec -T remotehub remotehub setup-code |
 echo "── The site connector"
 docker run --rm "${connector_image}:${tag}" --version | grep -qx "remotehub-connector ${version}" ||
   fail "the connector image does not report version ${version}"
-# Hardened as docs/install.md runs it. remotehub is not set up yet and
-# refuses the connector, which shows that the connector got as far as
-# remotehub's answer.
+# Hardened as docs/install.md runs it, with a named volume for its data.
+# remotehub is not set up yet and refuses the connector's report, which
+# shows that the connector got as far as remotehub's answer.
 connector="${project}-connector"
+connector_data="${project}-connector-data"
+connector_gone() {
+  docker rm -f "$connector" >/dev/null 2>&1 || true
+  docker volume rm "$connector_data" >/dev/null 2>&1 || true
+}
+connector_fail() { # message
+  docker logs "$connector" 2>&1 | tail -n 20
+  connector_gone
+  fail "$1"
+}
 docker run -d --name "$connector" --network "$network" --read-only --cap-drop ALL \
-  --security-opt no-new-privileges -e REMOTEHUB_URL="http://${remotehub}:8080" \
-  -e REMOTEHUB_CONNECTOR_TOKEN=rhc_check "${connector_image}:${tag}" >/dev/null
+  --security-opt no-new-privileges -v "${connector_data}:/var/lib/remotehub-connector" \
+  -e REMOTEHUB_URL="http://${remotehub}:8080" -e REMOTEHUB_CONNECTOR_TOKEN=rhc_check \
+  "${connector_image}:${tag}" >/dev/null
 for _ in $(seq 1 20); do
   docker logs "$connector" 2>&1 | grep -q "remotehub answered 409 Conflict" && break
   sleep 0.5
 done
-docker logs "$connector" 2>&1 | grep -q "remotehub answered 409 Conflict" || {
-  docker logs "$connector"
-  docker rm -f "$connector" >/dev/null
-  fail "the connector did not reach remotehub"
-}
-[ "$(docker inspect -f '{{.Config.User}}' "$connector")" = 65532:65532 ] || fail "the connector does not run as 65532"
+docker logs "$connector" 2>&1 | grep -q "remotehub answered 409 Conflict" ||
+  connector_fail "the connector did not reach remotehub"
+[ "$(docker inspect -f '{{.Config.User}}' "$connector")" = 65532:65532 ] ||
+  connector_fail "the connector does not run as 65532"
+# The customer's side: the command line in the running container, and the
+# web interface over HTTPS with its own certificate.
+docker exec "$connector" remotehub-connector status | grep -qx "Access is closed." ||
+  connector_fail "the connector does not start closed"
+docker exec "$connector" remotehub-connector user add check | grep -q "^Password: " ||
+  connector_fail "the connector's command line adds no user"
+connector_address="$(docker inspect -f "{{(index .NetworkSettings.Networks \"${network}\").IPAddress}}" "$connector")"
+curl -ksS "https://${connector_address}:8480/sign-in" | grep -q 'action="/sign-in"' ||
+  connector_fail "the connector's web interface does not answer"
 # SIGTERM ends it at once; Docker would kill it with 137 after the timeout.
 docker stop -t 5 "$connector" >/dev/null
-[ "$(docker inspect -f '{{.State.ExitCode}}' "$connector")" = 0 ] || fail "the connector ignores docker stop"
-docker rm "$connector" >/dev/null
+[ "$(docker inspect -f '{{.State.ExitCode}}' "$connector")" = 0 ] ||
+  connector_fail "the connector ignores docker stop"
+connector_gone
 
 echo "── Local accounts through Kratos"
 # Kratos hands its mails over on port 8081, and only with the token (#145).

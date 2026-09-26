@@ -134,7 +134,7 @@ async fn run(
 
     // 3. Connect on the server, directly or through the device's connector.
     let port = u16::try_from(target.port).unwrap_or(22);
-    let route = match connect::route(&state, &target, Engine::Server).await {
+    let route = match connect::route(&state, &target, Engine::Server, &session.username).await {
         Ok(route) => route,
         Err(problem) => {
             let _ = audit::record(

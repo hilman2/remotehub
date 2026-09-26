@@ -16,8 +16,9 @@ engines.
 ## Decision
 
 - **The connector only carries TCP.** It is a binary of its own, `remotehub-connector` (crate
-  `crates/connector`, image `ghcr.io/hilman2/remotehub-connector`), that depends on no other remotehub crate,
-  so it builds without the server and for Windows too (#164). It started as `remotehub connector` in the
+  `crates/connector`, image `ghcr.io/hilman2/remotehub-connector`), that depends on no other remotehub crate
+  but `i18n` and `totp`, so it builds without the server and for Windows too (#164). It connects only while
+  the customer keeps access open (ADR 0011). It started as `remotehub connector` in the
   server's image. It keeps a control WebSocket open to remotehub's public address, signed in with a token and
   its protocol version; remotehub refuses any other version. When an
   engine needs a device behind it, remotehub sends `open` with the device's host and port; the connector

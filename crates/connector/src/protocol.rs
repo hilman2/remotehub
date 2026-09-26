@@ -18,8 +18,13 @@ pub const VERSION: u32 = 1;
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Control {
-    /// Connect to `target` (`host:port`) and open the stream `id`.
-    Open { id: Uuid, target: String },
+    /// Connect to `target` (`host:port`) and open the stream `id`, for the
+    /// remotehub user `user`, whom the connector names in its journal.
+    Open {
+        id: Uuid,
+        target: String,
+        user: Option<String>,
+    },
 }
 
 /// What a connector sends on the control socket.
@@ -28,6 +33,20 @@ pub enum Control {
 pub enum Report {
     /// The stream `id` could not be opened.
     Failed { id: Uuid, reason: String },
+}
+
+/// Where a connector reports whether its customer lets remotehub in (#165),
+/// with a `POST` of [`State`]. It does so every [`STATE_EVERY`] and on each
+/// change, whether open or closed: a closed connector has no control socket.
+pub const STATE_PATH: &str = "/api/connectors/state";
+
+pub const STATE_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct State {
+    pub open: bool,
+    /// RFC 3339; none while closed or open without end.
+    pub until: Option<String>,
 }
 
 #[cfg(test)]
@@ -40,11 +59,12 @@ mod tests {
         let open = serde_json::to_value(Control::Open {
             id,
             target: "ssh-target:22".into(),
+            user: Some("alice".into()),
         })
         .unwrap();
         assert_eq!(
             open,
-            serde_json::json!({ "type": "open", "id": id, "target": "ssh-target:22" })
+            serde_json::json!({ "type": "open", "id": id, "target": "ssh-target:22", "user": "alice" })
         );
         let failed: Report = serde_json::from_str(&format!(
             r#"{{"type":"failed","id":"{id}","reason":"refused"}}"#

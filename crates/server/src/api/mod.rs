@@ -197,6 +197,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         )
         .route("/connectors/{id}", delete(connectors::delete))
         .route("/connectors/control", get(connectors::control))
+        .route("/connectors/state", post(connectors::report_state))
         .route("/connectors/streams/{id}", get(connectors::stream))
         .route("/search/picks", get(search::picks).post(search::pick))
         .route("/personal/search", put(personal::save_search))

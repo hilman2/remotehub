@@ -45,6 +45,8 @@ export const AUDIT_ACTIONS = [
 	'personal.vault_reset',
 	'connector.created',
 	'connector.deleted',
+	'connector.opened',
+	'connector.closed',
 	'purpose.required',
 	'purpose.waived',
 	'account.invited',

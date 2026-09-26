@@ -80,11 +80,13 @@ fn authority(host: &str, port: u16) -> String {
     }
 }
 
-/// The way `engine` reaches the device (ADR 0008).
+/// The way `engine` reaches the device (ADR 0008), for the remotehub user
+/// `user`, whom a site connector names in its journal.
 pub async fn route(
     state: &AppState,
     target: &Target,
     engine: Engine<'_>,
+    user: &str,
 ) -> Result<Route, Problem> {
     let port = u16::try_from(target.port).unwrap_or_default();
     let Some(connector) = target.connector_id else {
@@ -95,7 +97,16 @@ pub async fn route(
         });
     };
     if !state.connectors.is_online(connector) {
-        return Err(Problem::new(ErrorCode::ConnectorOffline));
+        // A closed connector keeps no control socket, but still reports.
+        let closed = state
+            .connectors
+            .access(connector)
+            .is_some_and(|access| !access.open);
+        return Err(Problem::new(if closed {
+            ErrorCode::ConnectorClosed
+        } else {
+            ErrorCode::ConnectorOffline
+        }));
     }
     let loopback = IpAddr::from(Ipv4Addr::LOCALHOST);
     let (bind, peers) = match engine {
@@ -109,6 +120,7 @@ pub async fn route(
         state.connectors.clone(),
         connector,
         authority(&target.host, port),
+        user.to_owned(),
         bind,
         peers,
     )

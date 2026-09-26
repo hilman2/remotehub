@@ -90,7 +90,26 @@ and reaches devices there for remotehub.
 | `REMOTEHUB_CONNECTOR_TOKEN` | required | The token shown when the connector was created. Better as `REMOTEHUB_CONNECTOR_TOKEN_FILE`. |
 | `REMOTEHUB_CONNECTOR_CA_FILE` | system CAs | PEM file with the CA of remotehub's certificate. |
 | `REMOTEHUB_CONNECTOR_ALLOW` | – | Address ranges the connector may connect to, separated by commas, e.g. `10.20.0.0/16`. Without it, every address. |
+| `REMOTEHUB_CONNECTOR_DATA` | `/var/lib/remotehub-connector` | Directory for the access state (`access.json`), the log (`access.log`), the users of the web interface (`users.json`) and its certificate. |
+| `REMOTEHUB_CONNECTOR_LISTEN` | `127.0.0.1:8480`, in the image `0.0.0.0:8480` | Address and port of the web interface, HTTPS only. |
+| `REMOTEHUB_CONNECTOR_TLS_CERT_FILE` | self-signed | PEM file with the web interface's certificate chain. Needs `REMOTEHUB_CONNECTOR_TLS_KEY_FILE`. Without both, the connector makes a self-signed certificate in the data directory. |
+| `REMOTEHUB_CONNECTOR_TLS_KEY_FILE` | – | PEM file with the certificate's private key. |
 | `REMOTEHUB_LOG_FORMAT` | `text` | `text` or `json`. |
+
+Commands of `remotehub-connector`; they answer in the language of `LC_ALL`, `LC_MESSAGES` or `LANG`:
+
+| Command | Does |
+|---|---|
+| `run` | Runs the connector and its web interface (the default). |
+| `open --hours N` | Opens access for N hours, 1 to 168. |
+| `open --until TIME` | Opens access until TIME: RFC 3339, or `2026-10-01T16:00` in UTC. |
+| `open --permanent` | Opens access until someone closes it. |
+| `close` | Closes access; running connections end at once. |
+| `status` | Prints whether access is open. |
+| `user add NAME [--totp]` | Creates a user of the web interface and prints its password, and with `--totp` a TOTP secret, once. |
+| `user reset NAME [--totp]` | Replaces the password, and the TOTP secret or none. |
+| `user delete NAME` | Deletes the user. |
+| `user list` | Lists the users. |
 
 ## Command line
 

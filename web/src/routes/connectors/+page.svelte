@@ -1,5 +1,8 @@
 <script lang="ts">
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import CircleHelp from '@lucide/svelte/icons/circle-help';
+	import Lock from '@lucide/svelte/icons/lock';
+	import LockOpen from '@lucide/svelte/icons/lock-open';
 	import Plus from '@lucide/svelte/icons/plus';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import {
@@ -67,7 +70,7 @@
 		await load();
 	}
 
-	/** The connector's environment (crates/server/src/connector_agent.rs). */
+	/** The connector's environment (crates/connector/src/agent.rs). */
 	const settings = (connector: CreatedConnector) =>
 		`REMOTEHUB_URL=${window.location.origin}\nREMOTEHUB_CONNECTOR_TOKEN=${connector.token}`;
 
@@ -120,6 +123,7 @@
 				<tr>
 					<th class="px-4 py-2 font-medium">{m.field_name()}</th>
 					<th class="px-4 py-2 font-medium">{m.connectors_col_state()}</th>
+					<th class="px-4 py-2 font-medium">{m.connectors_col_access()}</th>
 					<th class="px-4 py-2 font-medium">{m.connectors_col_streams()}</th>
 					<th class="px-4 py-2 font-medium">{m.connectors_col_last_seen()}</th>
 					<th class="px-4 py-2"><span class="sr-only">{m.catalog_delete()}</span></th>
@@ -137,6 +141,24 @@
 									<TriangleAlert size={13} class="text-warning" aria-hidden="true" />
 								{/if}
 								{connector.online ? m.connector_online() : m.connector_offline()}
+							</span>
+						</td>
+						<td class="px-4 py-2">
+							<span class="inline-flex items-center gap-2">
+								{#if connector.access === 'open'}
+									<LockOpen size={13} class="text-ok" aria-hidden="true" />
+									{connector.open_until
+										? m.connector_access_open_until({
+												until: time.format(new Date(connector.open_until))
+											})
+										: m.connector_access_open()}
+								{:else if connector.access === 'closed'}
+									<Lock size={13} class="text-ink-2" aria-hidden="true" />
+									{m.connector_access_closed()}
+								{:else}
+									<CircleHelp size={13} class="text-ink-3" aria-hidden="true" />
+									<span class="text-ink-2">{m.connector_access_unknown()}</span>
+								{/if}
 							</span>
 						</td>
 						<td class="px-4 py-2 text-ink-2 tabular-nums">
@@ -198,6 +220,7 @@
 		<pre
 			class="mt-3 overflow-x-auto rounded-lg border border-line bg-page p-3 font-mono text-xs select-all"
 			aria-label={m.connectors_token_settings()}>{settings(open.connector)}</pre>
+		<p class="mt-3 text-sm">{m.connectors_token_closed()}</p>
 		<p class="mt-3 text-xs text-ink-3">{m.connectors_token_docs()}</p>
 		<div class="mt-5 flex justify-end">
 			<button

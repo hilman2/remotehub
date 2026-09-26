@@ -2,10 +2,13 @@
 //! a connector running in this process against a real server.
 
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use remotehub_connector::agent::{self, AgentSettings};
+use remotehub_connector::access::{Access, Changer, Gate};
+use remotehub_connector::agent::{self, AgentSettings, Site};
+use remotehub_connector::journal::{Event, Journal};
 use remotehub_connector::protocol;
 use remotehub_server::AppState;
 use remotehub_server::connectors::{Forward, STREAM_TIMEOUT};
@@ -42,15 +45,22 @@ pub async fn new_connector(app: &Router, token: &str, name: &str) -> (Uuid, Stri
     )
 }
 
-/// Runs the connector agent against the server at `address`, restricted to
-/// `allow`, until the task is dropped; returns once the server sees it.
-pub async fn run_connector(
-    state: &AppState,
+/// A connector agent running in this process, until dropped.
+pub struct Agent {
+    pub site: Site,
+    /// Its data directory, as the command line would change it.
+    pub dir: tempfile::TempDir,
+    _task: AbortOnDrop,
+}
+
+/// Starts the connector agent against the server at `address`, restricted
+/// to `allow`, with the customer's access as given.
+pub fn start_connector(
     address: std::net::SocketAddr,
-    id: Uuid,
     token: &str,
     allow: &str,
-) -> AbortOnDrop {
+    access: Access,
+) -> Agent {
     let settings = AgentSettings {
         url: format!("http://{address}").parse().unwrap(),
         token: SecretString::from(token.to_owned()),
@@ -61,14 +71,50 @@ pub async fn run_connector(
             .map(|n| n.parse().unwrap())
             .collect(),
     };
-    let task = AbortOnDrop(tokio::spawn(agent::run(settings)));
+    let dir = tempfile::tempdir().unwrap();
+    let journal = Arc::new(Journal::new(dir.path()));
+    remotehub_connector::access::change(dir.path(), &journal, access, Changer::CommandLine)
+        .unwrap();
+    let site = Site {
+        gate: Gate::new(dir.path(), journal.clone()).unwrap(),
+        journal,
+        connections: Arc::default(),
+    };
+    let task = AbortOnDrop(tokio::spawn(agent::run(settings, site.clone())));
+    Agent {
+        site,
+        dir,
+        _task: task,
+    }
+}
+
+/// Runs a connector whose customer keeps access open, until the result is
+/// dropped; returns once the server sees it.
+pub async fn run_connector(
+    state: &AppState,
+    address: std::net::SocketAddr,
+    id: Uuid,
+    token: &str,
+    allow: &str,
+) -> Agent {
+    let agent = start_connector(address, token, allow, Access::Open { until: None });
+    wait_for(
+        || state.connectors.is_online(id),
+        "the connector to come online",
+    )
+    .await;
+    agent
+}
+
+/// Waits up to 5 s for `condition`.
+pub async fn wait_for(condition: impl Fn() -> bool, what: &str) {
     for _ in 0..100 {
-        if state.connectors.is_online(id) {
-            return task;
+        if condition() {
+            return;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    panic!("the connector did not come online");
+    panic!("waited in vain for {what}");
 }
 
 /// The connections the only connector carries, as the API reports them,
@@ -149,7 +195,7 @@ async fn administrators_manage_connectors_and_devices_name_them(pool: PgPool) {
     assert_eq!(
         listed,
         json!([{ "id": id, "name": "Hamburg office", "online": false, "streams": 0,
-                 "streams_carried": 0, "last_seen_at": null }])
+                 "streams_carried": 0, "access": null, "open_until": null, "last_seen_at": null }])
     );
     let refused = send(
         &app,
@@ -264,6 +310,7 @@ async fn a_forward_reaches_the_device_through_the_connector(pool: PgPool) {
         state.connectors.clone(),
         id,
         device.clone(),
+        "alice".into(),
         loopback,
         vec![loopback],
     )
@@ -288,6 +335,7 @@ async fn a_forward_reaches_the_device_through_the_connector(pool: PgPool) {
         state.connectors.clone(),
         id,
         device,
+        "alice".into(),
         loopback,
         vec![IpAddr::from(Ipv4Addr::new(10, 9, 9, 9))],
     )
@@ -305,7 +353,7 @@ async fn a_connector_reaches_only_what_it_allows(pool: PgPool) {
     let _connector = run_connector(&state, address, id, &secret, "10.0.0.0/8").await;
     let refused = state
         .connectors
-        .stream(id, &device, STREAM_TIMEOUT)
+        .stream(id, &device, None, STREAM_TIMEOUT)
         .await
         .err()
         .map(|e| e.to_string());
@@ -320,15 +368,10 @@ async fn a_wrong_token_opens_nothing(pool: PgPool) {
     let (state, app, token, _folder) = setup(pool).await;
     let (id, secret) = new_connector(&app, &token, "lab").await;
     let address = serve(state.clone()).await;
-    let settings = AgentSettings {
-        url: format!("http://{address}").parse().unwrap(),
-        token: SecretString::from("rhc_wrong".to_owned()),
-        tls: agent::tls_config(None).unwrap(),
-        allow: Vec::new(),
-    };
-    let _task = AbortOnDrop(tokio::spawn(agent::run(settings)));
+    let _agent = start_connector(address, "rhc_wrong", "", Access::Open { until: None });
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(!state.connectors.is_online(id));
+    assert!(state.connectors.access(id).is_none());
 
     // Streams: only with the token, and only one that was asked for.
     let version = protocol::VERSION.to_string();
@@ -389,4 +432,228 @@ async fn refusal(
         Err(tungstenite::Error::Http(response)) => *response,
         other => panic!("{path}: {:?}", other.map(|_| ())),
     }
+}
+
+// ── The customer's access (#165) ──────────────────────────────────────────
+
+fn reported_open(state: &AppState, id: Uuid) -> Option<bool> {
+    state.connectors.access(id).map(|access| access.open)
+}
+
+/// A closed connector keeps no control socket, but tells remotehub that the
+/// customer closed it. Opening brings it online; the audit log records each
+/// change.
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn the_customer_opens_and_closes_access(pool: PgPool) {
+    let (state, app, token, _folder) = setup(pool).await;
+    let (id, secret) = new_connector(&app, &token, "lab").await;
+    let address = serve(state.clone()).await;
+    let agent = start_connector(address, &secret, "", Access::Closed);
+    wait_for(
+        || reported_open(&state, id) == Some(false),
+        "a closed report",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!state.connectors.is_online(id));
+    let listed = send(&app, get("/api/connectors", Some(&token)))
+        .await
+        .json();
+    assert_eq!(listed[0]["access"], "closed");
+
+    let until = time::OffsetDateTime::now_utc() + Duration::from_secs(3600);
+    let carol = Changer::Web {
+        user: "carol".into(),
+    };
+    agent
+        .site
+        .gate
+        .set(Access::Open { until: Some(until) }, carol.clone())
+        .unwrap();
+    wait_for(
+        || state.connectors.is_online(id),
+        "the connector to come online",
+    )
+    .await;
+    wait_for(|| reported_open(&state, id) == Some(true), "an open report").await;
+    let listed = send(&app, get("/api/connectors", Some(&token)))
+        .await
+        .json();
+    assert_eq!(listed[0]["access"], "open");
+    let reported: time::OffsetDateTime = time::OffsetDateTime::parse(
+        listed[0]["open_until"].as_str().unwrap(),
+        &time::format_description::well_known::Rfc3339,
+    )
+    .unwrap();
+    assert_eq!(reported.unix_timestamp(), until.unix_timestamp());
+
+    agent.site.gate.set(Access::Closed, carol).unwrap();
+    wait_for(|| !state.connectors.is_online(id), "the connector to go").await;
+    wait_for(
+        || reported_open(&state, id) == Some(false),
+        "a closed report",
+    )
+    .await;
+
+    let log = send(&app, get("/api/audit", Some(&token))).await.json();
+    let log = log.to_string();
+    assert!(
+        log.contains("connector.opened") && log.contains("connector.closed"),
+        "{log}"
+    );
+}
+
+/// Closing ends running connections at once, and so does the time running
+/// out. The customer's journal holds each connection with the remotehub
+/// user it was for.
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn closing_ends_running_connections(pool: PgPool) {
+    let (state, app, token, _folder) = setup(pool).await;
+    let (id, secret) = new_connector(&app, &token, "lab").await;
+    let address = serve(state.clone()).await;
+    let device = echo().await;
+    let loopback = IpAddr::from(Ipv4Addr::LOCALHOST);
+    let forward = Forward::open(
+        state.connectors.clone(),
+        id,
+        device,
+        "alice".into(),
+        loopback,
+        vec![loopback],
+    )
+    .await
+    .unwrap();
+    let agent = run_connector(&state, address, id, &secret, "").await;
+
+    /// A connection through the connector that has carried a byte each way.
+    async fn held(forward: &Forward) -> TcpStream {
+        let mut held = TcpStream::connect(forward.address).await.unwrap();
+        held.write_all(b"x").await.unwrap();
+        held.read_exact(&mut [0u8; 1]).await.unwrap();
+        held
+    }
+    /// Whether the connection ends within `seconds`.
+    async fn ends_within(held: &mut TcpStream, seconds: u64) -> bool {
+        let mut buffer = [0u8; 16];
+        let read = held.read(&mut buffer);
+        matches!(
+            tokio::time::timeout(Duration::from_secs(seconds), read).await,
+            Ok(Ok(0) | Err(_))
+        )
+    }
+
+    let mut first = held(&forward).await;
+    agent
+        .site
+        .gate
+        .set(
+            Access::Closed,
+            Changer::Web {
+                user: "carol".into(),
+            },
+        )
+        .unwrap();
+    assert!(
+        ends_within(&mut first, 3).await,
+        "closing left the connection open"
+    );
+    let ended = agent
+        .site
+        .journal
+        .recent(10)
+        .into_iter()
+        .find_map(|e| match e.event {
+            Event::ConnectionEnded {
+                user,
+                sent,
+                received,
+                ..
+            } => Some((user, sent, received)),
+            _ => None,
+        });
+    assert_eq!(ended, Some((Some("alice".to_owned()), 1, 1)));
+
+    let until = time::OffsetDateTime::now_utc() + Duration::from_secs(2);
+    agent
+        .site
+        .gate
+        .set(Access::Open { until: Some(until) }, Changer::CommandLine)
+        .unwrap();
+    wait_for(
+        || state.connectors.is_online(id),
+        "the connector to come online",
+    )
+    .await;
+    let mut second = held(&forward).await;
+    assert!(
+        ends_within(&mut second, 5).await,
+        "the time ran out, the connection did not"
+    );
+    wait_for(
+        || reported_open(&state, id) == Some(false),
+        "a closed report",
+    )
+    .await;
+    assert!(
+        agent
+            .site
+            .journal
+            .recent(10)
+            .iter()
+            .any(|e| e.event == Event::Expired)
+    );
+}
+
+/// The command line changes the file; the running connector follows.
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn the_command_line_opens_a_running_connector(pool: PgPool) {
+    let (state, app, token, _folder) = setup(pool).await;
+    let (id, secret) = new_connector(&app, &token, "lab").await;
+    let address = serve(state.clone()).await;
+    let agent = start_connector(address, &secret, "", Access::Closed);
+    wait_for(
+        || reported_open(&state, id) == Some(false),
+        "a closed report",
+    )
+    .await;
+    remotehub_connector::access::change(
+        agent.dir.path(),
+        &Journal::new(agent.dir.path()),
+        Access::Open { until: None },
+        Changer::CommandLine,
+    )
+    .unwrap();
+    wait_for(
+        || state.connectors.is_online(id),
+        "the connector to come online",
+    )
+    .await;
+}
+
+/// A report reaches the audit log and the UI only as a point in time.
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn a_report_holds_a_point_in_time_or_none(pool: PgPool) {
+    let (state, app, token, _folder) = setup(pool).await;
+    let (id, secret) = new_connector(&app, &token, "lab").await;
+    let report = |until: Value| {
+        axum::http::Request::post("/api/connectors/state")
+            .header("authorization", format!("Bearer {secret}"))
+            .header(protocol::HEADER, protocol::VERSION)
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(
+                json!({ "open": true, "until": until }).to_string(),
+            ))
+            .unwrap()
+    };
+    let refused = send(&app, report(json!("<b>soon</b>"))).await;
+    assert_eq!(refused.status, 400);
+    assert_eq!(refused.json()["params"]["field"], "until");
+    assert!(state.connectors.access(id).is_none());
+
+    let taken = send(&app, report(json!("2026-10-01T18:00:00+02:00"))).await;
+    assert_eq!(taken.status, 204);
+    assert_eq!(
+        state.connectors.access(id).unwrap().until.as_deref(),
+        Some("2026-10-01T16:00:00Z")
+    );
 }

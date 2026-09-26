@@ -1,5 +1,5 @@
-//! Text that remotehub renders on the server (ADR 0002): the admin CLI now,
-//! later exports and notifications.
+//! Text that remotehub renders on the server (ADR 0002): the admin CLI,
+//! mails, and the site connector's web interface and command line.
 //!
 //! Every such text is a [`Message`]: a variant per message with typed
 //! arguments, never a `String`. The Fluent catalogs `locales/{locale}/*.ftl`
@@ -149,6 +149,75 @@ messages! {
     AuditIntact = "audit-intact" { entries: i64 }
     /// `remotehub verify-audit`: the chain breaks at entry `first`.
     AuditBroken = "audit-broken" { first: i64, entries: i64 }
+
+    /// The site connector's web interface (#165). Arguments named `until`,
+    /// `at`, `sent` and `received` get a marker that the interface replaces
+    /// with an element the browser formats in its locale.
+    ConnectorUiTitle = "connector-ui-title" {}
+    ConnectorUiSignIn = "connector-ui-sign-in" {}
+    ConnectorUiName = "connector-ui-name" {}
+    ConnectorUiPassword = "connector-ui-password" {}
+    ConnectorUiCode = "connector-ui-code" {}
+    ConnectorUiCodeHint = "connector-ui-code-hint" {}
+    ConnectorUiSignInFailed = "connector-ui-sign-in-failed" {}
+    ConnectorUiLocked = "connector-ui-locked" { minutes: i64 }
+    ConnectorUiSignOut = "connector-ui-sign-out" {}
+    ConnectorUiSignedInAs = "connector-ui-signed-in-as" { name: String }
+    ConnectorUiAccessFor = "connector-ui-access-for" { remotehub: String }
+    ConnectorUiClosed = "connector-ui-closed" {}
+    ConnectorUiOpenUntil = "connector-ui-open-until" { until: String }
+    ConnectorUiOpenPermanent = "connector-ui-open-permanent" {}
+    ConnectorUiChangedBy = "connector-ui-changed-by" { who: String, at: String }
+    ConnectorUiChangedCli = "connector-ui-changed-cli" { at: String }
+    ConnectorUiChangedExpiry = "connector-ui-changed-expiry" { at: String }
+    ConnectorUiChange = "connector-ui-change" {}
+    ConnectorUiOpenFor = "connector-ui-open-for" { hours: i64 }
+    ConnectorUiUntilField = "connector-ui-until-field" {}
+    ConnectorUiOpenUntilButton = "connector-ui-open-until-button" {}
+    ConnectorUiOpenPermanentButton = "connector-ui-open-permanent-button" {}
+    ConnectorUiOpenPermanentHint = "connector-ui-open-permanent-hint" {}
+    ConnectorUiClose = "connector-ui-close" {}
+    ConnectorUiCloseHint = "connector-ui-close-hint" {}
+    ConnectorUiInvalidUntil = "connector-ui-invalid-until" {}
+    ConnectorUiConnections = "connector-ui-connections" {}
+    ConnectorUiNoConnections = "connector-ui-no-connections" {}
+    ConnectorUiColDevice = "connector-ui-col-device" {}
+    ConnectorUiColUser = "connector-ui-col-user" {}
+    ConnectorUiColSince = "connector-ui-col-since" {}
+    ConnectorUiColTraffic = "connector-ui-col-traffic" {}
+    ConnectorUiTraffic = "connector-ui-traffic" { sent: String, received: String }
+    ConnectorUiUserHint = "connector-ui-user-hint" {}
+    ConnectorUiLog = "connector-ui-log" {}
+    ConnectorUiNoLog = "connector-ui-no-log" {}
+    ConnectorUiColTime = "connector-ui-col-time" {}
+    ConnectorUiColEvent = "connector-ui-col-event" {}
+    /// The connector's journal as the web interface shows it.
+    ConnectorLogOpenedUntil = "connector-log-opened-until" { who: String, until: String }
+    ConnectorLogOpenedUntilCli = "connector-log-opened-until-cli" { until: String }
+    ConnectorLogOpenedPermanent = "connector-log-opened-permanent" { who: String }
+    ConnectorLogOpenedPermanentCli = "connector-log-opened-permanent-cli" {}
+    ConnectorLogClosed = "connector-log-closed" { who: String }
+    ConnectorLogClosedCli = "connector-log-closed-cli" {}
+    ConnectorLogExpired = "connector-log-expired" {}
+    ConnectorLogConnectionStarted = "connector-log-connection-started" { user: String, target: String }
+    ConnectorLogConnectionEnded = "connector-log-connection-ended" { user: String, target: String, minutes: i64, sent: String, received: String }
+    ConnectorLogConnectionRefused = "connector-log-connection-refused" { user: String, target: String, reason: String }
+    ConnectorLogSignedIn = "connector-log-signed-in" { user: String, address: String }
+    ConnectorLogSignInFailed = "connector-log-sign-in-failed" { user: String, address: String }
+    ConnectorLogLocked = "connector-log-locked" { user: String, minutes: i64 }
+    /// The site connector's command line (#165). Password and TOTP secret
+    /// follow on their own lines, after the labels, so they never pass
+    /// through a message.
+    ConnectorCliClosed = "connector-cli-closed" {}
+    ConnectorCliOpenUntil = "connector-cli-open-until" { until: String }
+    ConnectorCliOpenPermanent = "connector-cli-open-permanent" {}
+    ConnectorCliUserReady = "connector-cli-user-ready" { name: String }
+    ConnectorCliPasswordLabel = "connector-cli-password-label" {}
+    ConnectorCliTotpSecretLabel = "connector-cli-totp-secret-label" {}
+    ConnectorCliTotpUriLabel = "connector-cli-totp-uri-label" {}
+    ConnectorCliUserDeleted = "connector-cli-user-deleted" { name: String }
+    ConnectorCliNoUsers = "connector-cli-no-users" {}
+    ConnectorCliWithTotp = "connector-cli-with-totp" {}
 }
 
 /// The catalog files of a locale, embedded in the binary.
@@ -157,10 +226,12 @@ fn sources(locale: Locale) -> &'static [&'static str] {
         Locale::En => &[
             include_str!("../locales/en/cli.ftl"),
             include_str!("../locales/en/mail.ftl"),
+            include_str!("../locales/en/connector.ftl"),
         ],
         Locale::De => &[
             include_str!("../locales/de/cli.ftl"),
             include_str!("../locales/de/mail.ftl"),
+            include_str!("../locales/de/connector.ftl"),
         ],
     }
 }

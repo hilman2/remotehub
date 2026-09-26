@@ -99,7 +99,7 @@ fn password_matches(password: &str, hash: &str) -> bool {
 
 fn issue(username: &str, password: Zeroizing<String>, secret: &[u8]) -> Issued {
     let encoded = totp::encode(secret);
-    let uri = totp::uri(username, &encoded);
+    let uri = totp::uri("remotehub", username, &encoded);
     Issued {
         username: username.to_owned(),
         password,
