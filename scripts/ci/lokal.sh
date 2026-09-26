@@ -40,7 +40,7 @@ LAB_INPUTS=("${RUST_INPUTS[@]}" deploy/testlab/ deploy/guacd/ deploy/browser/ de
 E2E_INPUTS=(web/src/ web/tests/e2e/ web/playwright.config.ts deploy/ops/kratos/ deploy/testlab/oidc/)
 # The production images build a release binary; they are tried when they or
 # the ops package change, and in full runs (every commit on main, releases).
-IMAGE_INPUTS=(deploy/Dockerfile .dockerignore deploy/ops/ deploy/guacd/ deploy/browser/)
+IMAGE_INPUTS=(deploy/Dockerfile .dockerignore deploy/ops/ deploy/guacd/ deploy/browser/ deploy/connector/)
 
 # Files changed between the merge base with main and the commit under test.
 # Fails when everything has to run: CI_FULL=1, no merge base, or a commit
@@ -89,7 +89,8 @@ job_base() {
     echo "── Rust version"
     wanted="$(sed -n "s/^channel = \"\(.*\)\"/\1/p" rust-toolchain.toml)"
     echo "rust-toolchain.toml: ${wanted}"
-    for file in scripts/ci/tools.Dockerfile deploy/dev/rust.Dockerfile deploy/Dockerfile deploy/browser/Dockerfile; do
+    for file in scripts/ci/tools.Dockerfile deploy/dev/rust.Dockerfile deploy/Dockerfile deploy/browser/Dockerfile \
+      deploy/connector/Dockerfile; do
       grep -q "^FROM rust:${wanted}-" "$file" || {
         echo "${file} does not use rust:${wanted}"
         exit 1
@@ -115,7 +116,7 @@ job_base() {
   '
 }
 
-# The production images (deploy/Dockerfile, deploy/guacd, deploy/browser) with the ops
+# The production images (deploy/Dockerfile, deploy/guacd, deploy/browser, deploy/connector) with the ops
 # package (deploy/ops), tried the way an installation uses them: see
 # scripts/ci/image-check.sh, which the release script runs alike.
 job_image() {
@@ -127,7 +128,7 @@ job_image() {
   tools="$(ci_image scripts/ci/tools.Dockerfile)"
   version="$(git -C "$CI_WURZEL" show "${CI_SHA}:Cargo.toml" | sed -n 's/^version = "\(.*\)"/\1/p' | head -n 1)"
   ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" remotehub-ci-image remotehub-ci-guacd \
-    remotehub-ci-browser-image ci
+    remotehub-ci-browser-image remotehub-ci-connector ci
   # The installer (#142) with the images just built, on three kinds of host.
   ci_docker_run "$tools" bash scripts/ci/install-check.sh remotehub-ci-image remotehub-ci-guacd \
     remotehub-ci-browser-image ci

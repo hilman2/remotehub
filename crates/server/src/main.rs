@@ -11,7 +11,6 @@ use remotehub_i18n::{self as i18n, Locale, Message};
 use remotehub_server::api::health;
 use remotehub_server::audit::{Action, Actor, Entry};
 use remotehub_server::config::{self, Config};
-use remotehub_server::connector_agent::{self, AgentSettings};
 use remotehub_server::{
     AppState, Settings, VERSION, app, audit, break_glass, db, escrow, session, setup,
 };
@@ -52,9 +51,6 @@ enum Command {
     /// 1 unless it answers 200. The image's health check: it has no shell
     /// and no curl.
     Healthcheck,
-    /// Run as a site connector: reach devices in this network for the
-    /// remotehub at REMOTEHUB_URL, signed in with REMOTEHUB_CONNECTOR_TOKEN.
-    Connector,
     /// Manage break-glass accounts: local emergency accounts that work
     /// without the directory. Password and TOTP secret are shown only once.
     BreakGlass {
@@ -120,13 +116,6 @@ async fn main() -> anyhow::Result<()> {
         Command::BreakGlass { action } => manage_break_glass(action).await,
         Command::Account { action } => manage_accounts(action).await,
         Command::SetupCode => setup_code().await,
-        Command::Connector => {
-            let settings = AgentSettings::from_env()?;
-            init_tracing(std::env::var("REMOTEHUB_LOG_FORMAT").is_ok_and(|f| f == "json"));
-            tracing::info!(version = VERSION, url = %settings.url, "starting the site connector");
-            connector_agent::run(settings).await;
-            Ok(())
-        }
     }
 }
 

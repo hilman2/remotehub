@@ -59,7 +59,7 @@ This repository shares nothing with other projects. `scripts/ci/gemeinsam.sh` st
 
 Built up with the issues of milestone M0:
 
-- `crates/` holds `server`, `model`, `vault`, `directory`, `gateway` and `i18n`.
+- `crates/` holds `server`, `model`, `vault`, `directory`, `gateway`, `browser`, `connector` and `i18n`. `connector` depends on no other remotehub crate: it builds for Windows too.
 - `web/` is the SvelteKit frontend.
 - `migrations/` holds the sqlx migrations.
 - `deploy/` holds the Dockerfiles (`Dockerfile` is the production image), the development compose and the ops package `deploy/ops` (see `docs/install.md`).

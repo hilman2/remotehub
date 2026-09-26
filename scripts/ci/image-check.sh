@@ -4,7 +4,7 @@
 # init.sh, docker compose up, then checks on the running stack. The local CI
 # (job `image`) and the release script run it alike.
 #
-#   image-check.sh VERSION REMOTEHUB_IMAGE GUACD_IMAGE BROWSER_IMAGE TAG [docker build options]
+#   image-check.sh VERSION REMOTEHUB_IMAGE GUACD_IMAGE BROWSER_IMAGE CONNECTOR_IMAGE TAG [docker build options]
 #
 # VERSION is the release (Cargo.toml), which /api/health must report; all
 # images are tagged TAG. Run it in a container, in a directory that the
@@ -13,8 +13,8 @@
 # container joins the stack's network to reach the services.
 set -euo pipefail
 
-version="$1" image="$2" guacd="$3" browser_image="$4" tag="$5"
-shift 5
+version="$1" image="$2" guacd="$3" browser_image="$4" connector_image="$5" tag="$6"
+shift 6
 
 echo "── docker build (version ${version})"
 docker build --quiet "$@" --file deploy/Dockerfile --build-arg VERSION="$version" --tag "${image}:${tag}" .
@@ -24,6 +24,8 @@ docker build --quiet "$@" --tag "${guacd}:${tag}" \
   --label "org.opencontainers.image.version=${version}" deploy/guacd
 docker build --quiet "$@" --file deploy/browser/Dockerfile --build-arg VERSION="$version" \
   --tag "${browser_image}:${tag}" .
+docker build --quiet "$@" --file deploy/connector/Dockerfile --build-arg VERSION="$version" \
+  --tag "${connector_image}:${tag}" .
 
 dir="${PWD}/.image-check"
 rm -rf "$dir"
@@ -98,6 +100,31 @@ curl -sS "http://${remotehub}:8080/api/tree" | grep -q '"code":"setup_pending"' 
   fail "the API is open before setup"
 docker compose -p "$project" exec -T remotehub remotehub setup-code |
   grep -q 'http://localhost:8080/setup#code=' || fail "setup-code prints no link"
+
+echo "── The site connector"
+docker run --rm "${connector_image}:${tag}" --version | grep -qx "remotehub-connector ${version}" ||
+  fail "the connector image does not report version ${version}"
+# Hardened as docs/install.md runs it. remotehub is not set up yet and
+# refuses the connector, which shows that the connector got as far as
+# remotehub's answer.
+connector="${project}-connector"
+docker run -d --name "$connector" --network "$network" --read-only --cap-drop ALL \
+  --security-opt no-new-privileges -e REMOTEHUB_URL="http://${remotehub}:8080" \
+  -e REMOTEHUB_CONNECTOR_TOKEN=rhc_check "${connector_image}:${tag}" >/dev/null
+for _ in $(seq 1 20); do
+  docker logs "$connector" 2>&1 | grep -q "remotehub answered 409 Conflict" && break
+  sleep 0.5
+done
+docker logs "$connector" 2>&1 | grep -q "remotehub answered 409 Conflict" || {
+  docker logs "$connector"
+  docker rm -f "$connector" >/dev/null
+  fail "the connector did not reach remotehub"
+}
+[ "$(docker inspect -f '{{.Config.User}}' "$connector")" = 65532:65532 ] || fail "the connector does not run as 65532"
+# SIGTERM ends it at once; Docker would kill it with 137 after the timeout.
+docker stop -t 5 "$connector" >/dev/null
+[ "$(docker inspect -f '{{.State.ExitCode}}' "$connector")" = 0 ] || fail "the connector ignores docker stop"
+docker rm "$connector" >/dev/null
 
 echo "── Local accounts through Kratos"
 # Kratos hands its mails over on port 8081, and only with the token (#145).
@@ -193,4 +220,4 @@ docker compose -p "$project" exec -T remotehub remotehub verify-audit >/dev/null
 
 docker network disconnect "$network" "$(hostname)"
 docker compose -p "$project" down -v
-echo "images ok: ${REMOTEHUB_IMAGE}:${REMOTEHUB_VERSION}, ${GUACD_IMAGE}:${REMOTEHUB_VERSION}, ${BROWSER_IMAGE}:${REMOTEHUB_VERSION}"
+echo "images ok: ${REMOTEHUB_IMAGE}:${REMOTEHUB_VERSION}, ${GUACD_IMAGE}:${REMOTEHUB_VERSION}, ${BROWSER_IMAGE}:${REMOTEHUB_VERSION}, ${connector_image}:${tag}"

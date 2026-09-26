@@ -9,7 +9,6 @@ pub mod caddy;
 pub mod catalog;
 pub mod certificate;
 pub mod config;
-pub mod connector_agent;
 pub mod connectors;
 pub mod db;
 pub mod directory;

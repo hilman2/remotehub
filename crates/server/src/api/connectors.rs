@@ -1,6 +1,7 @@
 //! Site connectors (#19, ADR 0008).
 //!
-//! For connectors, signed in with their token (`Authorization: Bearer`):
+//! For connectors, signed in with their token (`Authorization: Bearer`) and
+//! speaking remotehub's protocol version (`remotehub-connector-protocol`):
 //! - `GET /api/connectors/control`: the control WebSocket; remotehub sends
 //!   `open` requests, the connector reports streams it could not open
 //! - `GET /api/connectors/streams/{id}`: the WebSocket for one stream that
@@ -21,8 +22,9 @@ use axum::extract::rejection::JsonRejection;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use data_encoding::BASE64URL_NOPAD;
+use remotehub_connector::protocol::{self, Report};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
@@ -32,7 +34,7 @@ use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
 use crate::AppState;
 use crate::audit::{self, Action, Actor, Entry};
-use crate::connectors::{Report, token_hash};
+use crate::connectors::token_hash;
 use crate::session::Session;
 
 /// Keeps proxies and NAT from closing an idle control socket.
@@ -186,12 +188,34 @@ async fn signed_in(state: &AppState, headers: &HeaderMap) -> Result<Uuid, Proble
         .ok_or(Problem::new(ErrorCode::Unauthenticated))
 }
 
+/// The refusal of a connector that speaks another protocol version, if it
+/// does. The refusal names remotehub's version in the same header, so the
+/// connector can tell its administrator which release to run.
+fn other_protocol(headers: &HeaderMap) -> Option<Response> {
+    let theirs = headers
+        .get(protocol::HEADER)
+        .and_then(|value| value.to_str().ok());
+    if theirs == Some(protocol::VERSION.to_string().as_str()) {
+        return None;
+    }
+    let mut response = Problem::new(ErrorCode::ConnectorProtocol)
+        .param("version", protocol::VERSION)
+        .into_response();
+    response
+        .headers_mut()
+        .insert(protocol::HEADER, protocol::VERSION.into());
+    Some(response)
+}
+
 pub async fn control(
     State(state): State<AppState>,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Problem> {
     let connector = signed_in(&state, &headers).await?;
+    if let Some(refusal) = other_protocol(&headers) {
+        return Ok(refusal);
+    }
     Ok(upgrade.on_upgrade(move |socket| run_control(socket, state, connector)))
 }
 
@@ -243,6 +267,9 @@ pub async fn stream(
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Problem> {
     let connector = signed_in(&state, &headers).await?;
+    if let Some(refusal) = other_protocol(&headers) {
+        return Ok(refusal);
+    }
     let reply = state
         .connectors
         .claim(connector, id)
