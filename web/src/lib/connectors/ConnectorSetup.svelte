@@ -1,17 +1,24 @@
 <script lang="ts">
 	/**
-	 * Shown once after creating a site connector (#171): its token, and how to
-	 * start it with Docker or on a Windows server, with this remotehub's
-	 * address and release filled in.
+	 * How to start a site connector with Docker or on a Windows server, with
+	 * this remotehub's address and release filled in. Right after creating
+	 * one (#171) with its token, shown this once; without a token, for a
+	 * connector that exists (#186), with the way to update it as well.
 	 */
 	import Check from '@lucide/svelte/icons/check';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Download from '@lucide/svelte/icons/download';
 	import { fetchServerState } from '$lib/api/health';
 	import { m } from '$lib/paraglide/messages';
-	import { dockerCommands, windowsCommands, windowsDownloads } from './setup';
+	import {
+		dockerCommands,
+		dockerUpdate,
+		windowsCommands,
+		windowsDownloads,
+		windowsUpdate
+	} from './setup';
 
-	let { token, origin }: { token: string; origin: string } = $props();
+	let { token = null, origin }: { token?: string | null; origin: string } = $props();
 
 	type Way = 'docker' | 'windows';
 	let way = $state<Way>('docker');
@@ -65,8 +72,12 @@
 	</div>
 {/snippet}
 
-<p class="text-sm">{m.connectors_token_hint()}</p>
-<div class="mt-2">{@render copyable('token', m.connectors_token_label(), token)}</div>
+{#if token}
+	<p class="text-sm">{m.connectors_token_hint()}</p>
+	<div class="mt-2">{@render copyable('token', m.connectors_token_label(), token)}</div>
+{:else}
+	<p class="text-sm">{m.connectors_download_hint()}</p>
+{/if}
 
 <h3 class="mt-5 text-sm font-semibold">{m.connectors_setup_title()}</h3>
 <div class="mt-2 inline-flex rounded-lg bg-surface-2 p-0.5" role="group">
@@ -98,6 +109,17 @@
 				dockerCommands(origin, version)
 			)}
 		</div>
+		{#if !token}
+			<h3 class="mt-5 text-sm font-semibold">{m.connectors_update_title()}</h3>
+			<p class="mt-2 text-sm text-ink-2">{m.connectors_update_docker_hint()}</p>
+			<div class="mt-2">
+				{@render copyable(
+					'docker-update',
+					m.connectors_update_docker_commands(),
+					dockerUpdate(origin, version)
+				)}
+			</div>
+		{/if}
 	{:else}
 		{@const downloads = windowsDownloads(version)}
 		<div class="mt-3 flex flex-wrap gap-2">
@@ -116,8 +138,21 @@
 		<div class="mt-2">
 			{@render copyable('windows', m.connectors_setup_windows_commands(), windowsCommands(origin))}
 		</div>
+		{#if !token}
+			<h3 class="mt-5 text-sm font-semibold">{m.connectors_update_title()}</h3>
+			<p class="mt-2 text-sm text-ink-2">{m.connectors_update_windows_hint()}</p>
+			<div class="mt-2">
+				{@render copyable(
+					'windows-update',
+					m.connectors_update_windows_commands(),
+					windowsUpdate()
+				)}
+			</div>
+		{/if}
 	{/if}
 {/if}
 
-<p class="mt-4 text-sm">{m.connectors_token_closed()}</p>
+{#if token}
+	<p class="mt-4 text-sm">{m.connectors_token_closed()}</p>
+{/if}
 <p class="mt-2 text-xs text-ink-3">{m.connectors_token_docs()}</p>

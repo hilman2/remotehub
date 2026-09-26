@@ -1,6 +1,7 @@
 <script lang="ts">
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import CircleHelp from '@lucide/svelte/icons/circle-help';
+	import Download from '@lucide/svelte/icons/download';
 	import Lock from '@lucide/svelte/icons/lock';
 	import LockOpen from '@lucide/svelte/icons/lock-open';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -22,6 +23,7 @@
 	type Open =
 		| { type: 'create' }
 		| { type: 'created'; connector: CreatedConnector }
+		| { type: 'download' }
 		| { type: 'delete'; connector: Connector };
 
 	let connectors = $state<Connector[]>([]);
@@ -83,6 +85,8 @@
 				return m.connectors_new();
 			case 'created':
 				return m.connectors_token_title({ name: open.connector.name });
+			case 'download':
+				return m.connectors_download();
 			case 'delete':
 				return m.catalog_delete();
 			default:
@@ -96,14 +100,25 @@
 		<h1 class="text-4xl font-semibold">{m.connectors_title()}</h1>
 	</div>
 	{#if session.user?.admin}
-		<button
-			type="button"
-			class="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink"
-			onclick={() => show({ type: 'create' })}
-		>
-			<Plus size={16} aria-hidden="true" />
-			{m.connectors_new()}
-		</button>
+		<div class="flex flex-wrap gap-2">
+			<!-- For connectors that exist: another host, a reinstall, an update (#186). -->
+			<button
+				type="button"
+				class="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-1.5 text-sm font-medium hover:bg-surface-2"
+				onclick={() => show({ type: 'download' })}
+			>
+				<Download size={16} aria-hidden="true" />
+				{m.connectors_download()}
+			</button>
+			<button
+				type="button"
+				class="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink"
+				onclick={() => show({ type: 'create' })}
+			>
+				<Plus size={16} aria-hidden="true" />
+				{m.connectors_new()}
+			</button>
+		</div>
 	{/if}
 </div>
 
@@ -209,7 +224,7 @@
 	</div>
 {/if}
 
-<Dialog bind:open={dialogOpen} {title} wide={open?.type === 'created'}>
+<Dialog bind:open={dialogOpen} {title} wide={open?.type === 'created' || open?.type === 'download'}>
 	{#if open?.type === 'create'}
 		<form onsubmit={create}>
 			<label class="block text-sm font-medium" for="connector-name">{m.field_name()}</label>
@@ -239,8 +254,11 @@
 				</button>
 			</div>
 		</form>
-	{:else if open?.type === 'created'}
-		<ConnectorSetup token={open.connector.token} origin={window.location.origin} />
+	{:else if open?.type === 'created' || open?.type === 'download'}
+		<ConnectorSetup
+			token={open.type === 'created' ? open.connector.token : null}
+			origin={window.location.origin}
+		/>
 		<div class="mt-5 flex justify-end">
 			<button
 				type="button"
