@@ -764,7 +764,7 @@ async fn an_rdp_desktop_behind_a_connector_opens_through_it(pool: PgPool) {
         &token,
         &folder,
         json!({ "protocol": "rdp", "port": 3389, "auth_mode": "stored", "credential_id": credential,
-                "connector_id": connector }),
+                "connector_mode": "connector", "connector_id": connector }),
     )
     .await;
     let address = serve(state.clone()).await;
@@ -799,7 +799,8 @@ async fn an_https_device_behind_a_connector_signs_in_through_it(pool: PgPool) {
         &app,
         &token,
         &folder,
-        json!({ "auth_mode": "ask", "credential_id": null, "connector_id": connector }),
+        json!({ "auth_mode": "ask", "credential_id": null, "connector_mode": "connector",
+                "connector_id": connector }),
     )
     .await;
     let address = serve(state.clone()).await;

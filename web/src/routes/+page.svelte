@@ -24,11 +24,11 @@
 		deleteDevice,
 		deleteFolder,
 		loadTree,
-		renameFolder,
 		resetHostKey,
 		setFolderOpen,
 		updateCredential,
 		updateDevice,
+		updateFolder,
 		type Credential,
 		type CredentialInput,
 		type Device,
@@ -68,7 +68,7 @@
 		ROLE_LABELS,
 		keyboardLayoutLabel
 	} from '$lib/catalog/labels';
-	import { nest, pathTo } from '$lib/catalog/tree';
+	import { folderConnector, nest, pathTo } from '$lib/catalog/tree';
 	import Dialog from '$lib/components/Dialog.svelte';
 	import SettingsMenu, { type MenuItem } from '$lib/components/SettingsMenu.svelte';
 	import { getLocale } from '$lib/i18n';
@@ -96,6 +96,8 @@
 	let dialogOpen = $state(false);
 	let error = $state<string | null>(null);
 	let folderName = $state('');
+	/** The folder's own site connector (#176); empty: its parent's. */
+	let folderConnectorId = $state('');
 	/** The object whose access request was just sent, for the notice. */
 	let requested = $state<string | null>(null);
 
@@ -169,7 +171,12 @@
 		if (picked.ok) picks = picked.data;
 	}
 
-	const connectorOf = (device: Device) => connectors.find((c) => c.id === device.connector_id);
+	const connectorOf = (device: Device) => connectors.find((c) => c.id === device.reached_through);
+	/** The connector a folder passes on to what is in it (#176). */
+	const passedOn = (folderId: string | null) => {
+		const id = tree ? folderConnector(tree, folderId) : null;
+		return id ? (connectors.find((c) => c.id === id) ?? null) : null;
+	};
 	const path = (folderId: string | null) =>
 		tree
 			? pathTo(tree, folderId)
@@ -185,7 +192,10 @@
 		error = null;
 		kdbxResult = null;
 		open = next;
-		if (next.type === 'folder') folderName = next.folder?.name ?? '';
+		if (next.type === 'folder') {
+			folderName = next.folder?.name ?? '';
+			folderConnectorId = next.folder?.connector_id ?? '';
+		}
 		dialogOpen = true;
 	}
 
@@ -255,8 +265,8 @@
 		const target = open;
 		run(
 			target.folder
-				? renameFolder(target.folder.id, folderName)
-				: createFolder(target.parent, folderName),
+				? updateFolder(target.folder.id, folderName, folderConnectorId || null)
+				: createFolder(target.parent, folderName, folderConnectorId || null),
 			target.folder ? undefined : created('folder', target.parent)
 		);
 	}
@@ -631,7 +641,7 @@
 					<div class="flex flex-wrap gap-2">
 						<span class="chip font-mono">{device.host}:{device.port}</span>
 						<span class="chip">{PROTOCOL_LABELS[device.protocol]()}</span>
-						{#if device.connector_id}
+						{#if device.reached_through}
 							{@const connector = connectorOf(device)}
 							<span class="chip">
 								{#if connector?.online}
@@ -845,6 +855,25 @@
 						maxlength="200"
 						bind:value={folderName}
 					/>
+					{#if connectors.length > 0 || folderConnectorId}
+						{@const fromParent = passedOn(open.folder ? open.folder.parent_id : open.parent)}
+						<label class="mt-3 block text-sm font-medium" for="folder-connector">
+							{m.field_connector()}
+						</label>
+						<select
+							id="folder-connector"
+							class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
+							bind:value={folderConnectorId}
+						>
+							<option value="">
+								{m.connector_inherited({ name: fromParent?.name ?? m.connector_direct() })}
+							</option>
+							{#each connectors as connector (connector.id)}
+								<option value={connector.id}>{connector.name}</option>
+							{/each}
+						</select>
+						<p class="mt-1 text-xs text-ink-3">{m.folder_connector_hint()}</p>
+					{/if}
 					<div class="mt-5 flex justify-end gap-2">
 						<button
 							type="button"
@@ -867,6 +896,7 @@
 					device={open.device}
 					credentials={tree.credentials}
 					{connectors}
+					inherited={passedOn(open.folderId)}
 					onsubmit={saveDevice}
 					oncancel={() => (dialogOpen = false)}
 				/>

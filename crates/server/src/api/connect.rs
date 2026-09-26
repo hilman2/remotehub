@@ -40,6 +40,8 @@ pub struct Target {
     pub host_key: Option<String>,
     pub keyboard_layout: Option<String>,
     pub certificate_fingerprint: Option<String>,
+    /// The connector the device is reached through, its own or its folder's
+    /// (#176); none: directly.
     pub connector_id: Option<Uuid>,
 }
 
@@ -163,7 +165,8 @@ pub async fn target(
     }
     let target: Target = sqlx::query_as(
         "SELECT id, name, protocol, host, port, auth_mode, credential_id, host_key, keyboard_layout,
-                certificate_fingerprint, connector_id
+                certificate_fingerprint,
+                device_connector(connector_mode, connector_id, folder_id) AS connector_id
          FROM devices WHERE id = $1",
     )
     .bind(id)

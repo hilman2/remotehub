@@ -223,7 +223,8 @@ async fn administrators_manage_connectors_and_devices_name_them(pool: PgPool) {
     // A device names an existing connector, and keeps it from being deleted.
     let device = |connector: Value| {
         json!({ "folder_id": folder, "name": "router", "protocol": "ssh", "host": "10.1.1.1",
-                "port": 22, "auth_mode": "ask", "credential_id": null, "connector_id": connector })
+                "port": 22, "auth_mode": "ask", "credential_id": null,
+                "connector_mode": "connector", "connector_id": connector })
     };
     let unknown = send(
         &app,
@@ -271,8 +272,14 @@ async fn moving_a_device_to_a_connector_forgets_its_pins(pool: PgPool) {
     let (_state, app, token, folder) = setup(pool.clone()).await;
     let (id, _) = new_connector(&app, &token, "Hamburg office").await;
     let body = |connector: Value| {
+        let mode = if connector.is_null() {
+            "inherit"
+        } else {
+            "connector"
+        };
         json!({ "folder_id": folder, "name": "router", "protocol": "ssh", "host": "10.1.1.1",
-                "port": 22, "auth_mode": "ask", "credential_id": null, "connector_id": connector })
+                "port": 22, "auth_mode": "ask", "credential_id": null,
+                "connector_mode": mode, "connector_id": connector })
     };
     let router = create(&app, &token, "/api/devices", body(Value::Null)).await;
     sqlx::query("UPDATE devices SET host_key = 'ssh-ed25519 AAAA', host_key_pinned_at = now()")

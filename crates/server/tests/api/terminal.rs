@@ -272,7 +272,8 @@ async fn a_device_behind_a_connector_opens_only_while_it_is_connected(pool: PgPo
         "/api/devices",
         json!({
             "folder_id": folder, "name": "behind", "protocol": "ssh", "host": ssh_host(),
-            "port": 22, "auth_mode": "stored", "credential_id": credential, "connector_id": connector,
+            "port": 22, "auth_mode": "stored", "credential_id": credential,
+            "connector_mode": "connector", "connector_id": connector,
         }),
     )
     .await;
@@ -316,7 +317,8 @@ async fn a_closed_connector_says_the_customer_closed_it(pool: PgPool) {
         "/api/devices",
         json!({
             "folder_id": folder, "name": "behind", "protocol": "ssh", "host": "10.1.1.1",
-            "port": 22, "auth_mode": "stored", "credential_id": credential, "connector_id": connector,
+            "port": 22, "auth_mode": "stored", "credential_id": credential,
+            "connector_mode": "connector", "connector_id": connector,
         }),
     )
     .await;

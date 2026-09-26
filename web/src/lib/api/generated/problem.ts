@@ -33,6 +33,7 @@ export const ERROR_CODES = [
 	'recovery_open',
 	'recovery_not_ready',
 	'connector_in_use',
+	'retarget_forbidden',
 	'connector_offline',
 	'connector_closed',
 	'connector_protocol',

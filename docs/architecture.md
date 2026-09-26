@@ -279,6 +279,9 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   WebSocket of its own under `/api/connectors/streams/{id}`. The engines do not know: for a device with a
   connector, `connect::route` opens a forward (`crates/server/src/connectors.rs`) that only the engine in
   question may use, and hands its address to SSH, the certificate probes, guacd or the browser service.
+  Which connector applies comes from the database: the device's own, none (`direct`), or the nearest folder's
+  above it (#176), all in the SQL function `device_connector`, which routing, the tree and the checks on a
+  change use alike.
 - **The customer's access** (ADR 0011): a connector connects only while its customer keeps access open, in
   its own web interface or on its command line (`crates/connector/src/access.rs`, `ui.rs`). Closed, it has no
   control socket and posts its state to `/api/connectors/state`; `connect::route` then answers
