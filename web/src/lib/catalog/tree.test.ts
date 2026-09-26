@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { allows, type Device, type Tree } from '$lib/api/catalog';
 import { catalogItems } from '$lib/search/catalog';
 import { rank } from '$lib/search/rank';
-import { nest, pathTo } from './tree';
+import { folderConnector, nest, pathTo } from './tree';
 
 function device(id: string, name: string, host: string): Device {
 	return {
@@ -18,7 +18,9 @@ function device(id: string, name: string, host: string): Device {
 		keyboard_layout: null,
 		certificate_fingerprint: null,
 		host_key_fingerprint: null,
+		connector_mode: 'inherit',
 		connector_id: null,
+		reached_through: null,
 		username: '',
 		domain: '',
 		secret_kind: 'password',
@@ -34,10 +36,10 @@ const tree: Tree = {
 	open: [],
 	purpose_required: false,
 	folders: [
-		{ id: 'l', parent_id: 's', name: 'Linux', role: 'edit' },
-		{ id: 's', parent_id: null, name: 'Servers', role: 'connect' },
-		{ id: 'n', parent_id: null, name: 'Network', role: null },
-		{ id: 'w', parent_id: 's', name: 'windows', role: 'connect' }
+		{ id: 'l', parent_id: 's', name: 'Linux', role: 'edit', connector_id: null },
+		{ id: 's', parent_id: null, name: 'Servers', role: 'connect', connector_id: 'site' },
+		{ id: 'n', parent_id: null, name: 'Network', role: null, connector_id: null },
+		{ id: 'w', parent_id: 's', name: 'windows', role: 'connect', connector_id: 'office' }
 	],
 	devices: [device('d2', 'web02', 'web02.example.com'), device('d1', 'Web01', 'db.example.com')],
 	credentials: [
@@ -96,6 +98,15 @@ describe('pathTo', () => {
 	it('lists the folders from the top', () => {
 		expect(pathTo(tree, 'l').map((f) => f.name)).toEqual(['Servers', 'Linux']);
 		expect(pathTo(tree, null)).toEqual([]);
+	});
+});
+
+describe('folderConnector', () => {
+	it('takes the nearest connector up the path', () => {
+		expect(folderConnector(tree, 'l')).toBe('site');
+		expect(folderConnector(tree, 'w')).toBe('office');
+		expect(folderConnector(tree, 'n')).toBeNull();
+		expect(folderConnector(tree, null)).toBeNull();
 	});
 });
 

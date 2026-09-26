@@ -42,3 +42,16 @@ export function pathTo(tree: Tree, folderId: string | null): Folder[] {
 	}
 	return path;
 }
+
+/**
+ * The site connector a folder passes on to what is in it (#176): its own,
+ * or the nearest one above it; null: none, devices connect directly. As the
+ * server's `folder_connector`.
+ */
+export function folderConnector(tree: Tree, folderId: string | null): string | null {
+	const path = pathTo(tree, folderId);
+	for (let i = path.length - 1; i >= 0; i--) {
+		if (path[i].connector_id) return path[i].connector_id;
+	}
+	return null;
+}

@@ -127,7 +127,7 @@ export async function importInto(
 		const existing = tree.folders.find((f) => f.parent_id === parent && f.name === name);
 		let id = existing?.id;
 		if (!id) {
-			const made = await createFolder(parent, name);
+			const made = await createFolder(parent, name, null);
 			if (!made.ok) return null;
 			id = made.data.id;
 		}

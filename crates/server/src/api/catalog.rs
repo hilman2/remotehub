@@ -132,6 +132,9 @@ struct TreeFolder {
     name: String,
     /// `None`: only shown as the way to something visible inside.
     role: Option<Role>,
+    /// The site connector the folder names for the devices below it (#176);
+    /// none: its parent's.
+    connector_id: Option<Uuid>,
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -150,8 +153,12 @@ struct DeviceRow {
     /// RDP and HTTPS: SHA-256 fingerprint of the pinned certificate, if one
     /// is pinned.
     certificate_fingerprint: Option<String>,
-    /// The site connector the device is reached through; none: directly.
+    /// `inherit` from the folder, `direct`, or its own `connector` (#176).
+    connector_mode: String,
+    /// Its own connector, with `connector_mode` `connector`.
     connector_id: Option<Uuid>,
+    /// The connector it is reached through, however chosen; none: directly.
+    reached_through: Option<Uuid>,
     /// Sign-in mode `device`: its own credentials as far as they may be
     /// shown: user name, domain, `password` or `ssh_key`, and what
     /// identifies a key. Password and key stay sealed.
@@ -215,14 +222,17 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
     let (subject, catalog) = context(&state, &session).await?;
     let visible = catalog.visible(&subject);
 
-    let folders: Vec<(Uuid, Option<Uuid>, String)> =
-        sqlx::query_as("SELECT id, parent_id, name FROM folders ORDER BY lower(name)")
-            .fetch_all(&state.db)
-            .await?;
+    let folders: Vec<(Uuid, Option<Uuid>, String, Option<Uuid>)> = sqlx::query_as(
+        "SELECT id, parent_id, name, connector_id FROM folders ORDER BY lower(name)",
+    )
+    .fetch_all(&state.db)
+    .await?;
     let devices: Vec<DeviceRow> = sqlx::query_as(
         "SELECT id, folder_id, name, protocol, host, port, auth_mode, credential_id, description,
-                keyboard_layout, certificate_fingerprint, connector_id, username, domain,
-                secret_kind, key_algorithm, key_fingerprint, has_certificate, host_key
+                keyboard_layout, certificate_fingerprint, connector_mode, connector_id,
+                device_connector(connector_mode, connector_id, folder_id) AS reached_through,
+                username, domain, secret_kind, key_algorithm, key_fingerprint, has_certificate,
+                host_key
          FROM devices ORDER BY lower(name)",
     )
     .fetch_all(&state.db)
@@ -255,13 +265,14 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
         purpose_required,
         folders: folders
             .into_iter()
-            .filter_map(|(id, parent_id, name)| {
+            .filter_map(|(id, parent_id, name, connector_id)| {
                 let role = visible.roles.get(&ObjectId::Folder(id)).copied();
                 (role.is_some() || visible.path_only.contains(&id)).then_some(TreeFolder {
                     id,
                     parent_id,
                     name,
                     role,
+                    connector_id,
                 })
             })
             .collect(),
@@ -329,6 +340,9 @@ pub async fn set_folder_open(
 pub struct NewFolder {
     parent_id: Option<Uuid>,
     name: String,
+    /// The site connector for what is in it (#176); none: its parent's.
+    #[serde(default)]
+    connector_id: Option<Uuid>,
 }
 
 #[derive(Serialize)]
@@ -350,16 +364,22 @@ pub async fn create_folder(
         None => return Err(Problem::new(ErrorCode::Forbidden)),
         Some(parent) => require(&catalog, &subject, Role::Manage, ObjectId::Folder(parent))?,
     }
+    // A new folder holds no devices yet: no target changes.
+    require_connector(&state, input.connector_id).await?;
 
     let mut tx = state.db.begin().await?;
-    let id: Uuid =
-        sqlx::query_scalar("INSERT INTO folders (parent_id, name) VALUES ($1, $2) RETURNING id")
-            .bind(input.parent_id)
-            .bind(&name)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(database)?;
-    let details = json!({ "name": name, "parent_id": input.parent_id });
+    let id: Uuid = sqlx::query_scalar(
+        "INSERT INTO folders (parent_id, name, connector_id) VALUES ($1, $2, $3) RETURNING id",
+    )
+    .bind(input.parent_id)
+    .bind(&name)
+    .bind(input.connector_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(database)?;
+    let details = json!({
+        "name": name, "parent_id": input.parent_id, "connector_id": input.connector_id,
+    });
     audit::record(
         &mut *tx,
         entry(
@@ -381,7 +401,45 @@ pub struct FolderChange {
     /// Absent: stays; `null`: to the top level; an id: into that folder.
     #[serde(default, deserialize_with = "nullable")]
     parent_id: Option<Option<Uuid>>,
+    /// Absent: stays; `null`: the parent's; an id: that connector (#176).
+    #[serde(default, deserialize_with = "nullable")]
+    connector_id: Option<Option<Uuid>>,
 }
+
+/// A device in a folder's subtree, and the connector it is reached through.
+#[derive(sqlx::FromRow)]
+struct Reached {
+    id: Uuid,
+    name: String,
+    credential_id: Option<Uuid>,
+    reached_through: Option<Uuid>,
+}
+
+/// Every device in `folder` and the folders below it, with its connector.
+async fn devices_below(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    folder: Uuid,
+) -> Result<Vec<Reached>, Problem> {
+    Ok(sqlx::query_as(
+        "WITH RECURSIVE below AS (
+             SELECT id FROM folders WHERE id = $1
+             UNION ALL
+             SELECT f.id FROM folders f JOIN below b ON f.parent_id = b.id
+         )
+         SELECT d.id, d.name, d.credential_id,
+                device_connector(d.connector_mode, d.connector_id, d.folder_id) AS reached_through
+         FROM devices d WHERE d.folder_id IN (SELECT id FROM below)",
+    )
+    .bind(folder)
+    .fetch_all(&mut **tx)
+    .await?)
+}
+
+/// Forgets what was pinned for devices whose target changed: the same
+/// address behind another connector may be another machine.
+const FORGET_PINS: &str = "UPDATE devices SET host_key = NULL, host_key_pinned_at = NULL,
+         certificate_fingerprint = NULL, certificate_pinned_at = NULL
+     WHERE id = ANY($1)";
 
 pub async fn update_folder(
     State(state): State<AppState>,
@@ -406,12 +464,17 @@ pub async fn update_folder(
             }
         }
     }
+    if let Some(Some(connector)) = input.connector_id {
+        require_connector(&state, Some(connector)).await?;
+    }
 
     let mut tx = state.db.begin().await?;
+    let before = devices_below(&mut tx, id).await?;
     sqlx::query(
         "UPDATE folders SET
              name = coalesce($2, name),
              parent_id = CASE WHEN $3 THEN $4 ELSE parent_id END,
+             connector_id = CASE WHEN $5 THEN $6 ELSE connector_id END,
              updated_at = now()
          WHERE id = $1",
     )
@@ -419,10 +482,51 @@ pub async fn update_folder(
     .bind(&name)
     .bind(input.parent_id.is_some())
     .bind(input.parent_id.flatten())
+    .bind(input.connector_id.is_some())
+    .bind(input.connector_id.flatten())
     .execute(&mut *tx)
     .await
     .map_err(database)?;
-    let details = json!({ "name": name, "parent_id": input.parent_id });
+    // A new connector here, or one above after a move, is another target for
+    // every device below that inherits it: the same rules as changing one
+    // device's target (see update_device). Their own passwords and keys go
+    // along: managing the folder includes `reveal` on everything in it.
+    let after = devices_below(&mut tx, id).await?;
+    let retargeted: Vec<&Reached> = after
+        .iter()
+        .filter(|now| {
+            before
+                .iter()
+                .any(|was| was.id == now.id && was.reached_through != now.reached_through)
+        })
+        .collect();
+    let refused: Vec<&str> = retargeted
+        .iter()
+        .filter(|device| {
+            device.credential_id.is_some_and(|credential| {
+                require(
+                    &catalog,
+                    &subject,
+                    Role::Connect,
+                    ObjectId::Credential(credential),
+                )
+                .is_err()
+            })
+        })
+        .map(|device| device.name.as_str())
+        .collect();
+    if !refused.is_empty() {
+        return Err(Problem::new(ErrorCode::RetargetForbidden).param("devices", refused.join(", ")));
+    }
+    let retargeted: Vec<Uuid> = retargeted.iter().map(|device| device.id).collect();
+    sqlx::query(FORGET_PINS)
+        .bind(&retargeted)
+        .execute(&mut *tx)
+        .await?;
+    let details = json!({
+        "name": name, "parent_id": input.parent_id, "connector_id": input.connector_id,
+        "retargeted": retargeted,
+    });
     audit::record(
         &mut *tx,
         entry(
@@ -483,7 +587,10 @@ pub struct DeviceInput {
     /// RDP only: one of guacd's layouts, or none for the instance's default.
     #[serde(default)]
     keyboard_layout: Option<String>,
-    /// The site connector the device is reached through; none: directly.
+    /// How the device is reached (#176): `inherit` from its folder (the
+    /// default), `direct`, or through its own `connector`, `connector_id`.
+    #[serde(default)]
+    connector_mode: Option<String>,
     #[serde(default)]
     connector_id: Option<Uuid>,
     /// Sign-in mode `device` only: the device's own credentials, a password
@@ -508,6 +615,8 @@ struct ValidDevice {
     credential_id: Option<Uuid>,
     description: String,
     keyboard_layout: Option<&'static str>,
+    connector_mode: &'static str,
+    /// Set exactly with `connector_mode` `connector`.
     connector_id: Option<Uuid>,
     /// Empty unless the sign-in mode is `device`.
     username: String,
@@ -520,6 +629,12 @@ struct ValidDevice {
 
 impl DeviceInput {
     fn validate(self) -> Result<ValidDevice, Problem> {
+        let connector_mode = match (self.connector_mode.as_deref(), self.connector_id) {
+            (None | Some("inherit"), None) => "inherit",
+            (Some("direct"), None) => "direct",
+            (Some("connector"), Some(_)) => "connector",
+            _ => return Err(invalid("connector_id")),
+        };
         let protocol = match self.protocol.as_str() {
             "ssh" => "ssh",
             "rdp" => "rdp",
@@ -596,6 +711,7 @@ impl DeviceInput {
             credential_id: self.credential_id,
             description: self.description.trim().to_owned(),
             keyboard_layout,
+            connector_mode,
             connector_id: self.connector_id,
             username: if own {
                 plain(&self.username, "username")?
@@ -620,7 +736,8 @@ struct DeviceBefore {
     host: String,
     port: i32,
     credential_id: Option<Uuid>,
-    connector_id: Option<Uuid>,
+    /// The connector it was reached through, however chosen.
+    reached_through: Option<Uuid>,
     auth_mode: String,
     secret_version: i32,
     secret_kind: String,
@@ -638,8 +755,18 @@ fn missing_secret(secret_kind: &str) -> Problem {
     })
 }
 
-/// A connector the device names must exist; the foreign key would only say
-/// that something is missing.
+/// The connector a device with these settings is reached through (#176).
+async fn reached_through(state: &AppState, device: &ValidDevice) -> Result<Option<Uuid>, Problem> {
+    Ok(sqlx::query_scalar("SELECT device_connector($1, $2, $3)")
+        .bind(device.connector_mode)
+        .bind(device.connector_id)
+        .bind(device.folder_id)
+        .fetch_one(&state.db)
+        .await?)
+}
+
+/// A connector the device or folder names must exist; the foreign key would
+/// only say that something is missing.
 async fn require_connector(state: &AppState, connector: Option<Uuid>) -> Result<(), Problem> {
     let Some(connector) = connector else {
         return Ok(());
@@ -695,8 +822,8 @@ pub async fn create_device(
         "INSERT INTO devices
              (folder_id, name, protocol, host, port, auth_mode, credential_id, description, keyboard_layout,
               connector_id, username, domain, secret_version, secret_kind, key_algorithm,
-              key_fingerprint, has_certificate)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+              key_fingerprint, has_certificate, connector_mode)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
          RETURNING id",
     )
     .bind(device.folder_id)
@@ -716,6 +843,7 @@ pub async fn create_device(
     .bind(key_algorithm)
     .bind(key_fingerprint)
     .bind(has_certificate)
+    .bind(device.connector_mode)
     .fetch_one(&mut *tx)
     .await
     .map_err(database)?;
@@ -725,7 +853,8 @@ pub async fn create_device(
     let details = json!({
         "name": device.name, "protocol": device.protocol, "host": device.host, "port": device.port,
         "auth_mode": device.auth_mode, "credential_id": device.credential_id,
-        "keyboard_layout": device.keyboard_layout, "connector_id": device.connector_id,
+        "keyboard_layout": device.keyboard_layout, "connector_mode": device.connector_mode,
+        "connector_id": device.connector_id,
         "username": device.username, "domain": device.domain, "secret_kind": device.secret_kind,
         "key_fingerprint": key_fingerprint,
     });
@@ -763,20 +892,24 @@ pub async fn update_device(
         )?;
     }
     let before: DeviceBefore = sqlx::query_as(
-        "SELECT protocol, host, port, credential_id, connector_id, auth_mode, secret_version,
-                secret_kind, key_algorithm, key_fingerprint, has_certificate
+        "SELECT protocol, host, port, credential_id,
+                device_connector(connector_mode, connector_id, folder_id) AS reached_through,
+                auth_mode, secret_version, secret_kind, key_algorithm, key_fingerprint,
+                has_certificate
          FROM devices WHERE id = $1",
     )
     .bind(id)
     .fetch_one(&state.db)
     .await?;
+    require_connector(&state, device.connector_id).await?;
     // A credential may only be linked, or sent to a changed target, by
     // someone who may use it (see create_device). Another connector is
     // another target: the same address may be another machine at its site.
+    // That includes a move into a folder with another connector (#176).
     let target_changed = before.protocol != device.protocol
         || before.host != device.host
         || before.port != device.port
-        || before.connector_id != device.connector_id;
+        || before.reached_through != reached_through(&state, &device).await?;
     if let Some(credential) = device.credential_id
         && (before.credential_id != Some(credential) || target_changed)
     {
@@ -787,14 +920,19 @@ pub async fn update_device(
             ObjectId::Credential(credential),
         )?;
     }
-    require_connector(&state, device.connector_id).await?;
-    // The device's own password or key goes only to the target it was
-    // entered for: whoever changes the target enters it again, like a linked
-    // credential needs its right to be used (above).
+    // The device's own password or key goes to another target only with
+    // someone who may read it (#174): pointing the device at a host of one's
+    // own would hand one the password. `edit` includes `reveal` today, so
+    // this holds for everyone who gets here; the audit entry says the secret
+    // went along. Should the roles ever part, the others enter it again, as
+    // a linked credential needs its right to be used (above).
+    let may_carry =
+        !target_changed || require(&catalog, &subject, Role::Reveal, ObjectId::Device(id)).is_ok();
     let keeps = before.auth_mode == "device"
         && before.secret_version > 0
         && before.secret_kind == device.secret_kind
-        && !target_changed;
+        && may_carry;
+    let secret_kept = keeps && target_changed && device.secrets.is_none();
     let secret_version = match (&device.secrets, device.auth_mode) {
         (Some(_), _) => before.secret_version + 1,
         (None, "device") if keeps => before.secret_version,
@@ -833,7 +971,7 @@ pub async fn update_device(
              auth_mode = $7, credential_id = $8, description = $9, keyboard_layout = $11,
              connector_id = $12, username = $13, domain = $14, secret_version = $15,
              secret_kind = $16, key_algorithm = $17, key_fingerprint = $18, has_certificate = $19,
-             updated_at = now(),
+             connector_mode = $20, updated_at = now(),
              host_key = CASE WHEN $10 THEN NULL ELSE host_key END,
              host_key_pinned_at = CASE WHEN $10 THEN NULL ELSE host_key_pinned_at END,
              certificate_fingerprint = CASE WHEN $10 THEN NULL ELSE certificate_fingerprint END,
@@ -859,15 +997,18 @@ pub async fn update_device(
     .bind(&key_algorithm)
     .bind(&key_fingerprint)
     .bind(has_certificate)
+    .bind(device.connector_mode)
     .execute(&mut *tx)
     .await
     .map_err(database)?;
     let details = json!({
         "name": device.name, "protocol": device.protocol, "host": device.host, "port": device.port,
         "auth_mode": device.auth_mode, "credential_id": device.credential_id, "folder_id": device.folder_id,
-        "keyboard_layout": device.keyboard_layout, "connector_id": device.connector_id,
+        "keyboard_layout": device.keyboard_layout, "connector_mode": device.connector_mode,
+        "connector_id": device.connector_id,
         "username": device.username, "domain": device.domain, "secret_kind": device.secret_kind,
         "key_fingerprint": key_fingerprint, "secret_changed": device.secrets.is_some(),
+        "secret_kept": secret_kept,
     });
     audit::record(
         &mut *tx,
