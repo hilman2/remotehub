@@ -77,6 +77,28 @@ async fn nested_groups_are_resolved() {
     assert!(!bob.groups.contains(&group_sid("RH Admins").await));
 }
 
+/// Sign-in reads only SIDs; their names come in one lookup (#178), and a
+/// SID the directory does not know is left out.
+#[tokio::test]
+#[ignore = "needs the test lab"]
+async fn group_names_are_read_by_sid() {
+    let bob = sign_in("bob", "Bob-Passw0rd!").await.unwrap();
+    let unknown: Sid = "S-1-5-21-1-2-3-999999".parse().unwrap();
+    let mut asked = bob.groups.clone();
+    asked.push(unknown.clone());
+    let named = directory().group_names(&asked).await.unwrap();
+    let helpdesk = group_sid("Helpdesk").await;
+    assert!(
+        named
+            .iter()
+            .any(|g| g.sid == helpdesk && g.name == "Helpdesk"),
+        "{named:?}"
+    );
+    assert!(named.iter().any(|g| g.name == "RH Operators"), "{named:?}");
+    assert!(!named.iter().any(|g| g.sid == unknown));
+    assert!(directory().group_names(&[]).await.unwrap().is_empty());
+}
+
 #[tokio::test]
 #[ignore = "needs the test lab"]
 async fn every_name_form_finds_the_same_account() {

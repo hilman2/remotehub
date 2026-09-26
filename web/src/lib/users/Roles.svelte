@@ -14,6 +14,15 @@
 	import { m } from '$lib/paraglide/messages';
 	import type { Role } from '$lib/session.svelte';
 
+	let {
+		admin,
+		onchanged = () => {}
+	}: {
+		/** May give and take roles; an auditor only looks (#178). */
+		admin: boolean;
+		onchanged?: () => void;
+	} = $props();
+
 	let roles = $state<RoleAssignments[]>([]);
 	let error = $state<string | null>(null);
 	let adding = $state<Role | null>(null);
@@ -59,18 +68,20 @@
 		}
 		dialogOpen = false;
 		await load();
+		onchanged();
 	}
 
 	async function revoke(role: Role, sid: string) {
 		const result = await revokeRole(role, sid);
 		if (!result.ok) error = errorMessage(result.code);
 		await load();
+		onchanged();
 	}
 </script>
 
-<section class="mt-12" aria-labelledby="roles-title">
-	<h2 id="roles-title" class="text-2xl font-semibold">{m.roles_title()}</h2>
-	<p class="mt-2 text-sm text-ink-2">{m.roles_hint()}</p>
+<section aria-labelledby="roles-title">
+	<h2 id="roles-title" class="sr-only">{m.roles_title()}</h2>
+	<p class="text-sm text-ink-2">{m.roles_hint()}</p>
 	{#if error}
 		<p class="mt-4 text-sm text-critical" role="alert">{error}</p>
 	{/if}
@@ -80,15 +91,17 @@
 			<div class="rounded-card border border-line bg-surface p-4" data-testid="role-{role}">
 				<div class="flex items-start justify-between gap-2">
 					<h3 class="font-medium">{names[role]()}</h3>
-					<button
-						type="button"
-						class="rounded-md p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"
-						title={m.roles_add({ role: names[role]() })}
-						onclick={() => add(role)}
-					>
-						<Plus size={15} aria-hidden="true" />
-						<span class="sr-only">{m.roles_add({ role: names[role]() })}</span>
-					</button>
+					{#if admin}
+						<button
+							type="button"
+							class="rounded-md p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"
+							title={m.roles_add({ role: names[role]() })}
+							onclick={() => add(role)}
+						>
+							<Plus size={15} aria-hidden="true" />
+							<span class="sr-only">{m.roles_add({ role: names[role]() })}</span>
+						</button>
+					{/if}
 				</div>
 				<p class="mt-1 text-xs text-ink-3">{hints[role]()}</p>
 				{#if assignments.members.length === 0}
@@ -98,15 +111,17 @@
 						{#each assignments.members as member (member.sid)}
 							<li class="flex items-center gap-2 text-sm">
 								<PrincipalName kind={member.kind} name={member.name} />
-								<button
-									type="button"
-									class="ml-auto rounded-md p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"
-									title={m.groups_remove_member({ name: member.name })}
-									onclick={() => revoke(role, member.sid)}
-								>
-									<X size={14} aria-hidden="true" />
-									<span class="sr-only">{m.groups_remove_member({ name: member.name })}</span>
-								</button>
+								{#if admin}
+									<button
+										type="button"
+										class="ml-auto rounded-md p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"
+										title={m.groups_remove_member({ name: member.name })}
+										onclick={() => revoke(role, member.sid)}
+									>
+										<X size={14} aria-hidden="true" />
+										<span class="sr-only">{m.groups_remove_member({ name: member.name })}</span>
+									</button>
+								{/if}
 							</li>
 						{/each}
 					</ul>

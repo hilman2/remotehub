@@ -1,5 +1,6 @@
 //! HTTP API under `/api`.
 
+mod access;
 mod accounts;
 mod attachments;
 mod audit;
@@ -231,6 +232,8 @@ pub fn router(state: AppState) -> Router<AppState> {
             get(recovery::attachment),
         )
         .route("/vault-recoveries/{id}/complete", post(recovery::complete))
+        .route("/access", get(access::overview))
+        .route("/access/grants", get(access::grants))
         .route("/reports/people", get(reports::people))
         .route("/reports/folders", get(reports::folders))
         .route("/reports/users/{id}", get(reports::user))

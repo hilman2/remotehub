@@ -26,7 +26,6 @@ const IDENTICAL_IN_GERMAN = new Set<string>([
 	'credential_version',
 	'field_passphrase',
 	'vault_kind_passkey',
-	'permissions_person',
 	'account_passkeys',
 	'vault_kind_passphrase',
 	'sign_in_code',
@@ -35,7 +34,9 @@ const IDENTICAL_IN_GERMAN = new Set<string>([
 	'vault_totp_left',
 	'connectors_setup_docker',
 	'connectors_setup_windows_program',
-	'connectors_setup_windows_sums'
+	'connectors_setup_windows_sums',
+	'access_more',
+	'access_group_own'
 ]);
 
 /** Every message as text; plural and select variants as their JSON. */

@@ -9,7 +9,9 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use remotehub_directory::laps::{LapsError, LapsPassword};
-use remotehub_directory::{AuthError, Identity, IdentityProvider, Principal, PrincipalKind, Sid};
+use remotehub_directory::{
+    AuthError, Group, Identity, IdentityProvider, Principal, PrincipalKind, Sid,
+};
 use remotehub_server::config::SessionConfig;
 use remotehub_server::{AppState, Settings};
 use remotehub_vault::{DynVault, FileKeyring, Vault, generate_key_line};
@@ -136,6 +138,24 @@ impl IdentityProvider for FakeDirectory {
             ("offline", _) => Err(AuthError::Unavailable("connection refused".into())),
             _ => Err(AuthError::InvalidCredentials),
         }
+    }
+
+    /// The directory's two groups; other SIDs it does not know.
+    async fn group_names(&self, sids: &[Sid]) -> Result<Vec<Group>, AuthError> {
+        Ok(sids
+            .iter()
+            .filter_map(|sid| {
+                let name = match sid.as_str() {
+                    ADMINS_SID => "RH Admins",
+                    OPS_SID => "RH Operators",
+                    _ => return None,
+                };
+                Some(Group {
+                    sid: sid.clone(),
+                    name: name.into(),
+                })
+            })
+            .collect())
     }
 
     /// Everyone keeps the groups they sign in with.

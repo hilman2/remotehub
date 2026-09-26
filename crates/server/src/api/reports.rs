@@ -53,13 +53,13 @@ pub async fn people(
 }
 
 /// Names of everything in the catalog, for the reports' paths.
-struct Names {
+pub(super) struct Names {
     folders: HashMap<Uuid, (Option<Uuid>, String)>,
     objects: HashMap<ObjectId, String>,
 }
 
 impl Names {
-    async fn load(state: &AppState) -> Result<Self, Problem> {
+    pub(super) async fn load(state: &AppState) -> Result<Self, Problem> {
         let folders: Vec<(Uuid, Option<Uuid>, String)> =
             sqlx::query_as("SELECT id, parent_id, name FROM folders")
                 .fetch_all(&state.db)
@@ -89,12 +89,12 @@ impl Names {
         })
     }
 
-    fn name(&self, object: ObjectId) -> String {
+    pub(super) fn name(&self, object: ObjectId) -> String {
         self.objects.get(&object).cloned().unwrap_or_default()
     }
 
     /// The names of the folders from the top down to `folder`.
-    fn path(&self, folder: Option<Uuid>) -> Vec<String> {
+    pub(super) fn path(&self, folder: Option<Uuid>) -> Vec<String> {
         let mut names = Vec::new();
         let mut next = folder;
         // A bound instead of loop detection: the database prevents loops.
@@ -139,7 +139,7 @@ pub async fn folders(
 /// Display names of the principals grants and memberships name: today's
 /// name of a user or group remotehub knows, else the one a grant or
 /// membership kept from when it was made.
-async fn principal_names(state: &AppState) -> Result<HashMap<String, String>, Problem> {
+pub(super) async fn principal_names(state: &AppState) -> Result<HashMap<String, String>, Problem> {
     // The names that count most come last and so win in the map.
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT sid, name FROM (
@@ -149,6 +149,7 @@ async fn principal_names(state: &AppState) -> Result<HashMap<String, String>, Pr
              UNION ALL SELECT 'local:' || identity_id, display_name, 1 FROM users
                  WHERE identity_id IS NOT NULL
              UNION ALL SELECT 'group:' || id, name, 1 FROM groups
+             UNION ALL SELECT sid, name, 1 FROM directory_groups
          ) named ORDER BY rank DESC",
     )
     .fetch_all(&state.db)

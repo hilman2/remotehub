@@ -74,11 +74,14 @@ fn entry<'a>(
     }
 }
 
+/// Who has which role; auditors see it too, on the Access page (#178).
 pub async fn list(
     State(state): State<AppState>,
     session: Session,
 ) -> Result<Json<Vec<Assignments>>, Problem> {
-    require_admin(&session)?;
+    if !session.is_auditor() {
+        return Err(Problem::new(ErrorCode::Forbidden));
+    }
     let members: Vec<Member> = sqlx::query_as(
         "SELECT role, principal_sid AS sid, principal_kind AS kind, principal_name AS name
          FROM role_assignments ORDER BY principal_kind DESC, lower(principal_name)",

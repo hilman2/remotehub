@@ -441,19 +441,18 @@ test('a group of remotehub’s own passes a permission on to its members', async
 	await signIn(page);
 	const dialog = page.getByRole('dialog');
 	const group = `E2E team ${run}`;
-	await page.getByRole('link', { name: 'Users' }).click();
+	await page.getByRole('link', { name: 'Access', exact: true }).click();
+	await page.getByRole('link', { name: /^Groups/ }).click();
 	await page.getByRole('button', { name: 'New group' }).click();
 	await dialog.getByLabel('Name', { exact: true }).fill(group);
 	await dialog.getByRole('button', { name: 'Create' }).click();
-	const row = page.getByTestId('group-row').filter({ hasText: group });
-	await row.getByRole('button', { name: `Actions for ${group}` }).click();
-	await page.getByRole('menuitem', { name: 'Members' }).click();
+	// The new group's page.
+	await expect(page.getByRole('heading', { name: group })).toBeVisible();
+	await page.getByRole('button', { name: 'Add', exact: true }).click();
 	await dialog.getByLabel('Search users and groups').fill('Bob');
 	await dialog.getByRole('button', { name: /Bob Helpdesk/ }).click();
 	await dialog.getByRole('button', { name: 'Add', exact: true }).click();
-	await expect(dialog.getByRole('listitem').filter({ hasText: 'Bob Helpdesk' })).toBeVisible();
-	await page.keyboard.press('Escape');
-	await expect(row).toContainText('Bob Helpdesk');
+	await expect(page.getByRole('listitem').filter({ hasText: 'Bob Helpdesk' })).toBeVisible();
 
 	// The group may see a new device.
 	await page.getByRole('link', { name: 'Devices' }).click();
@@ -493,7 +492,8 @@ test('an auditor reads the audit log and manages nothing', async ({ page, browse
 	await expect(bob.getByRole('link', { name: 'Audit log' })).toHaveCount(0);
 
 	await signIn(page);
-	await page.getByRole('link', { name: 'Users' }).click();
+	await page.getByRole('link', { name: 'Access', exact: true }).click();
+	await page.getByRole('link', { name: 'Roles', exact: true }).click();
 	const auditors = page.getByTestId('role-auditor');
 	await auditors.getByRole('button', { name: 'Give the role Auditor' }).click();
 	const dialog = page.getByRole('dialog');
@@ -506,7 +506,13 @@ test('an auditor reads the audit log and manages nothing', async ({ page, browse
 	await bob.reload();
 	await bob.getByRole('link', { name: 'Audit log' }).click();
 	await expect(bob.getByText('Gave a role').first()).toBeVisible();
-	await expect(bob.getByRole('link', { name: 'Users' })).toHaveCount(0);
+	await expect(bob.getByRole('link', { name: 'Connectors' })).toHaveCount(0);
+	// The Access page, without a way to change anything (#178).
+	await bob.getByRole('link', { name: 'Access', exact: true }).click();
+	await expect(bob.getByText('You see this as an auditor')).toBeVisible();
+	await bob.getByRole('link', { name: 'Roles', exact: true }).click();
+	await expect(bob.getByTestId('role-auditor')).toContainText('Bob Helpdesk');
+	await expect(bob.getByRole('button', { name: /Give the role/ })).toHaveCount(0);
 
 	await auditors.getByRole('button', { name: 'Remove Bob Helpdesk' }).click();
 	await expect(auditors).not.toContainText('Bob Helpdesk');
@@ -1070,7 +1076,8 @@ test('a vault is recovered with the organisation key once someone else approved'
 	// bob approves recoveries. The lab has no third user without a second
 	// factor, so he approves those of his own vault: only the one who asked
 	// may not.
-	await page.getByRole('link', { name: 'Users' }).click();
+	await page.getByRole('link', { name: 'Access', exact: true }).click();
+	await page.getByRole('link', { name: 'Roles', exact: true }).click();
 	const officers = page.getByTestId('role-security_officer');
 	await expect(officers).toBeVisible();
 	if (!(await officers.textContent())?.includes('Bob Helpdesk')) {
@@ -1208,12 +1215,17 @@ test('the permission report names what bob reaches and who reaches a folder', as
 		});
 	}, folder);
 
-	await page.getByRole('link', { name: 'Permissions' }).click();
-	await page.getByLabel('Person', { exact: true }).selectOption({ label: 'Bob Helpdesk (bob)' });
+	await page.getByRole('link', { name: 'Access', exact: true }).click();
+	await page
+		.getByRole('searchbox', { name: 'Search name, username or group' })
+		.fill('Bob Helpdesk');
+	await page.getByRole('link', { name: 'Bob Helpdesk' }).click();
 	await expect(
 		page.getByTestId('person-report').getByRole('row').filter({ hasText: folder })
 	).toContainText('See for Bob Helpdesk');
 
-	await page.getByLabel('Folder', { exact: true }).selectOption({ label: folder });
+	await page.getByRole('link', { name: 'Folders', exact: true }).click();
+	await page.getByRole('searchbox', { name: 'Search folders' }).fill(folder);
+	await page.getByRole('link', { name: folder }).click();
 	await expect(page.getByTestId('folder-report')).toContainText('Bob Helpdesk');
 });

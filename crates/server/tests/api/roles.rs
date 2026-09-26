@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 
 use crate::accounts::{ADA, setup, sign_in};
-use crate::common::{BOB_SID, OPS_SID, Response, authed, send, sign_in_request};
+use crate::common::{BOB_SID, OLAF_SID, OPS_SID, Response, authed, send, sign_in_request};
 
 async fn token(app: &Router, request: axum::http::Request<axum::body::Body>) -> (String, Value) {
     let response = send(app, request).await;
@@ -59,10 +59,13 @@ async fn an_auditor_reads_the_audit_log_and_nothing_else(pool: PgPool) {
         let response = call(&app, &bob, method, uri, None).await;
         assert_eq!(response.status, StatusCode::OK, "{method} {uri}");
     }
-    for (method, uri) in [("GET", "/api/users"), ("GET", "/api/roles")] {
-        let response = call(&app, &bob, method, uri, None).await;
-        assert_eq!(response.status, StatusCode::FORBIDDEN, "{method} {uri}");
-    }
+    let response = call(&app, &bob, "GET", "/api/users", None).await;
+    assert_eq!(response.status, StatusCode::FORBIDDEN);
+    // An auditor sees the roles, and changes none (#178).
+    let response = call(&app, &bob, "GET", "/api/roles", None).await;
+    assert_eq!(response.status, StatusCode::OK);
+    let response = assign(&app, &bob, "auditor", OLAF_SID, "user").await;
+    assert_eq!(response.status, StatusCode::FORBIDDEN);
     // A new sign-in answers with the role right away.
     let (_, signed_in) = token(&app, sign_in_request("bob", "right")).await;
     assert_eq!(signed_in["roles"], json!(["auditor"]));

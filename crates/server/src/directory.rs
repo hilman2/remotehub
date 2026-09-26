@@ -5,6 +5,7 @@
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use remotehub_directory::Sid;
 use remotehub_directory::ldap::{LdapConfig, LdapDirectory};
 use remotehub_vault::DynVault;
 use secrecy::{ExposeSecret, SecretString};
@@ -230,6 +231,36 @@ pub async fn remove(tx: &mut Transaction<'_, Postgres>) -> Result<bool, sqlx::Er
             .await?;
     }
     Ok(removed.is_some())
+}
+
+/// Remembers the names of a user's directory `groups` as the directory
+/// gives them now (#178): sign-in reads only their SIDs, and the Access page
+/// names them. Runs beside the sign-in, which does not wait for it; if the
+/// directory does not answer, the names from before stay.
+pub fn remember_group_names(db: PgPool, directory: Arc<dyn Authenticator>, groups: Vec<Sid>) {
+    if groups.is_empty() {
+        return;
+    }
+    tokio::spawn(async move {
+        match directory.group_names(&groups).await {
+            Ok(named) => {
+                for group in named {
+                    let stored = sqlx::query(
+                        "INSERT INTO directory_groups (sid, name) VALUES ($1, $2)
+                         ON CONFLICT (sid) DO UPDATE SET name = EXCLUDED.name, seen_at = now()",
+                    )
+                    .bind(group.sid.as_str())
+                    .bind(&group.name)
+                    .execute(&db)
+                    .await;
+                    if let Err(error) = stored {
+                        tracing::warn!(%error, "cannot remember a group's name");
+                    }
+                }
+            }
+            Err(error) => tracing::warn!(%error, "cannot read the names of directory groups"),
+        }
+    });
 }
 
 /// Ends every session of a directory user: after the directory changed,

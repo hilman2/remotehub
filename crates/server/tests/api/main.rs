@@ -7,6 +7,7 @@
 
 mod common;
 
+mod access;
 mod accounts;
 mod audit;
 mod break_glass;

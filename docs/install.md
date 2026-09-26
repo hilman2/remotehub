@@ -185,15 +185,15 @@ Under *Settings → Administrators*, give directory groups the administrator rol
 Local accounts live in Ory Kratos, which the ops package runs next to remotehub. People reach it only
 through remotehub. Its settings are in `kratos/kratos.yml`; database and secrets in `secrets/kratos.yml`.
 
-- **Inviting and managing:** administrators invite local accounts under *Users*. With a mail server (see
-  [Send mail](#send-mail)), the link and the code go out by mail; the dialog shows them too, to hand over
-  by hand. The same page blocks anyone, local or from the directory, ends their sessions, and deletes
-  local accounts. Everything done there is in the audit log.
-- **Groups:** without a directory, put local accounts into groups under *Users* and grant access to the
-  groups. Directory users and groups can be members too.
+- **Inviting and managing:** administrators invite local accounts under *Access → Users*. With a mail
+  server (see [Send mail](#send-mail)), the link and the code go out by mail; the dialog shows them too, to
+  hand over by hand. A person's page there blocks anyone, local or from the directory, ends their sessions,
+  and deletes local accounts. Everything done there is in the audit log.
+- **Groups:** without a directory, put local accounts into groups under *Access → Groups* and grant access
+  to the groups. Directory users and groups can be members too.
 - **Forgotten passwords:** with a mail server, "Forgot the password?" on the sign-in page mails a code, in
   the language of the browser. Without one, the page says to ask an administrator, who gives the person a
-  *New sign-in code* under *Users*.
+  *New sign-in code* on their page under *Access*.
 - **Second factor:** every local account sets up an authenticator app before its first session, and can
   create recovery codes under *My account*. A lost authenticator app takes a *New sign-in code* too: it
   removes the second factor, and the person sets up a new one with the code.
@@ -269,7 +269,7 @@ Directory accounts sign in with their password only, unless they set up an authe
 key under *My account*. A passkey (Touch ID, Face ID, Windows Hello) counts as a security key; either one
 does as the second factor. To make it a condition, add users or groups under *Settings → Second factor for directory
 accounts*: they set up the app at their next sign-in. After a lost phone, an administrator removes the
-app under *Users*, and the person sets up a new one.
+app on the person's page under *Access*, and the person sets up a new one.
 
 ## Recover personal vaults
 
@@ -279,7 +279,7 @@ when its owner forgets the passphrase and the recovery key, or leaves.
 1. Under *Vault recovery*, an administrator creates the recovery key. The browser downloads it as a file,
    sealed with a passphrase, and shows it once as text. Print the text and keep it in a safe; keep the file
    and its passphrase apart.
-2. Give someone the role *Security officer* under *Users*. A recovery needs their approval, and they cannot
+2. Give someone the role *Security officer* under *Access → Roles*. A recovery needs their approval, and they cannot
    approve one they asked for themselves.
 3. Every vault is wrapped for the key at its owner's next unlock. *Vault recovery* shows which are.
 

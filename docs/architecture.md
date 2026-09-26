@@ -86,14 +86,19 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 - **Identifiers:** users and groups are stored by `objectSid`/`objectGUID` (Entra object IDs later), never
   by name, so renames do not change permissions. Local accounts are `local:<Kratos identity>`, groups of
   remotehub's own `group:<id>` (`crate::principal`).
-- **Groups of remotehub's own (`/users`, `api/groups.rs`):** for installations without a directory and for
+- **Groups of remotehub's own (`api/groups.rs`):** for installations without a directory and for
   teams it does not know. Members are directory users, directory groups and local accounts; groups do not
   nest. The session lookup adds a user's groups at every request, so a change holds at once. Deleting a
   group removes its grants, purpose rules and roles.
-- **Permission reports (`/permissions`, `api/reports.rs`, #110):** for auditors and administrators, what a
-  person reaches and who reaches a folder. A person is read as their next session would be: directory
-  groups asked from the directory (those of the last sign-in if it does not answer), groups of remotehub's
-  own, roles. `authorize()` decides the roles shown; `Catalog::reasons` names the grants behind them.
+- **The Access page (`/access`, #178):** users, groups, roles and folders in one place, for administrators;
+  auditors see it without the controls. `api/access.rs` lists users with their groups and roles, every group
+  with its members, and the grants of one user or group; changes go through the endpoints of users,
+  groups, roles and grants. Sign-in reads only the SIDs of directory groups; their names are looked up
+  afterwards and kept in `directory_groups`.
+- **Permission reports (`api/reports.rs`, #110):** what a person reaches and who reaches a folder, shown on
+  the Access page. A person is read as their next session would be: directory groups asked from the
+  directory (those of the last sign-in if it does not answer), groups of remotehub's own, roles.
+  `authorize()` decides the roles shown; `Catalog::reasons` names the grants behind them.
 - **Roles for remotehub itself (`api/roles.rs`):** administrator, auditor (reads and checks the audit log)
   and security officer (approves vault recoveries), given to users and groups in `role_assignments`. The
   session lookup reads them with the groups. Break-glass accounts are administrators too. The last
