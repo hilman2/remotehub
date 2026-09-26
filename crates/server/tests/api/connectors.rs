@@ -11,7 +11,7 @@ use remotehub_connector::agent::{self, AgentSettings, Site};
 use remotehub_connector::journal::{Event, Journal};
 use remotehub_connector::protocol;
 use remotehub_server::AppState;
-use remotehub_server::connectors::{Forward, STREAM_TIMEOUT};
+use remotehub_server::connectors::{Forward, Requester, STREAM_TIMEOUT};
 use secrecy::SecretString;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -104,6 +104,14 @@ pub async fn run_connector(
     )
     .await;
     agent
+}
+
+/// alice, connecting to the device named router.
+fn alice() -> Requester {
+    Requester {
+        user: "alice".into(),
+        device: "router".into(),
+    }
 }
 
 /// Waits up to 5 s for `condition`.
@@ -317,7 +325,7 @@ async fn a_forward_reaches_the_device_through_the_connector(pool: PgPool) {
         state.connectors.clone(),
         id,
         device.clone(),
-        "alice".into(),
+        alice(),
         loopback,
         vec![loopback],
     )
@@ -342,7 +350,7 @@ async fn a_forward_reaches_the_device_through_the_connector(pool: PgPool) {
         state.connectors.clone(),
         id,
         device,
-        "alice".into(),
+        alice(),
         loopback,
         vec![IpAddr::from(Ipv4Addr::new(10, 9, 9, 9))],
     )
@@ -524,7 +532,7 @@ async fn closing_ends_running_connections(pool: PgPool) {
         state.connectors.clone(),
         id,
         device,
-        "alice".into(),
+        alice(),
         loopback,
         vec![loopback],
     )
@@ -572,13 +580,18 @@ async fn closing_ends_running_connections(pool: PgPool) {
         .find_map(|e| match e.event {
             Event::ConnectionEnded {
                 user,
+                device,
                 sent,
                 received,
                 ..
-            } => Some((user, sent, received)),
+            } => Some((user, device, sent, received)),
             _ => None,
         });
-    assert_eq!(ended, Some((Some("alice".to_owned()), 1, 1)));
+    // Named as in remotehub (#177), with the user it was for.
+    assert_eq!(
+        ended,
+        Some((Some("alice".to_owned()), Some("router".to_owned()), 1, 1))
+    );
 
     let until = time::OffsetDateTime::now_utc() + Duration::from_secs(2);
     agent

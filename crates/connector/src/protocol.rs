@@ -19,11 +19,14 @@ pub const VERSION: u32 = 1;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Control {
     /// Connect to `target` (`host:port`) and open the stream `id`, for the
-    /// remotehub user `user`, whom the connector names in its journal.
+    /// remotehub user `user` and the device named `device` in remotehub; the
+    /// connector names both in its journal (#177).
     Open {
         id: Uuid,
         target: String,
         user: Option<String>,
+        #[serde(default)]
+        device: Option<String>,
     },
 }
 
@@ -60,11 +63,13 @@ mod tests {
             id,
             target: "ssh-target:22".into(),
             user: Some("alice".into()),
+            device: Some("router".into()),
         })
         .unwrap();
         assert_eq!(
             open,
-            serde_json::json!({ "type": "open", "id": id, "target": "ssh-target:22", "user": "alice" })
+            serde_json::json!({ "type": "open", "id": id, "target": "ssh-target:22",
+                                "user": "alice", "device": "router" })
         );
         let failed: Report = serde_json::from_str(&format!(
             r#"{{"type":"failed","id":"{id}","reason":"refused"}}"#

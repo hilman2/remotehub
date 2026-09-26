@@ -580,7 +580,7 @@ fn connections(ui: &Ui, locale: Locale) -> String {
             .map(|r| {
                 format!(
                     "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-                    escape(&r.target),
+                    escape(&labelled(r.device.as_deref(), &r.target)),
                     escape(r.user.as_deref().unwrap_or("remotehub")),
                     time_element(r.since),
                     rich(
@@ -643,6 +643,16 @@ fn log(ui: &Ui, locale: Locale) -> String {
     )
 }
 
+/// A connection's target for people (#177): the device's name in remotehub
+/// first, the address it went to behind it, as the name alone could be
+/// anything.
+fn labelled(device: Option<&str>, target: &str) -> String {
+    match device.filter(|name| !name.trim().is_empty()) {
+        Some(name) => format!("{name} ({target})"),
+        None => target.to_owned(),
+    }
+}
+
 /// A journal entry in words, as HTML.
 fn describe(locale: Locale, entry: &Entry) -> String {
     let someone = |user: &Option<String>| user.clone().unwrap_or_else(|| "remotehub".to_owned());
@@ -667,15 +677,21 @@ fn describe(locale: Locale, entry: &Entry) -> String {
         } => t(locale, Message::ConnectorLogClosed { who: user.clone() }),
         Event::Closed { .. } => t(locale, Message::ConnectorLogClosedCli {}),
         Event::Expired => t(locale, Message::ConnectorLogExpired {}),
-        Event::ConnectionStarted { target, user, .. } => t(
+        Event::ConnectionStarted {
+            target,
+            device,
+            user,
+            ..
+        } => t(
             locale,
             Message::ConnectorLogConnectionStarted {
                 user: someone(user),
-                target: target.clone(),
+                target: labelled(device.as_deref(), target),
             },
         ),
         Event::ConnectionEnded {
             target,
+            device,
             user,
             seconds,
             sent,
@@ -685,7 +701,7 @@ fn describe(locale: Locale, entry: &Entry) -> String {
             locale,
             Message::ConnectorLogConnectionEnded {
                 user: someone(user),
-                target: target.clone(),
+                target: labelled(device.as_deref(), target),
                 minutes: i64::try_from(seconds.div_ceil(60)).unwrap_or(i64::MAX),
                 sent: slot(0),
                 received: slot(1),
@@ -694,13 +710,14 @@ fn describe(locale: Locale, entry: &Entry) -> String {
         ),
         Event::ConnectionRefused {
             target,
+            device,
             user,
             reason,
         } => t(
             locale,
             Message::ConnectorLogConnectionRefused {
                 user: someone(user),
-                target: target.clone(),
+                target: labelled(device.as_deref(), target),
                 reason: reason.clone(),
             },
         ),

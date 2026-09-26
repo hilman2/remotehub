@@ -135,6 +135,8 @@ pub struct Site {
 pub struct Running {
     pub target: String,
     pub user: Option<String>,
+    /// The device's name in remotehub, as remotehub reports it.
+    pub device: Option<String>,
     pub since: OffsetDateTime,
     /// Bytes to the device so far.
     pub sent: Arc<AtomicU64>,
@@ -261,8 +263,8 @@ async fn control(
         tokio::select! {
             message = from_remotehub.next() => match message {
                 Some(Ok(Message::Text(text))) => match serde_json::from_str::<Control>(&text) {
-                    Ok(Control::Open { id, target, user }) => {
-                        let request = Request { id, target, user };
+                    Ok(Control::Open { id, target, user, device }) => {
+                        let request = Request { id, target, user, device };
                         tokio::spawn(stream(
                             settings.clone(),
                             site.clone(),
@@ -293,6 +295,7 @@ struct Request {
     id: Uuid,
     target: String,
     user: Option<String>,
+    device: Option<String>,
 }
 
 /// Connects to the target and carries the connection over a new stream to
@@ -305,13 +308,20 @@ async fn stream(
     reports: mpsc::Sender<Report>,
     ends: CancellationToken,
 ) {
-    let Request { id, target, user } = request;
-    let device = match reach(&settings.allow, &target).await {
-        Ok(device) => device,
+    let Request {
+        id,
+        target,
+        user,
+        device,
+    } = request;
+    let name = device.as_deref().unwrap_or_default();
+    let connection = match reach(&settings.allow, &target).await {
+        Ok(connection) => connection,
         Err(reason) => {
-            tracing::warn!(%target, reason, "cannot reach the target");
+            tracing::warn!(device = name, %target, reason, "cannot reach the target");
             site.journal.append(Event::ConnectionRefused {
                 target: target.clone(),
+                device: device.clone(),
                 user,
                 reason: reason.clone(),
             });
@@ -322,13 +332,14 @@ async fn stream(
     let socket = match open_socket(&settings, &format!("/api/connectors/streams/{id}")).await {
         Ok(socket) => socket,
         Err(error) => {
-            tracing::warn!(%target, %error, "cannot open the stream to remotehub");
+            tracing::warn!(device = name, %target, %error, "cannot open the stream to remotehub");
             return;
         }
     };
     let running = Running {
         target: target.clone(),
         user: user.clone(),
+        device: device.clone(),
         since: OffsetDateTime::now_utc(),
         sent: Arc::default(),
         received: Arc::default(),
@@ -341,10 +352,11 @@ async fn stream(
     site.journal.append(Event::ConnectionStarted {
         id,
         target: target.clone(),
+        device: device.clone(),
         user: user.clone(),
     });
     tokio::select! {
-        () = carry(device, socket, &running) => {}
+        () = carry(connection, socket, &running) => {}
         () = ends.cancelled() => {}
     }
     site.connections
@@ -355,6 +367,7 @@ async fn stream(
     site.journal.append(Event::ConnectionEnded {
         id,
         target,
+        device,
         user,
         seconds: (OffsetDateTime::now_utc() - running.since)
             .whole_seconds()

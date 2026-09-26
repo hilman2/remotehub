@@ -50,6 +50,14 @@ fn random_id() -> Uuid {
     uuid::Builder::from_random_bytes(bytes).into_uuid()
 }
 
+/// Who a stream is for: the remotehub user and the device's name, which the
+/// connector names in its journal (#177).
+#[derive(Clone, Debug)]
+pub struct Requester {
+    pub user: String,
+    pub device: String,
+}
+
 /// The connectors that are online and the streams asked of them.
 #[derive(Default)]
 pub struct Connectors {
@@ -209,13 +217,13 @@ impl Connectors {
             .map(|(state, _)| state.clone())
     }
 
-    /// A stream to `target` through the connector, for the remotehub user
-    /// `user`, whom the connector names in its journal.
+    /// A stream to `target` through the connector, for `whom`, which the
+    /// connector names in its journal.
     pub async fn stream(
         &self,
         connector: Uuid,
         target: &str,
-        user: Option<&str>,
+        whom: Option<&Requester>,
         timeout: Duration,
     ) -> Result<WebSocket, ConnectorError> {
         let control = self
@@ -235,7 +243,8 @@ impl Connectors {
             .send(Control::Open {
                 id,
                 target: target.to_owned(),
-                user: user.map(str::to_owned),
+                user: whom.map(|w| w.user.clone()),
+                device: whom.map(|w| w.device.clone()),
             })
             .await;
         let result = match asked {
@@ -294,13 +303,12 @@ impl Drop for Forward {
 impl Forward {
     /// Listens on `bind`, port chosen by the system, and accepts connections
     /// only from `peers`: the engine that needs the device, and nobody else
-    /// on remotehub's networks. `user` is the remotehub user the connections
-    /// are for.
+    /// on remotehub's networks. `whom` names who the connections are for.
     pub async fn open(
         connectors: Arc<Connectors>,
         connector: Uuid,
         target: String,
-        user: String,
+        whom: Requester,
         bind: IpAddr,
         peers: Vec<IpAddr>,
     ) -> std::io::Result<Self> {
@@ -314,9 +322,9 @@ impl Forward {
                 }
                 let connectors = connectors.clone();
                 let target = target.clone();
-                let user = user.clone();
+                let whom = whom.clone();
                 tokio::spawn(async move {
-                    let stream = connectors.stream(connector, &target, Some(&user), STREAM_TIMEOUT);
+                    let stream = connectors.stream(connector, &target, Some(&whom), STREAM_TIMEOUT);
                     match stream.await {
                         Ok(stream) => {
                             let _counted = connectors.count(connector);
@@ -436,22 +444,33 @@ mod tests {
         let waiting = {
             let connectors = connectors.clone();
             tokio::spawn(async move {
+                let whom = Requester {
+                    user: "alice".into(),
+                    device: "router".into(),
+                };
                 connectors
                     .stream(
                         connector,
                         "ssh-target:22",
-                        Some("alice"),
+                        Some(&whom),
                         Duration::from_secs(5),
                     )
                     .await
                     .err()
             })
         };
-        let Some(Control::Open { id, target, user }) = control.recv().await else {
+        let Some(Control::Open {
+            id,
+            target,
+            user,
+            device,
+        }) = control.recv().await
+        else {
             panic!("no open");
         };
         assert_eq!(target, "ssh-target:22");
         assert_eq!(user.as_deref(), Some("alice"));
+        assert_eq!(device.as_deref(), Some("router"));
         assert!(connectors.claim(random_id(), id).is_none());
         connectors.fail(connector, id, "refused".into());
         assert_eq!(
