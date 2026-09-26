@@ -17,6 +17,8 @@ use futures_util::{SinkExt, StreamExt};
 use remotehub_connector::protocol::{self, Control, State};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use time::format_description::well_known::Rfc3339;
+use time::{OffsetDateTime, UtcOffset};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
@@ -76,7 +78,23 @@ pub struct Connectors {
     access: Mutex<HashMap<Uuid, (State, Instant)>>,
     /// Checks asked of connectors whether a target is open (#180), with the
     /// connector asked.
-    checks: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<bool>)>>,
+    checks: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<Checked>)>>,
+}
+
+/// A connector's answer whether a target is open (#180).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Checked {
+    pub open: bool,
+    /// RFC 3339 in UTC; none while closed or open without end.
+    pub until: Option<String>,
+}
+
+/// `text` as a point in time in RFC 3339 and UTC, written the same way
+/// whatever a connector sent; none if it is not one.
+pub fn utc(text: &str) -> Option<String> {
+    OffsetDateTime::parse(text, &Rfc3339)
+        .ok()
+        .and_then(|at| at.to_offset(UtcOffset::UTC).format(&Rfc3339).ok())
 }
 
 /// A report older than this counts as none: the connector reports every
@@ -296,14 +314,14 @@ impl Connectors {
     }
 
     /// Whether the connector's customer lets a connection to `target`
-    /// through now (#180). Only the connector knows: the customer's list
-    /// names hosts that resolve only in their network.
+    /// through now, and until when (#180). Only the connector knows: the
+    /// customer's list names hosts that resolve only in their network.
     pub async fn check(
         &self,
         connector: Uuid,
         target: &str,
         timeout: Duration,
-    ) -> Result<bool, ConnectorError> {
+    ) -> Result<Checked, ConnectorError> {
         let control = self
             .online
             .lock()
@@ -339,14 +357,14 @@ impl Connectors {
     }
 
     /// The connector's answer to check `id`.
-    pub fn checked(&self, connector: Uuid, id: Uuid, open: bool) {
+    pub fn checked(&self, connector: Uuid, id: Uuid, answer: Checked) {
         let mut checks = self.checks.lock().expect("no panics while locked");
         if checks
             .get(&id)
             .is_some_and(|(asked, _)| *asked == connector)
             && let Some((_, reply)) = checks.remove(&id)
         {
-            let _ = reply.send(open);
+            let _ = reply.send(answer);
         }
     }
 }

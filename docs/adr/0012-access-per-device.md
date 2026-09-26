@@ -25,17 +25,22 @@ names what the customer opens, and a compromised remotehub could rename a device
   `REMOTEHUB_CONNECTOR_ALLOW` stays the outer limit. When a device closes or leaves the list, its running
   connections end.
 - **The control socket is up while anything is open.** The state report says `partly` when only devices or
-  groups are open. Which ones stays with the customer.
+  groups are open, and lists the open groups and devices with their address, ports and end. remotehub
+  refuses a report whose lists are longer than 1000 entries, hold anything but short plain text, or name an
+  end that is no point in time. Only administrators see the lists.
 - **remotehub asks before it connects.** For a connector that is open in part, `connect::route` sends a
   `Check` with the target on the control socket and refuses a closed one with `connector_target_closed`,
   before engines, credentials or pins are involved. A stream the connector still refuses is reported as not
   open.
+- **A device's own state comes from the connector, too.** The report's list names the customer's devices,
+  not remotehub's, and a host name there may resolve only in the customer's network. So the device's page
+  and a session ask with `Check`, whose answer carries the latest end of what opens the target.
 - **The journal names the device or group** in each opening, closing and expiry, and the list's changes.
 
 ## Consequences
 
 - A compromised remotehub reaches, while access is open in part, only the ports of the open devices.
-- remotehub cannot show which devices are open, nor warn a session before a device's access ends; it knows
-  only `partly`.
-- A connection in part costs one more round trip to the connector.
+- The service provider sees the customer's list of open devices. What is closed stays with the customer.
+- A connection in part costs one more round trip to the connector, and each device's page and session one
+  a minute.
 - Lines of the journal written before this change mean the whole network.

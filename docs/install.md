@@ -472,7 +472,9 @@ device, `close --group ERP` closes the group again. `device remove`, `group remo
 
 A connection goes through when its target is a listed port of an open device, alone or through an open group,
 or anywhere while the whole network is open. `REMOTEHUB_CONNECTOR_ALLOW` still limits all of it. remotehub
-shows such a connector as *open in part* and refuses devices you have not opened.
+shows such a connector as *open in part*, lists the open groups and devices with their end to its
+administrators, marks each device as open or closed at the customer, and refuses devices you have not
+opened.
 
 ### The log
 

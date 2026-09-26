@@ -5,8 +5,9 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 
-use axum::extract::State;
+use axum::Json;
 use axum::extract::ws::{Message, WebSocket};
+use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::http::header::ORIGIN;
 use remotehub_directory::AuthError;
@@ -14,12 +15,13 @@ use remotehub_directory::laps::LapsError;
 use remotehub_gateway::ssh::SshKey;
 use remotehub_model::{ObjectId, Role};
 use secrecy::{ExposeSecret, SecretString};
+use serde::Serialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 use super::problem::{ErrorCode, Problem};
 use crate::audit::{Action, Actor, Entry};
-use crate::connectors::{Forward, Requester, towards};
+use crate::connectors::{Checked, Forward, Requester, towards};
 use crate::session::Session;
 use crate::{AppState, catalog, secrets};
 
@@ -121,7 +123,7 @@ pub async fn route(
             .connectors
             .check(connector, &authority(&target.host, port), CHECK_TIMEOUT)
             .await;
-        if open == Ok(false) {
+        if open.is_ok_and(|checked| !checked.open) {
             return Err(Problem::new(ErrorCode::ConnectorTargetClosed));
         }
     }
@@ -154,6 +156,49 @@ pub async fn route(
         port: forward.address.port(),
         _forward: Some(forward),
     })
+}
+
+/// Whether the customer lets remotehub reach a device behind a site connector
+/// now (#180), for the device's page and the warning in a session.
+#[derive(Serialize, Debug)]
+pub struct ConnectorAccess {
+    /// `direct` without a connector; `open`, `closed`, `offline`, or
+    /// `unknown` when the connector did not answer in time.
+    state: &'static str,
+    /// RFC 3339 in UTC, while open until a point in time.
+    until: Option<String>,
+}
+
+pub async fn connector_access(
+    State(state): State<AppState>,
+    session: Session,
+    Path(id): Path<Uuid>,
+) -> Result<Json<ConnectorAccess>, Problem> {
+    let target = target(&state, &session, id, &["ssh", "rdp", "vnc", "https"]).await?;
+    let answer =
+        |state: &'static str, until: Option<String>| Ok(Json(ConnectorAccess { state, until }));
+    let Some(connector) = target.connector_id else {
+        return answer("direct", None);
+    };
+    let reported = state.connectors.access(connector);
+    if !state.connectors.is_online(connector) {
+        let closed = reported
+            .as_ref()
+            .is_some_and(|access| !access.open && !access.partly);
+        return answer(if closed { "closed" } else { "offline" }, None);
+    }
+    // Only the connector knows which of the customer's devices this is and
+    // which of them ends last; the report alone cannot say.
+    let port = u16::try_from(target.port).unwrap_or_default();
+    match state
+        .connectors
+        .check(connector, &authority(&target.host, port), CHECK_TIMEOUT)
+        .await
+    {
+        Ok(Checked { open: true, until }) => answer("open", until),
+        Ok(Checked { open: false, .. }) => answer("closed", None),
+        Err(_) => answer("unknown", None),
+    }
 }
 
 /// Browsers send `Origin` with every WebSocket handshake; without this check

@@ -318,7 +318,7 @@
 		{/key}
 
 		{#if phase === 'connected' && device.reached_through}
-			<ConnectorClosing connectorId={device.reached_through} />
+			<ConnectorClosing connectorId={device.reached_through} deviceId={device.id} />
 		{/if}
 
 		{#if phase === 'closed' || phase === 'failed'}

@@ -55,6 +55,7 @@
 	import Journal from '$lib/catalog/Journal.svelte';
 	import RevealSecret from '$lib/catalog/RevealSecret.svelte';
 	import CredentialExtras from '$lib/catalog/CredentialExtras.svelte';
+	import DeviceAccess from '$lib/connectors/DeviceAccess.svelte';
 	import EntryDetails from '$lib/vault/EntryDetails.svelte';
 	import FileDown from '@lucide/svelte/icons/file-down';
 	import FileUp from '@lucide/svelte/icons/file-up';
@@ -655,6 +656,9 @@
 										: m.connector_offline()}
 								</span>
 							</span>
+							{#if allows(device.role, 'connect')}
+								<DeviceAccess deviceId={device.id} />
+							{/if}
 						{/if}
 						<span class="chip">{m.catalog_access({ role: ROLE_LABELS[device.role]() })}</span>
 					</div>

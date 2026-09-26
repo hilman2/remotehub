@@ -156,20 +156,53 @@ impl Snapshot {
         self.access.network.access.is_open(now)
     }
 
+    /// Until when the whole network is open at `now`: `Some(None)` without
+    /// end, none while closed.
+    pub fn network_until(&self, now: OffsetDateTime) -> Option<Option<OffsetDateTime>> {
+        let access = self.access.network.access;
+        access.is_open(now).then(|| access.closes_at())
+    }
+
+    /// Until when `device` is open at `now`, by itself or through one of its
+    /// groups: the latest end among them, `Some(None)` without end, none
+    /// while closed.
+    pub fn device_until(
+        &self,
+        device: &Device,
+        now: OffsetDateTime,
+    ) -> Option<Option<OffsetDateTime>> {
+        let scopes = std::iter::once(Scope::Device {
+            name: device.name.clone(),
+        })
+        .chain(device.groups.iter().map(|group| Scope::Group {
+            name: group.clone(),
+        }));
+        scopes
+            .map(|scope| self.access.get(&scope).access)
+            .filter(|access| access.is_open(now))
+            .map(|access| Some(access.closes_at()))
+            .fold(None, later)
+    }
+
     /// The devices open at `now`, themselves or through one of their groups.
     pub fn open_devices(&self, now: OffsetDateTime) -> Vec<&Device> {
-        let open = |scope: Scope| self.access.get(&scope).access.is_open(now);
         self.inventory
             .devices
             .iter()
-            .filter(|device| {
-                open(Scope::Device {
-                    name: device.name.clone(),
-                }) || device.groups.iter().any(|group| {
-                    open(Scope::Group {
-                        name: group.clone(),
-                    })
-                })
+            .filter(|device| self.device_until(device, now).is_some())
+            .collect()
+    }
+
+    /// The groups of the list open at `now`, with their end.
+    pub fn open_groups(&self, now: OffsetDateTime) -> Vec<(&str, Option<OffsetDateTime>)> {
+        self.inventory
+            .groups
+            .iter()
+            .filter_map(|name| {
+                let access = self.access.groups.get(name)?.access;
+                access
+                    .is_open(now)
+                    .then(|| (name.as_str(), access.closes_at()))
             })
             .collect()
     }
@@ -197,6 +230,19 @@ impl Snapshot {
             })
             .map(|(scope, _)| scope)
             .collect()
+    }
+}
+
+/// The later of two ends of access, as [`Snapshot::device_until`] gives
+/// them: none is closed and loses, `Some(None)` is without end and wins.
+pub fn later(
+    a: Option<Option<OffsetDateTime>>,
+    b: Option<Option<OffsetDateTime>>,
+) -> Option<Option<OffsetDateTime>> {
+    match (a, b) {
+        (None, other) | (other, None) => other,
+        (Some(None), _) | (_, Some(None)) => Some(None),
+        (Some(Some(a)), Some(Some(b))) => Some(Some(a.max(b))),
     }
 }
 

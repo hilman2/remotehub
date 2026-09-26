@@ -46,8 +46,15 @@ pub enum Report {
         #[serde(default)]
         not_open: bool,
     },
-    /// The answer to [`Control::Check`] `id`.
-    Checked { id: Uuid, open: bool },
+    /// The answer to [`Control::Check`] `id`: whether the target is open,
+    /// and until when (RFC 3339), the latest end of what opens it; none while
+    /// closed or open without end.
+    Checked {
+        id: Uuid,
+        open: bool,
+        #[serde(default)]
+        until: Option<String>,
+    },
 }
 
 /// Where a connector reports whether its customer lets remotehub in (#165),
@@ -57,6 +64,10 @@ pub const STATE_PATH: &str = "/api/connectors/state";
 
 pub const STATE_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// A report names at most this many groups and as many devices; remotehub
+/// refuses a longer one.
+pub const MAX_LISTED: usize = 1000;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
     /// Whether the whole network is open.
@@ -65,9 +76,35 @@ pub struct State {
     /// open without end.
     pub until: Option<String>,
     /// Whether single devices or groups are open while the whole network is
-    /// not (#180). Which ones stays with the customer.
+    /// not (#180).
     #[serde(default)]
     pub partly: bool,
+    /// The open groups of the customer's list.
+    #[serde(default)]
+    pub groups: Vec<OpenGroup>,
+    /// The open devices of the customer's list, by themselves or through a
+    /// group.
+    #[serde(default)]
+    pub devices: Vec<OpenDevice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenGroup {
+    pub name: String,
+    /// RFC 3339; none while open without end.
+    pub until: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenDevice {
+    pub name: String,
+    /// As the customer wrote it: an address, a range or a host name.
+    pub address: String,
+    /// Such as `22,8000-8100`.
+    pub ports: String,
+    /// RFC 3339, the latest end of what opens it; none while open without
+    /// end.
+    pub until: Option<String>,
 }
 
 #[cfg(test)]
