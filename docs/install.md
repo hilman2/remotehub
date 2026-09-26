@@ -349,9 +349,10 @@ HTTPS to `REMOTEHUB_PUBLIC_URL` and nothing inbound. It is the image `ghcr.io/hi
 The customer decides when remotehub may enter, and where. Access starts closed: the connector does not connect
 to remotehub until someone opens it, for some hours, until a point in time, or without end. It opens the whole
 network or only single devices and groups the customer lists. Closing, or the time running out, ends running
-connections at once. The connector keeps its own log of every change and every connection. Why the switch
-sits at the connector: [ADR 0011](adr/0011-customer-controls-access.md) and
-[ADR 0012](adr/0012-access-per-device.md).
+connections at once. remotehub can ask for access, and a person at the customer approves or refuses. The
+connector keeps its own log of every change and every connection. Why the switch sits at the connector:
+[ADR 0011](adr/0011-customer-controls-access.md), [ADR 0012](adr/0012-access-per-device.md) and
+[ADR 0013](adr/0013-remotehub-asks-the-customer.md).
 
 ### Start the connector on Linux
 
@@ -476,12 +477,25 @@ shows such a connector as *open in part*, lists the open groups and devices with
 administrators, marks each device as open or closed at the customer, and refuses devices you have not
 opened.
 
+### Ask the customer for access
+
+A technician who needs a device behind a closed connector chooses *Ask the customer* on the device, or on
+its folder for all the folder's devices behind the connector, with a duration and a reason. Within ten
+seconds the request appears at the top of the connector's web interface, with each device's name in
+remotehub, its address and port, and whether your own list knows that address. *Approve* opens exactly
+these addresses and ports for the time asked; *Refuse* opens nothing. The page lists approved requests
+until they end, each with *Close*. remotehub shows the answer and who gave it at the device.
+
+Only a signed-in user of the web interface answers. A request waits a day, and the technician can withdraw
+it before.
+
 ### The log
 
-Every opening and closing, naming the device or group, every change to the list, and every connection with
-its device, the remotehub user, its duration and the bytes transferred, go to `access.log` in the data directory, one JSON object per line, and to the container's log
-output. On Windows, the same lines also go to the event log (*Application*, source `remotehub-connector`): ID 1
-for openings and closings, 2 for connections, 3 for sign-ins to the web interface; refused connections and
+Every opening and closing, naming the device or group, every change to the list, every request from
+remotehub with its answer, and every connection with its device, the remotehub user, its duration and the
+bytes transferred, go to `access.log` in the data directory, one JSON object per line, and to the container's
+log output. On Windows, the same lines also go to the event log (*Application*, source `remotehub-connector`):
+ID 1 for openings, closings and requests, 2 for connections, 3 for sign-ins to the web interface; refused connections and
 failed sign-ins are warnings. The remotehub user is the name remotehub reports; the connector cannot check it.
 remotehub records openings and closings in its own audit log, too.
 

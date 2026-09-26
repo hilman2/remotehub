@@ -17,9 +17,11 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio::sync::watch;
+use uuid::Uuid;
 
-use crate::inventory::{self, Device, Inventory, InventoryError};
+use crate::inventory::{self, Device, Inventory, InventoryError, Ports};
 use crate::journal::{Event, Journal};
+use crate::protocol::{CustomerRequest, RequestTarget};
 
 /// How often the connector reads the files for changes from the command line
 /// and checks whether a time ran out.
@@ -83,6 +85,38 @@ pub enum Scope {
     Group {
         name: String,
     },
+    /// The targets of a request from remotehub the customer approved (#181).
+    Request {
+        id: Uuid,
+    },
+}
+
+/// A request from remotehub the customer approved (#181): exactly its
+/// targets, until the end. It leaves the file when it closes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Grant {
+    pub requester: String,
+    pub reason: String,
+    pub targets: Vec<RequestTarget>,
+    #[serde(flatten)]
+    pub stored: Stored,
+}
+
+impl Grant {
+    /// Its targets, as the devices of the list are.
+    pub fn devices(&self) -> impl Iterator<Item = Device> + '_ {
+        self.targets.iter().filter_map(|target| {
+            Some(Device {
+                name: target.name.clone(),
+                address: target.host.parse().ok()?,
+                ports: vec![Ports {
+                    first: target.port,
+                    last: target.port,
+                }],
+                groups: Vec::new(),
+            })
+        })
+    }
 }
 
 /// The access of one scope and its last change.
@@ -103,6 +137,9 @@ pub struct AccessFile {
     pub devices: BTreeMap<String, Stored>,
     #[serde(default)]
     pub groups: BTreeMap<String, Stored>,
+    /// Approved requests from remotehub, while open (#181).
+    #[serde(default)]
+    pub requests: BTreeMap<Uuid, Grant>,
 }
 
 impl AccessFile {
@@ -111,6 +148,7 @@ impl AccessFile {
             Scope::Network => Some(&self.network),
             Scope::Device { name } => self.devices.get(name),
             Scope::Group { name } => self.groups.get(name),
+            Scope::Request { id } => self.requests.get(id).map(|grant| &grant.stored),
         }
         .cloned()
         .unwrap_or_default()
@@ -124,6 +162,14 @@ impl AccessFile {
             }
             Scope::Group { name } => {
                 self.groups.insert(name.clone(), stored);
+            }
+            // An approval is stored by `approve`; closed, it goes.
+            Scope::Request { id } => {
+                if stored.access == Access::Closed {
+                    self.requests.remove(id);
+                } else if let Some(grant) = self.requests.get_mut(id) {
+                    grant.stored = stored;
+                }
             }
         }
     }
@@ -140,6 +186,11 @@ impl AccessFile {
                 self.groups
                     .iter()
                     .map(|(name, s)| (Scope::Group { name: name.clone() }, s)),
+            )
+            .chain(
+                self.requests
+                    .iter()
+                    .map(|(id, grant)| (Scope::Request { id: *id }, &grant.stored)),
             )
     }
 }
@@ -207,9 +258,21 @@ impl Snapshot {
             .collect()
     }
 
-    /// Whether anything is open: the network, or a device.
+    /// The approved requests open at `now`, with their end.
+    pub fn open_requests(&self, now: OffsetDateTime) -> Vec<(Uuid, &Grant)> {
+        self.access
+            .requests
+            .iter()
+            .filter(|(_, grant)| grant.stored.access.is_open(now))
+            .map(|(id, grant)| (*id, grant))
+            .collect()
+    }
+
+    /// Whether anything is open: the network, a device, or a request.
     pub fn any_open(&self, now: OffsetDateTime) -> bool {
-        self.network_open(now) || !self.open_devices(now).is_empty()
+        self.network_open(now)
+            || !self.open_devices(now).is_empty()
+            || !self.open_requests(now).is_empty()
     }
 
     /// The next point in time something open closes by itself.
@@ -297,14 +360,17 @@ pub fn change(
     by: Changer,
 ) -> Result<(), ChangeError> {
     let list = inventory::load(dir)?;
+    let mut file = load_access(dir)?;
     let known = match &scope {
         Scope::Network => true,
         Scope::Device { name } => list.device(name).is_some(),
         Scope::Group { name } => list.has_group(name),
+        Scope::Request { id } => file.requests.contains_key(id),
     };
     if !known {
         let name = match &scope {
             Scope::Device { name } | Scope::Group { name } => name.clone(),
+            Scope::Request { id } => id.to_string(),
             Scope::Network => String::new(),
         };
         return Err(InventoryError::Unknown(name).into());
@@ -315,7 +381,6 @@ pub fn change(
         },
         Access::Closed => Access::Closed,
     };
-    let mut file = load_access(dir)?;
     file.set(
         &scope,
         Stored {
@@ -331,6 +396,73 @@ pub fn change(
         Access::Open { until } => Event::Opened { by, until, scope },
     });
     Ok(())
+}
+
+/// A request's targets as the journal names them: the name remotehub gave,
+/// and the address it opens.
+fn targets_text(targets: &[RequestTarget]) -> Vec<String> {
+    targets
+        .iter()
+        .map(|t| format!("{} ({}:{})", t.name, t.host, t.port))
+        .collect()
+}
+
+/// Opens exactly the targets of `request` until `until`, as `by` approved
+/// it (#181).
+pub fn approve(
+    dir: &Path,
+    journal: &Journal,
+    request: &CustomerRequest,
+    until: OffsetDateTime,
+    by: Changer,
+) -> Result<(), ChangeError> {
+    let until = seconds(until);
+    let mut file = load_access(dir)?;
+    file.requests.insert(
+        request.id,
+        Grant {
+            requester: request.requester.clone(),
+            reason: request.reason.clone(),
+            targets: request.targets.clone(),
+            stored: Stored {
+                access: Access::Open { until: Some(until) },
+                changed_by: Some(by.clone()),
+                changed_at: Some(seconds(OffsetDateTime::now_utc())),
+            },
+        },
+    );
+    save_access(dir, &file)?;
+    journal.append(Event::RequestApproved {
+        by,
+        id: request.id,
+        requester: request.requester.clone(),
+        reason: request.reason.clone(),
+        targets: targets_text(&request.targets),
+        until,
+    });
+    Ok(())
+}
+
+/// Records that `by` refused `request`; nothing opens.
+pub fn refuse(journal: &Journal, request: &CustomerRequest, by: Changer) {
+    journal.append(Event::RequestRefused {
+        by,
+        id: request.id,
+        requester: request.requester.clone(),
+        reason: request.reason.clone(),
+        targets: targets_text(&request.targets),
+    });
+}
+
+/// Records that remotehub asked; nothing opens.
+pub fn received(journal: &Journal, request: &CustomerRequest) {
+    journal.append(Event::RequestReceived {
+        id: request.id,
+        requester: request.requester.clone(),
+        reason: request.reason.clone(),
+        minutes: request.minutes,
+        targets: targets_text(&request.targets),
+    });
 }
 
 /// Adds a device to the list, closed.

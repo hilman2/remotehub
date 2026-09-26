@@ -80,9 +80,28 @@ connector-ui-error-no-ports = Ein Gerät braucht mindestens einen Port.
 connector-ui-error-exists = { $name } gibt es schon.
 connector-ui-error-unknown = { $name } gibt es nicht.
 
+connector-ui-requests = Anfragen von remotehub
+connector-ui-requests-hint = Eine Zustimmung öffnet genau die aufgeführten Adressen und Ports, für die angefragte Zeit. Namen und Begründungen stehen so da, wie remotehub sie angibt.
+connector-ui-request-asks = { $requester } bittet um Zugang für { $minutes ->
+    [one] 1 Minute
+   *[other] { $minutes } Minuten
+}.
+connector-ui-request-reason = Begründung: { $reason }
+connector-ui-col-target = Name in remotehub
+connector-ui-col-port = Port
+connector-ui-col-listed = Ihre Liste
+connector-ui-listed-as = eingetragen als { $name }
+connector-ui-not-listed = nicht in Ihrer Liste
+connector-ui-approve = Zustimmen
+connector-ui-refuse = Ablehnen
+connector-ui-approved = Zugestimmte Anfragen
+connector-ui-approved-for = Für { $requester }: { $reason }
+connector-ui-error-request-gone = Die Anfrage wartet nicht mehr: remotehub hat sie zurückgezogen, oder jemand hat sie schon beantwortet.
+
 connector-log-what-network = den Zugang
 connector-log-what-device = das Gerät { $name }
 connector-log-what-group = die Gruppe { $name }
+connector-log-what-request = die Anfrage { $id }
 connector-log-opened-until = { $who } hat { $what } bis { $until } geöffnet.
 connector-log-opened-until-cli = Auf der Kommandozeile { $what } bis { $until } geöffnet.
 connector-log-opened-permanent = { $who } hat { $what } ohne Ende geöffnet.
@@ -95,6 +114,12 @@ connector-log-device-added = { $who } hat das Gerät { $name } hinzugefügt: { $
 connector-log-device-removed = { $who } hat das Gerät { $name } entfernt.
 connector-log-group-added = { $who } hat die Gruppe { $name } hinzugefügt.
 connector-log-group-removed = { $who } hat die Gruppe { $name } entfernt.
+connector-log-request-received = remotehub fragt an, Anfrage { $id }: { $requester } möchte { $targets } für { $minutes ->
+    [one] 1 Minute
+   *[other] { $minutes } Minuten
+}. Begründung: { $reason }
+connector-log-request-approved = { $who } hat Anfrage { $id } von { $requester } zugestimmt: { $targets } bis { $until }.
+connector-log-request-refused = { $who } hat Anfrage { $id } von { $requester } abgelehnt: { $targets }.
 connector-log-connection-started = { $user } hat sich mit { $target } verbunden.
 connector-log-connection-ended = { $user } hat die Verbindung mit { $target } nach { $minutes ->
     [one] 1 Minute

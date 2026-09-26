@@ -60,9 +60,67 @@ pub enum Report {
 /// Where a connector reports whether its customer lets remotehub in (#165),
 /// with a `POST` of [`State`]. It does so every [`STATE_EVERY`] and on each
 /// change, whether open or closed: a closed connector has no control socket.
+/// remotehub answers with [`Pending`], the requests for access waiting for
+/// the customer (#181): data the connector shows, never a command.
 pub const STATE_PATH: &str = "/api/connectors/state";
 
-pub const STATE_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
+/// Often enough that a request for access reaches the customer while the
+/// technician waits.
+pub const STATE_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The most remotehub may answer a report with, in bytes; the connector drops
+/// a longer answer whole.
+pub const MAX_PENDING_BYTES: usize = 64 * 1024;
+/// The most requests an answer may hold, and targets a request.
+pub const MAX_REQUESTS: usize = 20;
+pub const MAX_TARGETS: usize = 20;
+/// The longest reason and the longest name, in characters.
+pub const MAX_REASON: usize = 500;
+pub const MAX_NAME: usize = 200;
+/// How long access may be asked for, in minutes: a quarter of an hour to a
+/// day.
+pub const MINUTES: std::ops::RangeInclusive<u32> = 15..=1440;
+
+/// The requests for access waiting for the customer, oldest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Pending {
+    pub requests: Vec<CustomerRequest>,
+}
+
+/// A remotehub user asks the customer to open these targets for a while.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustomerRequest {
+    pub id: Uuid,
+    /// The remotehub user who asks, as remotehub names them.
+    pub requester: String,
+    pub reason: String,
+    pub minutes: u32,
+    pub targets: Vec<RequestTarget>,
+}
+
+/// A device remotehub would connect to: its name in remotehub, and the
+/// address and port an approval opens.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequestTarget {
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+}
+
+/// The customer's answer to a request, sent with every report until
+/// remotehub no longer lists the request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Answer {
+    pub id: Uuid,
+    pub approved: bool,
+    /// The connector user who answered.
+    pub by: String,
+    /// RFC 3339, the end of an approval.
+    pub until: Option<String>,
+}
 
 /// A report names at most this many groups and as many devices; remotehub
 /// refuses a longer one.
@@ -83,9 +141,12 @@ pub struct State {
     #[serde(default)]
     pub groups: Vec<OpenGroup>,
     /// The open devices of the customer's list, by themselves or through a
-    /// group.
+    /// group, and the targets of approved requests (#181).
     #[serde(default)]
     pub devices: Vec<OpenDevice>,
+    /// The customer's answers to requests remotehub still lists (#181).
+    #[serde(default)]
+    pub answers: Vec<Answer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

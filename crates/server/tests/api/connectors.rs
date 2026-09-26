@@ -71,6 +71,8 @@ pub fn start_connector(
             .filter(|n| !n.is_empty())
             .map(|n| n.parse().unwrap())
             .collect(),
+        // Requests for access reach the connector within a test's patience.
+        report_every: Duration::from_millis(200),
     };
     let dir = tempfile::tempdir().unwrap();
     let journal = Arc::new(Journal::new(dir.path()));
@@ -86,6 +88,7 @@ pub fn start_connector(
         gate: Gate::new(dir.path(), journal.clone()).unwrap(),
         journal,
         connections: Arc::default(),
+        requests: Arc::default(),
     };
     let task = AbortOnDrop(tokio::spawn(agent::run(settings, site.clone())));
     Agent {
@@ -157,7 +160,7 @@ impl Drop for AbortOnDrop {
 }
 
 /// A device that echoes what it gets, on 127.0.0.1.
-async fn echo() -> String {
+pub async fn echo() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap().to_string();
     tokio::spawn(async move {
@@ -635,10 +638,20 @@ async fn closing_ends_running_connections(pool: PgPool) {
         "a closed report",
     )
     .await;
-    assert!(agent.site.journal.recent(10).iter().any(|e| e.event
-        == Event::Expired {
-            scope: Scope::Network
-        }));
+    // The report may say closed before the connector's once-a-second check
+    // writes the expiry to its journal.
+    wait_for(
+        || {
+            agent.site.journal.recent(10).iter().any(|e| {
+                e.event
+                    == Event::Expired {
+                        scope: Scope::Network,
+                    }
+            })
+        },
+        "the expiry in the journal",
+    )
+    .await;
 }
 
 /// The command line changes the file; the running connector follows.
@@ -821,7 +834,9 @@ async fn a_report_holds_a_point_in_time_or_none(pool: PgPool) {
     assert!(state.connectors.access(id).is_none());
 
     let taken = send(&app, report(json!("2026-10-01T18:00:00+02:00"))).await;
-    assert_eq!(taken.status, 204);
+    assert_eq!(taken.status, 200);
+    // The answer is the pending requests for the customer (#181): none here.
+    assert_eq!(taken.json(), json!({ "requests": [] }));
     assert_eq!(
         state.connectors.access(id).unwrap().until.as_deref(),
         Some("2026-10-01T16:00:00Z")
@@ -884,7 +899,7 @@ async fn a_report_lists_plain_names_and_points_in_time(pool: PgPool) {
         })),
     )
     .await;
-    assert_eq!(taken.status, 204);
+    assert_eq!(taken.status, 200);
     let access = state.connectors.access(id).unwrap();
     assert_eq!(
         access.groups[0].until.as_deref(),

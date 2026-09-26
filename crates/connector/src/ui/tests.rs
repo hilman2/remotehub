@@ -5,6 +5,7 @@ use tower::ServiceExt;
 use super::*;
 use crate::access::Gate;
 use crate::journal::Journal;
+use crate::protocol::CustomerRequest;
 
 const HOST: &str = "connector.test";
 
@@ -22,6 +23,7 @@ fn setup() -> Setup {
         gate: Gate::new(dir.path(), journal.clone()).unwrap(),
         journal,
         connections: Arc::default(),
+        requests: Arc::default(),
     };
     let users = Users::new(dir.path());
     let password = users.add("carol", false).unwrap().password.to_string();
@@ -294,6 +296,148 @@ async fn reported_names_are_escaped() {
     assert!(
         page.contains("&lt;b&gt;router&lt;/b&gt; (&lt;script&gt;x&lt;/script&gt;:22)"),
         "{page}"
+    );
+}
+
+fn customer_request(reason: &str) -> CustomerRequest {
+    CustomerRequest {
+        id: Uuid::from_u128(7),
+        requester: "alice".into(),
+        reason: reason.into(),
+        minutes: 120,
+        targets: vec![
+            RequestTarget {
+                name: "sql".into(),
+                host: "10.0.0.5".into(),
+                port: 1433,
+            },
+            RequestTarget {
+                name: "<b>web</b>".into(),
+                host: "web01".into(),
+                port: 443,
+            },
+        ],
+    }
+}
+
+/// A request from remotehub opens nothing by itself; a signed-in user's
+/// approval opens exactly its addresses and ports for the time asked (#181).
+#[tokio::test]
+async fn an_approval_opens_exactly_what_was_asked() {
+    let setup = setup();
+    let cookie = sign_in(&setup).await;
+    let request = customer_request("<script>alert(1)</script> ERP update");
+    setup.site.requests.listed(vec![request.clone()]);
+    assert!(
+        !setup
+            .site
+            .gate
+            .current()
+            .any_open(OffsetDateTime::now_utc())
+    );
+
+    let (_, _, page) = send(
+        &setup.router,
+        Request::get("/")
+            .header(header::COOKIE, &cookie)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert!(
+        page.contains("alice asks for access for 120 minutes."),
+        "{page}"
+    );
+    assert!(
+        !page.contains("<script>alert") && !page.contains("<b>web"),
+        "{page}"
+    );
+    assert!(
+        page.contains("&lt;script&gt;alert(1)&lt;/script&gt; ERP update"),
+        "{page}"
+    );
+    assert!(page.contains("<code>web01</code>"), "{page}");
+    assert!(page.contains("not on your list"), "{page}");
+
+    // Without a session, nothing happens.
+    let id = format!("id={}", request.id);
+    let (status, headers, _) = send(&setup.router, form("/requests/approve", &id, None)).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(headers[header::LOCATION], "/sign-in");
+    assert!(setup.site.requests.answers().is_empty());
+
+    let (status, _, _) = send(&setup.router, form("/requests/approve", &id, Some(&cookie))).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let snapshot = setup.site.gate.current();
+    let now = OffsetDateTime::now_utc();
+    let open = snapshot.open_requests(now);
+    assert_eq!(open.len(), 1);
+    let grant = open[0].1;
+    assert_eq!(grant.targets, request.targets);
+    let minutes = (grant.stored.access.closes_at().unwrap() - now).whole_minutes();
+    assert!((119..=120).contains(&minutes), "{minutes} minutes");
+    // The network and the list stay as they were.
+    assert!(!snapshot.network_open(now) && snapshot.open_devices(now).is_empty());
+    let answers = setup.site.requests.answers();
+    assert_eq!(answers.len(), 1);
+    assert!(answers[0].approved && answers[0].by == "carol");
+    assert!(answers[0].until.is_some());
+    assert!(matches!(
+        setup.site.journal.recent(1)[0].event,
+        Event::RequestApproved { .. }
+    ));
+
+    // Answered once; a second answer finds nothing waiting.
+    let (status, _, _) = send(&setup.router, form("/requests/refuse", &id, Some(&cookie))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // Closed early, it is gone.
+    let close = format!("action=close&scope=request&name={}", request.id);
+    let (status, _, _) = send(&setup.router, form("/access", &close, Some(&cookie))).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(setup.site.gate.current().access.requests.is_empty());
+    // An approved request cannot be opened again from the page.
+    let reopen = format!("action=permanent&scope=request&name={}", request.id);
+    let (status, _, _) = send(&setup.router, form("/access", &reopen, Some(&cookie))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn a_refusal_opens_nothing() {
+    let setup = setup();
+    let cookie = sign_in(&setup).await;
+    let request = customer_request("ERP update");
+    setup.site.requests.listed(vec![request.clone()]);
+    let id = format!("id={}", request.id);
+    let (status, _, _) = send(&setup.router, form("/requests/refuse", &id, Some(&cookie))).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(
+        !setup
+            .site
+            .gate
+            .current()
+            .any_open(OffsetDateTime::now_utc())
+    );
+    let answers = setup.site.requests.answers();
+    assert!(!answers[0].approved && answers[0].until.is_none());
+    assert!(setup.site.requests.waiting().is_empty());
+    // An id remotehub never listed is no request.
+    let (status, _, _) = send(
+        &setup.router,
+        form(
+            "/requests/approve",
+            &format!("id={}", Uuid::from_u128(8)),
+            Some(&cookie),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(
+        !setup
+            .site
+            .gate
+            .current()
+            .any_open(OffsetDateTime::now_utc())
     );
 }
 

@@ -73,6 +73,7 @@ pub async fn run(data: &Path) -> anyhow::Result<()> {
         gate: Gate::new(data, journal.clone())?,
         journal,
         connections: Arc::default(),
+        requests: Arc::default(),
     };
     let users = Users::new(data);
     if users.list()?.is_empty() {

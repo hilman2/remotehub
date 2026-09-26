@@ -223,11 +223,28 @@ messages! {
     ConnectorUiErrorNoPorts = "connector-ui-error-no-ports" {}
     ConnectorUiErrorExists = "connector-ui-error-exists" { name: String }
     ConnectorUiErrorUnknown = "connector-ui-error-unknown" { name: String }
+    /// Requests for access from remotehub (#181). What remotehub states is
+    /// shown as stated, next to the address an approval opens.
+    ConnectorUiRequests = "connector-ui-requests" {}
+    ConnectorUiRequestsHint = "connector-ui-requests-hint" {}
+    ConnectorUiRequestAsks = "connector-ui-request-asks" { requester: String, minutes: i64 }
+    ConnectorUiRequestReason = "connector-ui-request-reason" { reason: String }
+    ConnectorUiColTarget = "connector-ui-col-target" {}
+    ConnectorUiColPort = "connector-ui-col-port" {}
+    ConnectorUiColListed = "connector-ui-col-listed" {}
+    ConnectorUiListedAs = "connector-ui-listed-as" { name: String }
+    ConnectorUiNotListed = "connector-ui-not-listed" {}
+    ConnectorUiApprove = "connector-ui-approve" {}
+    ConnectorUiRefuse = "connector-ui-refuse" {}
+    ConnectorUiApproved = "connector-ui-approved" {}
+    ConnectorUiApprovedFor = "connector-ui-approved-for" { requester: String, reason: String }
+    ConnectorUiErrorRequestGone = "connector-ui-error-request-gone" {}
     /// The connector's journal as the web interface shows it. `what` is one
     /// of the `connector-log-what-*` messages.
     ConnectorLogWhatNetwork = "connector-log-what-network" {}
     ConnectorLogWhatDevice = "connector-log-what-device" { name: String }
     ConnectorLogWhatGroup = "connector-log-what-group" { name: String }
+    ConnectorLogWhatRequest = "connector-log-what-request" { id: String }
     ConnectorLogOpenedUntil = "connector-log-opened-until" { who: String, what: String, until: String }
     ConnectorLogOpenedUntilCli = "connector-log-opened-until-cli" { what: String, until: String }
     ConnectorLogOpenedPermanent = "connector-log-opened-permanent" { who: String, what: String }
@@ -240,6 +257,9 @@ messages! {
     ConnectorLogDeviceRemoved = "connector-log-device-removed" { who: String, name: String }
     ConnectorLogGroupAdded = "connector-log-group-added" { who: String, name: String }
     ConnectorLogGroupRemoved = "connector-log-group-removed" { who: String, name: String }
+    ConnectorLogRequestReceived = "connector-log-request-received" { id: String, requester: String, targets: String, minutes: i64, reason: String }
+    ConnectorLogRequestApproved = "connector-log-request-approved" { who: String, id: String, requester: String, targets: String, until: String }
+    ConnectorLogRequestRefused = "connector-log-request-refused" { who: String, id: String, requester: String, targets: String }
     ConnectorLogConnectionStarted = "connector-log-connection-started" { user: String, target: String }
     ConnectorLogConnectionEnded = "connector-log-connection-ended" { user: String, target: String, minutes: i64, sent: String, received: String }
     ConnectorLogConnectionRefused = "connector-log-connection-refused" { user: String, target: String, reason: String }

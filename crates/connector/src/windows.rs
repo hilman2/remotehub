@@ -404,7 +404,10 @@ pub mod eventlog {
             | Event::DeviceAdded { .. }
             | Event::DeviceRemoved { .. }
             | Event::GroupAdded { .. }
-            | Event::GroupRemoved { .. } => (Kind::Information, 1),
+            | Event::GroupRemoved { .. }
+            | Event::RequestReceived { .. }
+            | Event::RequestApproved { .. }
+            | Event::RequestRefused { .. } => (Kind::Information, 1),
             Event::ConnectionStarted { .. } | Event::ConnectionEnded { .. } => {
                 (Kind::Information, 2)
             }

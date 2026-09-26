@@ -1,6 +1,7 @@
 # ADR 0011: The customer opens and closes access at the connector
 
-- Status: accepted, extended by [ADR 0012](0012-access-per-device.md) (access per device)
+- Status: accepted, extended by [ADR 0012](0012-access-per-device.md) (access per device) and
+  [ADR 0013](0013-remotehub-asks-the-customer.md) (requests from remotehub, reports every 10 seconds)
 - Date: 2026-09-26
 
 ## Context

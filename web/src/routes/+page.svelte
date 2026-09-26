@@ -55,6 +55,7 @@
 	import Journal from '$lib/catalog/Journal.svelte';
 	import RevealSecret from '$lib/catalog/RevealSecret.svelte';
 	import CredentialExtras from '$lib/catalog/CredentialExtras.svelte';
+	import AskCustomer from '$lib/connectors/AskCustomer.svelte';
 	import DeviceAccess from '$lib/connectors/DeviceAccess.svelte';
 	import EntryDetails from '$lib/vault/EntryDetails.svelte';
 	import FileDown from '@lucide/svelte/icons/file-down';
@@ -602,6 +603,9 @@
 			{#if folder.role}
 				<div class="flex flex-wrap gap-2">
 					<span class="chip">{m.catalog_access({ role: ROLE_LABELS[folder.role]() })}</span>
+					{#if passedOn(folder.id) && allows(folder.role, 'connect')}
+						<AskCustomer kind="folder" id={folder.id} />
+					{/if}
 				</div>
 			{/if}
 			{#if allows(folder.role, 'edit')}
@@ -658,6 +662,7 @@
 							</span>
 							{#if allows(device.role, 'connect')}
 								<DeviceAccess deviceId={device.id} />
+								<AskCustomer kind="device" id={device.id} />
 							{/if}
 						{/if}
 						<span class="chip">{m.catalog_access({ role: ROLE_LABELS[device.role]() })}</span>
