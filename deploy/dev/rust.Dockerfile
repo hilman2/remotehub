@@ -4,9 +4,12 @@
 # so watchexec runs with --poll.
 # Keep in sync with rust-toolchain.toml and scripts/ci/tools.Dockerfile.
 FROM rust:1.98.1-trixie
-RUN rustup component add rustfmt clippy
+# The Windows target and mingw-w64 check the site connector for Windows:
+# cargo clippy -p remotehub-connector --target x86_64-pc-windows-gnu (#166).
+RUN rustup component add rustfmt clippy \
+  && rustup target add x86_64-pc-windows-gnu
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends mold \
+  && apt-get install -y --no-install-recommends mold gcc-mingw-w64-x86-64 \
   && rm -rf /var/lib/apt/lists/*
 # mold links test binaries several times faster than GNU ld; set only here,
 # so builds outside these containers are not affected.

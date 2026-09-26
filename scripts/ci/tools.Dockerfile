@@ -15,10 +15,13 @@ COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
   && npm install -g pnpm@12.6.0 \
   && node --version && pnpm --version
+# mingw-w64: the C compiler for ring's code when clippy checks the connector
+# for Windows (#166).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends shellcheck mold rsync \
+  && apt-get install -y --no-install-recommends shellcheck mold rsync gcc-mingw-w64-x86-64 \
   && rm -rf /var/lib/apt/lists/*
-RUN rustup component add rustfmt clippy
+RUN rustup component add rustfmt clippy \
+  && rustup target add x86_64-pc-windows-gnu
 # mold links test binaries several times faster than GNU ld; set only here,
 # so builds outside these containers are not affected.
 ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=mold"

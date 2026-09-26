@@ -81,8 +81,10 @@ Settings of the `remotehub-browser` container, which opens web interfaces in Chr
 
 ## Site connector
 
-Settings of `remotehub-connector` (image `ghcr.io/hilman2/remotehub-connector`), which runs in another network
-and reaches devices there for remotehub.
+Settings of `remotehub-connector` (image `ghcr.io/hilman2/remotehub-connector`, or `remotehub-connector.exe` as
+a Windows service), which runs in another network and reaches devices there for remotehub. Each setting can also
+stand in `connector.conf` in the data directory, one `NAME=value` per line; the environment takes precedence.
+The Windows service reads only that file, which `install` writes.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -90,13 +92,14 @@ and reaches devices there for remotehub.
 | `REMOTEHUB_CONNECTOR_TOKEN` | required | The token shown when the connector was created. Better as `REMOTEHUB_CONNECTOR_TOKEN_FILE`. |
 | `REMOTEHUB_CONNECTOR_CA_FILE` | system CAs | PEM file with the CA of remotehub's certificate. |
 | `REMOTEHUB_CONNECTOR_ALLOW` | – | Address ranges the connector may connect to, separated by commas, e.g. `10.20.0.0/16`. Without it, every address. |
-| `REMOTEHUB_CONNECTOR_DATA` | `/var/lib/remotehub-connector` | Directory for the access state (`access.json`), the log (`access.log`), the users of the web interface (`users.json`) and its certificate. |
+| `REMOTEHUB_CONNECTOR_DATA` | `/var/lib/remotehub-connector`, on Windows `C:\ProgramData\remotehub-connector` | Directory for the settings (`connector.conf`), the access state (`access.json`), the log (`access.log`), the users of the web interface (`users.json`) and its certificate. Only from the environment. |
 | `REMOTEHUB_CONNECTOR_LISTEN` | `127.0.0.1:8480`, in the image `0.0.0.0:8480` | Address and port of the web interface, HTTPS only. |
 | `REMOTEHUB_CONNECTOR_TLS_CERT_FILE` | self-signed | PEM file with the web interface's certificate chain. Needs `REMOTEHUB_CONNECTOR_TLS_KEY_FILE`. Without both, the connector makes a self-signed certificate in the data directory. |
 | `REMOTEHUB_CONNECTOR_TLS_KEY_FILE` | – | PEM file with the certificate's private key. |
 | `REMOTEHUB_LOG_FORMAT` | `text` | `text` or `json`. |
 
-Commands of `remotehub-connector`; they answer in the language of `LC_ALL`, `LC_MESSAGES` or `LANG`:
+Commands of `remotehub-connector`; they answer in the language of `LC_ALL`, `LC_MESSAGES` or `LANG`, on Windows
+without those in the user's language:
 
 | Command | Does |
 |---|---|
@@ -110,6 +113,9 @@ Commands of `remotehub-connector`; they answer in the language of `LC_ALL`, `LC_
 | `user reset NAME [--totp]` | Replaces the password, and the TOTP secret or none. |
 | `user delete NAME` | Deletes the user. |
 | `user list` | Lists the users. |
+| `install --url URL [--allow RANGES]` | Windows, as administrator: asks for the token, installs the program, writes `connector.conf`, and installs and starts the service `remotehub-connector`. |
+| `update` | Windows, as administrator: replaces the installed program with the running one and restarts the service. |
+| `uninstall [--purge]` | Windows, as administrator: removes the service and the program; with `--purge` also the data directory. |
 
 ## Command line
 

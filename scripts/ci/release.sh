@@ -80,6 +80,14 @@ tools="$(ci_image scripts/ci/tools.Dockerfile)"
 ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" "$IMAGE" "$GUACD_IMAGE" "$BROWSER_IMAGE" "$CONNECTOR_IMAGE" \
   "$version" --pull
 
+echo "── Build the site connector for Windows"
+# From the commit, not the working copy; image-check.sh built it the same way.
+windows="${CI_ABLAGE}/windows-${version}"
+rm -rf "$windows"
+git archive --format=tar "$CI_SHA" |
+  docker build --quiet --pull --file deploy/connector/windows.Dockerfile --output "type=local,dest=${windows}" -
+[ -s "${windows}/remotehub-connector.exe" ] || ci_fehler "no remotehub-connector.exe in ${windows}"
+
 ops="${CI_ABLAGE}/remotehub-ops-${version}.tar.gz"
 # LF line endings whatever Git for Windows' core.autocrlf says, as the CI
 # unpacks its commits: a shell script with CRLF does not run (#161).
@@ -89,10 +97,11 @@ echo "ops package: ${ops}"
 # install.sh (#142) fetches the package under a name without the version,
 # from the latest release or a given one, and checks it against SHA256SUMS.
 assets="${CI_ABLAGE}/assets-${version}"
-bash "$(dirname "${BASH_SOURCE[0]}")/release-assets.sh" "$ops" "$version" "$assets"
+bash "$(dirname "${BASH_SOURCE[0]}")/release-assets.sh" "$ops" "$version" "$assets" \
+  "${windows}/remotehub-connector.exe"
 
 if [ "$dry_run" = 1 ]; then
-  echo "✓ dry run: ${IMAGE}:${version}, ${GUACD_IMAGE}:${version}, ${BROWSER_IMAGE}:${version} and ${CONNECTOR_IMAGE}:${version} built and tried, nothing published"
+  echo "✓ dry run: ${IMAGE}:${version}, ${GUACD_IMAGE}:${version}, ${BROWSER_IMAGE}:${version}, ${CONNECTOR_IMAGE}:${version} and remotehub-connector.exe built and tried, nothing published"
   exit 0
 fi
 

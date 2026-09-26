@@ -1,25 +1,21 @@
 use std::path::Path;
-use std::sync::Arc;
 
 use anyhow::Context;
 use clap::{ArgGroup, Parser, Subcommand};
-use remotehub_connector::access::{self, Access, Changer, Gate};
-use remotehub_connector::agent::{self, AgentSettings, Site};
+use remotehub_connector::access::{self, Access, Changer};
+use remotehub_connector::daemon::{self, Logs};
 use remotehub_connector::journal::Journal;
-use remotehub_connector::settings::{self, UiSettings};
-use remotehub_connector::ui::{self, Ui};
 use remotehub_connector::users::{Issued, Users};
-use remotehub_connector::{VERSION, files, https};
+use remotehub_connector::{files, settings};
 use remotehub_i18n::{self as i18n, Locale, Message};
 use time::format_description::well_known::Rfc3339;
 use time::macros::format_description;
 use time::{OffsetDateTime, PrimitiveDateTime};
-use tracing_subscriber::EnvFilter;
 
 /// remotehub site connector: reaches devices in this network for the
 /// remotehub at REMOTEHUB_URL while access is open. Configuration comes from
-/// REMOTEHUB_* environment variables; the data directory is
-/// REMOTEHUB_CONNECTOR_DATA.
+/// REMOTEHUB_* environment variables and connector.conf in the data
+/// directory, REMOTEHUB_CONNECTOR_DATA.
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
@@ -55,6 +51,30 @@ enum Command {
         #[command(subcommand)]
         action: UserAction,
     },
+    /// Install and start the Windows service. Asks for the token.
+    #[cfg(windows)]
+    Install {
+        /// remotehub's address, e.g. https://remotehub.example.com.
+        #[arg(long)]
+        url: String,
+        /// Address ranges the connector may reach, e.g. 10.20.0.0/16.
+        #[arg(long)]
+        allow: Option<String>,
+    },
+    /// Replace the installed program with this one and restart the service.
+    #[cfg(windows)]
+    Update,
+    /// Remove the Windows service and the program.
+    #[cfg(windows)]
+    Uninstall {
+        /// Also remove the data: access state, log, users.
+        #[arg(long)]
+        purge: bool,
+    },
+    /// Run as the Windows service; the service manager calls this.
+    #[cfg(windows)]
+    #[command(hide = true)]
+    Service,
 }
 
 #[derive(Subcommand)]
@@ -78,13 +98,23 @@ enum UserAction {
     List,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let lookup = |name: &str| std::env::var(name).ok();
-    let data = settings::data_dir(&lookup)?;
-    let locale = Locale::from_posix(lookup);
-    match Cli::parse().command.unwrap_or(Command::Run) {
-        Command::Run => run(&data).await,
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    let data = settings::data_dir(&|name: &str| std::env::var(name).ok())?;
+    let locale = cli_locale();
+    match cli.command.unwrap_or(Command::Run) {
+        Command::Run => {
+            daemon::init_logs(&data, Logs::Stdout)?;
+            tokio::runtime::Runtime::new()?.block_on(async {
+                tokio::select! {
+                    result = daemon::run(&data) => result,
+                    () = shutdown_signal() => {
+                        tracing::info!("stopping");
+                        Ok(())
+                    }
+                }
+            })
+        }
         Command::Open {
             hours,
             until,
@@ -105,48 +135,33 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Status => print_status(&data, locale),
         Command::User { action } => manage_users(&data, locale, action),
+        #[cfg(windows)]
+        Command::Install { url, allow } => {
+            remotehub_connector::windows::install(&url, allow.as_deref(), locale)
+        }
+        #[cfg(windows)]
+        Command::Update => remotehub_connector::windows::update(locale),
+        #[cfg(windows)]
+        Command::Uninstall { purge } => remotehub_connector::windows::uninstall(purge, locale),
+        #[cfg(windows)]
+        Command::Service => remotehub_connector::windows::dispatch(),
     }
 }
 
-async fn run(data: &Path) -> anyhow::Result<()> {
-    let lookup = |name: &str| std::env::var(name).ok();
-    let agent_settings = AgentSettings::from_env(&lookup)?;
-    let ui_settings = UiSettings::from_env(&lookup)?;
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let builder = tracing_subscriber::fmt().with_env_filter(filter);
-    if lookup("REMOTEHUB_LOG_FORMAT").is_some_and(|f| f == "json") {
-        builder.json().init();
-    } else {
-        builder.init();
+/// The language of the command line's output: the POSIX variables if one
+/// is set, else on Windows the user's language, else English.
+fn cli_locale() -> Locale {
+    let set = ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .any(|name| std::env::var(name).is_ok_and(|value| !value.is_empty()));
+    if set {
+        return Locale::from_posix(|name| std::env::var(name).ok());
     }
-    tracing::info!(version = VERSION, url = %agent_settings.url, data = %data.display(), "starting the site connector");
-
-    files::data_dir(data).with_context(|| format!("creating {}", data.display()))?;
-    let journal = Arc::new(Journal::new(data));
-    let site = Site {
-        gate: Gate::new(data, journal.clone())?,
-        journal,
-        connections: Arc::default(),
-    };
-    let users = Users::new(data);
-    if users.list()?.is_empty() {
-        tracing::warn!(
-            "nobody can sign in to the web interface yet: remotehub-connector user add NAME"
-        );
+    #[cfg(windows)]
+    if let Some(locale) = remotehub_connector::windows::user_locale() {
+        return locale;
     }
-    let (acceptor, fingerprint) = https::acceptor(ui_settings.certificate.as_ref(), data)?;
-    let listener = tokio::net::TcpListener::bind(ui_settings.listen)
-        .await
-        .with_context(|| format!("listening on {}", ui_settings.listen))?;
-    tracing::info!(listen = %ui_settings.listen, %fingerprint, "web interface");
-    let remotehub = agent_settings.url.host().unwrap_or_default().to_owned();
-    let router = ui::router(Ui::new(site.clone(), users, remotehub));
-    tokio::select! {
-        () = agent::run(agent_settings, site) => {}
-        () = https::serve(listener, acceptor, router) => {}
-        () = shutdown_signal() => tracing::info!("stopping"),
-    }
-    Ok(())
+    Locale::En
 }
 
 fn change(data: &Path, access: Access) -> anyhow::Result<()> {

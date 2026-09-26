@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # The files of a release (#142, #158), from its ops package: the package
 # under its versioned name and under the name install.sh fetches, install.sh
-# from the package, and SHA256SUMS over all three. release.sh publishes them,
-# install-check.sh installs from them.
+# from the package, with CONNECTOR_EXE the site connector for Windows (#166)
+# under both kinds of name, and SHA256SUMS over all of them. release.sh
+# publishes them, install-check.sh installs from them.
 #
-#   release-assets.sh OPS_PACKAGE VERSION DIR
+#   release-assets.sh OPS_PACKAGE VERSION DIR [CONNECTOR_EXE]
 set -euo pipefail
 
-ops="$1" version="$2" dir="$3"
+ops="$1" version="$2" dir="$3" exe="${4:-}"
 # The package goes to Linux hosts: a carriage return anywhere in it, e.g. from
 # Git for Windows' core.autocrlf, breaks its shell scripts (#161). -U: grep
 # in Git Bash drops carriage returns before it matches otherwise. -c, not -q:
@@ -22,6 +23,12 @@ cp "$ops" "${dir}/remotehub-ops-${version}.tar.gz"
 cp "$ops" "${dir}/remotehub-ops.tar.gz"
 # From stdin: GNU tar in Git Bash takes "D:/..." for a remote host.
 tar -xzOf - remotehub/install.sh <"$ops" >"${dir}/install.sh"
+files=("remotehub-ops-${version}.tar.gz" remotehub-ops.tar.gz install.sh)
+if [ -n "$exe" ]; then
+  cp "$exe" "${dir}/remotehub-connector-${version}.exe"
+  cp "$exe" "${dir}/remotehub-connector.exe"
+  files+=("remotehub-connector-${version}.exe" remotehub-connector.exe)
+fi
 # --text: in Git Bash, sha256sum marks every file binary with "*" otherwise,
 # and SHA256SUMS should read the same wherever the release was made.
-(cd "$dir" && sha256sum --text "remotehub-ops-${version}.tar.gz" remotehub-ops.tar.gz install.sh >SHA256SUMS)
+(cd "$dir" && sha256sum --text "${files[@]}" >SHA256SUMS)

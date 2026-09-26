@@ -75,3 +75,9 @@ connector-cli-totp-uri-label = TOTP URI:
 connector-cli-user-deleted = User { $name } deleted.
 connector-cli-no-users = No users yet. Create one with: remotehub-connector user add NAME
 connector-cli-with-totp = with a second factor
+
+connector-cli-token-prompt = Paste the connector's token from remotehub and press Enter:
+connector-cli-installed = The Windows service remotehub-connector runs and reports to { $url }. Access is closed. Next, create a user for the web interface with: remotehub-connector user add NAME. Then open https://localhost:8480 on this server.
+connector-cli-updated = The service runs release { $version } now.
+connector-cli-uninstalled = The service and the program are removed.
+connector-cli-data-kept = The data stays in { $path }; uninstall --purge removes it.

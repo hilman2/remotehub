@@ -1,8 +1,10 @@
-//! Settings from the environment: `REMOTEHUB_*`, each also as `NAME_FILE`.
-//! The way to remotehub is in [`crate::agent::AgentSettings`].
+//! Settings from the environment: `REMOTEHUB_*`, each also as `NAME_FILE`,
+//! and from [`CONF`] in the data directory. The way to remotehub is in
+//! [`crate::agent::AgentSettings`].
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -63,6 +65,32 @@ fn default_data_dir() -> PathBuf {
     PathBuf::from("/var/lib/remotehub-connector")
 }
 
+/// The file in the data directory that holds settings where no environment
+/// is at hand, as for the Windows service (#166): one `NAME=value` per line,
+/// `#` starts a comment.
+pub const CONF: &str = "connector.conf";
+
+/// The settings from the environment, and from [`CONF`] in `data` for names
+/// the environment leaves unset.
+pub fn lookup(data: &Path) -> impl Fn(&str) -> Option<String> + use<> {
+    let conf = std::fs::read_to_string(data.join(CONF)).unwrap_or_default();
+    let values = parse_conf(&conf);
+    move |name: &str| {
+        std::env::var(name)
+            .ok()
+            .or_else(|| values.get(name).cloned())
+    }
+}
+
+fn parse_conf(text: &str) -> HashMap<String, String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| line.split_once('='))
+        .map(|(name, value)| (name.trim().to_owned(), value.trim().to_owned()))
+        .collect()
+}
+
 /// The web interface.
 pub struct UiSettings {
     /// `REMOTEHUB_CONNECTOR_LISTEN`, default `127.0.0.1:8480`; the image
@@ -96,5 +124,27 @@ impl UiSettings {
             listen,
             certificate,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_conf_file_holds_names_and_values() {
+        let values = parse_conf(
+            "# written by install\n\
+             REMOTEHUB_URL = https://remotehub.example.com\n\
+             \n\
+             REMOTEHUB_CONNECTOR_ALLOW=10.0.0.0/8,192.168.1.0/24\n\
+             not a setting\n",
+        );
+        assert_eq!(values.len(), 2);
+        assert_eq!(values["REMOTEHUB_URL"], "https://remotehub.example.com");
+        assert_eq!(
+            values["REMOTEHUB_CONNECTOR_ALLOW"],
+            "10.0.0.0/8,192.168.1.0/24"
+        );
     }
 }
