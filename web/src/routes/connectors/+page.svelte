@@ -14,6 +14,7 @@
 	} from '$lib/api/connectors';
 	import { errorMessage } from '$lib/api/errors';
 	import Dialog from '$lib/components/Dialog.svelte';
+	import ConnectorSetup from '$lib/connectors/ConnectorSetup.svelte';
 	import { formatLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
 	import { session } from '$lib/session.svelte';
@@ -69,10 +70,6 @@
 		dialogOpen = false;
 		await load();
 	}
-
-	/** The connector's environment (crates/connector/src/agent.rs). */
-	const settings = (connector: CreatedConnector) =>
-		`REMOTEHUB_URL=${window.location.origin}\nREMOTEHUB_CONNECTOR_TOKEN=${connector.token}`;
 
 	const title = $derived.by(() => {
 		switch (open?.type) {
@@ -185,7 +182,7 @@
 	</div>
 {/if}
 
-<Dialog bind:open={dialogOpen} {title}>
+<Dialog bind:open={dialogOpen} {title} wide={open?.type === 'created'}>
 	{#if open?.type === 'create'}
 		<form onsubmit={create}>
 			<label class="block text-sm font-medium" for="connector-name">{m.field_name()}</label>
@@ -216,12 +213,7 @@
 			</div>
 		</form>
 	{:else if open?.type === 'created'}
-		<p class="text-sm">{m.connectors_token_hint()}</p>
-		<pre
-			class="mt-3 overflow-x-auto rounded-lg border border-line bg-page p-3 font-mono text-xs select-all"
-			aria-label={m.connectors_token_settings()}>{settings(open.connector)}</pre>
-		<p class="mt-3 text-sm">{m.connectors_token_closed()}</p>
-		<p class="mt-3 text-xs text-ink-3">{m.connectors_token_docs()}</p>
+		<ConnectorSetup token={open.connector.token} origin={window.location.origin} />
 		<div class="mt-5 flex justify-end">
 			<button
 				type="button"

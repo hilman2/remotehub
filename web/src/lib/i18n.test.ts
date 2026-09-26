@@ -32,7 +32,10 @@ const IDENTICAL_IN_GERMAN = new Set<string>([
 	'sign_in_code',
 	'users_code_link',
 	'role_administrator',
-	'vault_totp_left'
+	'vault_totp_left',
+	'connectors_setup_docker',
+	'connectors_setup_windows_program',
+	'connectors_setup_windows_sums'
 ]);
 
 /** Every message as text; plural and select variants as their JSON. */
