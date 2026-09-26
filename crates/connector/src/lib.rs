@@ -3,7 +3,8 @@
 //! the customer keeps access open.
 //!
 //! - [`agent`]: the way to remotehub
-//! - [`access`], [`journal`]: whether the customer lets remotehub in, and
+//! - [`access`], [`inventory`], [`journal`]: whether the customer lets
+//!   remotehub in, to the whole network or to devices of their own list, and
 //!   the customer's record of it
 //! - [`ui`], [`https`], [`users`]: the web interface where the customer
 //!   opens and closes access
@@ -19,6 +20,7 @@ pub mod agent;
 pub mod daemon;
 pub mod files;
 pub mod https;
+pub mod inventory;
 pub mod journal;
 pub mod network;
 pub mod protocol;

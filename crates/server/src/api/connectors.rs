@@ -29,8 +29,6 @@ use data_encoding::BASE64URL_NOPAD;
 use remotehub_connector::protocol::{self, Report};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use time::format_description::well_known::Rfc3339;
-use time::{OffsetDateTime, UtcOffset};
 use uuid::Uuid;
 
 use super::catalog::{body, name};
@@ -38,7 +36,7 @@ use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
 use crate::AppState;
 use crate::audit::{self, Action, Actor, Entry};
-use crate::connectors::token_hash;
+use crate::connectors::{Checked, token_hash, utc};
 use crate::session::Session;
 
 /// Keeps proxies and NAT from closing an idle control socket.
@@ -56,13 +54,18 @@ pub struct ConnectorView {
     /// Connections it has carried since remotehub started.
     #[sqlx(skip)]
     streams_carried: u64,
-    /// `open` or `closed`, as the connector reports it; none without a
-    /// recent report.
+    /// `open`, `partly` (some devices, #180) or `closed`, as the connector
+    /// reports it; none without a recent report.
     #[sqlx(skip)]
     access: Option<&'static str>,
     /// RFC 3339; while open until a point in time.
     #[sqlx(skip)]
     open_until: Option<String>,
+    /// The groups and devices of the customer's list that are open (#180).
+    #[sqlx(skip)]
+    open_groups: Vec<protocol::OpenGroup>,
+    #[sqlx(skip)]
+    open_devices: Vec<protocol::OpenDevice>,
     /// RFC 3339 in UTC; none before the first connection.
     last_seen_at: Option<String>,
 }
@@ -89,7 +92,7 @@ fn actor(session: &Session) -> Actor<'_> {
 
 pub async fn list(
     State(state): State<AppState>,
-    _session: Session,
+    session: Session,
 ) -> Result<Json<Vec<ConnectorView>>, Problem> {
     let mut connectors: Vec<ConnectorView> = sqlx::query_as(
         r#"SELECT id, name,
@@ -103,8 +106,20 @@ pub async fn list(
         connector.streams = state.connectors.streams(connector.id);
         connector.streams_carried = state.connectors.streams_carried(connector.id);
         if let Some(access) = state.connectors.access(connector.id) {
-            connector.access = Some(if access.open { "open" } else { "closed" });
+            connector.access = Some(if access.open {
+                "open"
+            } else if access.partly {
+                "partly"
+            } else {
+                "closed"
+            });
             connector.open_until = access.until;
+            // The customer's addresses are for administrators; others learn
+            // at each device whether it is open.
+            if session.is_admin() {
+                connector.open_groups = access.groups;
+                connector.open_devices = access.devices;
+            }
         }
     }
     Ok(Json(connectors))
@@ -250,7 +265,21 @@ async fn run_control(mut socket: WebSocket, state: AppState, connector: Uuid) {
             }
             message = socket.recv() => match message {
                 Some(Ok(Message::Text(text))) => match serde_json::from_str::<Report>(&text) {
-                    Ok(Report::Failed { id, reason }) => state.connectors.fail(connector, id, reason),
+                    Ok(Report::Failed { id, reason, not_open }) => {
+                        state.connectors.fail(connector, id, reason, not_open);
+                    }
+                    Ok(Report::Checked { id, open, until }) => {
+                        // An end that is no point in time drops the answer:
+                        // the check runs out, and the connector still decides
+                        // when the engine connects.
+                        let until = until.as_deref().map(utc);
+                        if until.as_ref().is_some_and(Option::is_none) {
+                            tracing::warn!(%connector, "a check's end is no point in time");
+                        } else {
+                            let until = until.flatten();
+                            state.connectors.checked(connector, id, Checked { open, until });
+                        }
+                    }
                     Err(error) => tracing::warn!(%connector, %error, "unknown message from a connector"),
                 },
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
@@ -287,18 +316,7 @@ pub async fn report_state(
     if let Some(refusal) = other_protocol(&headers) {
         return Ok(refusal);
     }
-    let mut reported = body(input)?;
-    // Only a point in time reaches the audit log and the UI, written the
-    // same way whatever the connector sent.
-    reported.until = match reported.until.as_deref() {
-        None => None,
-        Some(text) => Some(
-            OffsetDateTime::parse(text, &Rfc3339)
-                .ok()
-                .and_then(|at| at.to_offset(UtcOffset::UTC).format(&Rfc3339).ok())
-                .ok_or_else(|| Problem::new(ErrorCode::InvalidRequest).param("field", "until"))?,
-        ),
-    };
+    let reported = checked_state(body(input)?)?;
     let before = state.connectors.report(connector, reported.clone());
     if before.is_some_and(|before| before != reported) {
         let name: String = sqlx::query_scalar("SELECT name FROM connectors WHERE id = $1")
@@ -312,19 +330,70 @@ pub async fn report_state(
                     id: None,
                     name: &name,
                 },
-                action: if reported.open {
+                action: if reported.open || reported.partly {
                     Action::ConnectorOpened
                 } else {
                     Action::ConnectorClosed
                 },
                 object: Some(("connector", connector)),
-                details: json!({ "name": name, "until": reported.until }),
+                details: json!({
+                    "name": name,
+                    "until": reported.until,
+                    "groups": reported.groups.iter()
+                        .map(|g| json!({ "name": g.name, "until": g.until }))
+                        .collect::<Vec<_>>(),
+                    "devices": reported.devices.iter()
+                        .map(|d| json!({ "name": d.name, "until": d.until }))
+                        .collect::<Vec<_>>(),
+                }),
                 address: None,
             },
         )
         .await?;
     }
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Longest name, address or port list a report may carry.
+const MAX_TEXT: usize = 200;
+
+/// A report as remotehub keeps it: the connector is on the customer's side,
+/// so its lists are bounded and plain text, and every end is a point in
+/// time, written the same way whatever the connector sent.
+fn checked_state(mut reported: protocol::State) -> Result<protocol::State, Problem> {
+    let invalid = |field: &str| Problem::new(ErrorCode::InvalidRequest).param("field", field);
+    let point = |until: &mut Option<String>, field: &str| -> Result<(), Problem> {
+        if let Some(text) = until.as_deref() {
+            *until = Some(utc(text).ok_or_else(|| invalid(field))?);
+        }
+        Ok(())
+    };
+    let plain = |text: &str| {
+        !text.is_empty() && text.chars().count() <= MAX_TEXT && !text.chars().any(char::is_control)
+    };
+    point(&mut reported.until, "until")?;
+    if reported.groups.len() > protocol::MAX_LISTED {
+        return Err(invalid("groups"));
+    }
+    for group in &mut reported.groups {
+        if !plain(&group.name) {
+            return Err(invalid("groups"));
+        }
+        point(&mut group.until, "groups")?;
+    }
+    if reported.devices.len() > protocol::MAX_LISTED {
+        return Err(invalid("devices"));
+    }
+    for device in &mut reported.devices {
+        if ![&device.name, &device.address, &device.ports]
+            .iter()
+            .all(|text| plain(text))
+        {
+            return Err(invalid("devices"));
+        }
+        point(&mut device.until, "devices")?;
+    }
+    Ok(reported)
 }
 
 pub async fn stream(

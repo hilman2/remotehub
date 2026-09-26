@@ -99,6 +99,66 @@ h2 {
 	color: var(--closed);
 }
 
+/* Some devices open, the network closed (#180). */
+.state.partly {
+	color: var(--accent);
+}
+
+.row-state {
+	display: inline-flex;
+	gap: 0.35rem;
+	align-items: center;
+	white-space: nowrap;
+}
+
+.row-state .icon {
+	width: 1rem;
+	height: 1rem;
+}
+
+.row-state.open {
+	color: var(--open);
+}
+
+.row-state.closed {
+	color: var(--closed);
+}
+
+.row-actions,
+.add {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem;
+	align-items: center;
+}
+
+.row-actions form {
+	display: flex;
+	gap: 0.4rem;
+	align-items: center;
+}
+
+.add {
+	margin-top: 0.9rem;
+	align-items: flex-end;
+}
+
+.check {
+	display: inline-flex;
+	gap: 0.3rem;
+	align-items: center;
+	font-size: 0.9rem;
+}
+
+select {
+	font: inherit;
+	color: inherit;
+	background: var(--bg);
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	padding: 0.35rem 0.5rem;
+}
+
 .icon {
 	width: 1.5rem;
 	height: 1.5rem;

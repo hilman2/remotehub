@@ -6,12 +6,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use remotehub_connector::access::{Access, Changer, Gate};
+use remotehub_connector::access::{Access, Changer, Gate, Scope};
 use remotehub_connector::agent::{self, AgentSettings, Site};
+use remotehub_connector::inventory::{Device, Ports};
 use remotehub_connector::journal::{Event, Journal};
 use remotehub_connector::protocol;
 use remotehub_server::AppState;
-use remotehub_server::connectors::{Forward, Requester, STREAM_TIMEOUT};
+use remotehub_server::connectors::{Checked, ConnectorError, Forward, Requester, STREAM_TIMEOUT};
 use secrecy::SecretString;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -73,8 +74,14 @@ pub fn start_connector(
     };
     let dir = tempfile::tempdir().unwrap();
     let journal = Arc::new(Journal::new(dir.path()));
-    remotehub_connector::access::change(dir.path(), &journal, access, Changer::CommandLine)
-        .unwrap();
+    remotehub_connector::access::change(
+        dir.path(),
+        &journal,
+        Scope::Network,
+        access,
+        Changer::CommandLine,
+    )
+    .unwrap();
     let site = Site {
         gate: Gate::new(dir.path(), journal.clone()).unwrap(),
         journal,
@@ -203,7 +210,8 @@ async fn administrators_manage_connectors_and_devices_name_them(pool: PgPool) {
     assert_eq!(
         listed,
         json!([{ "id": id, "name": "Hamburg office", "online": false, "streams": 0,
-                 "streams_carried": 0, "access": null, "open_until": null, "last_seen_at": null }])
+                 "streams_carried": 0, "access": null, "open_until": null, "open_groups": [],
+                 "open_devices": [], "last_seen_at": null }])
     );
     let refused = send(
         &app,
@@ -483,7 +491,11 @@ async fn the_customer_opens_and_closes_access(pool: PgPool) {
     agent
         .site
         .gate
-        .set(Access::Open { until: Some(until) }, carol.clone())
+        .set(
+            Scope::Network,
+            Access::Open { until: Some(until) },
+            carol.clone(),
+        )
         .unwrap();
     wait_for(
         || state.connectors.is_online(id),
@@ -502,7 +514,11 @@ async fn the_customer_opens_and_closes_access(pool: PgPool) {
     .unwrap();
     assert_eq!(reported.unix_timestamp(), until.unix_timestamp());
 
-    agent.site.gate.set(Access::Closed, carol).unwrap();
+    agent
+        .site
+        .gate
+        .set(Scope::Network, Access::Closed, carol)
+        .unwrap();
     wait_for(|| !state.connectors.is_online(id), "the connector to go").await;
     wait_for(
         || reported_open(&state, id) == Some(false),
@@ -562,6 +578,7 @@ async fn closing_ends_running_connections(pool: PgPool) {
         .site
         .gate
         .set(
+            Scope::Network,
             Access::Closed,
             Changer::Web {
                 user: "carol".into(),
@@ -597,7 +614,11 @@ async fn closing_ends_running_connections(pool: PgPool) {
     agent
         .site
         .gate
-        .set(Access::Open { until: Some(until) }, Changer::CommandLine)
+        .set(
+            Scope::Network,
+            Access::Open { until: Some(until) },
+            Changer::CommandLine,
+        )
         .unwrap();
     wait_for(
         || state.connectors.is_online(id),
@@ -614,14 +635,10 @@ async fn closing_ends_running_connections(pool: PgPool) {
         "a closed report",
     )
     .await;
-    assert!(
-        agent
-            .site
-            .journal
-            .recent(10)
-            .iter()
-            .any(|e| e.event == Event::Expired)
-    );
+    assert!(agent.site.journal.recent(10).iter().any(|e| e.event
+        == Event::Expired {
+            scope: Scope::Network
+        }));
 }
 
 /// The command line changes the file; the running connector follows.
@@ -639,6 +656,7 @@ async fn the_command_line_opens_a_running_connector(pool: PgPool) {
     remotehub_connector::access::change(
         agent.dir.path(),
         &Journal::new(agent.dir.path()),
+        Scope::Network,
         Access::Open { until: None },
         Changer::CommandLine,
     )
@@ -648,6 +666,138 @@ async fn the_command_line_opens_a_running_connector(pool: PgPool) {
         "the connector to come online",
     )
     .await;
+}
+
+/// With only one device open (#180), the connector stays online, remotehub
+/// asks it about each target, and a stream to another device is refused as
+/// not open rather than as unreachable.
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn one_open_device_lets_only_itself_through(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let (id, secret) = new_connector(&app, &token, "lab").await;
+    let address = serve(state.clone()).await;
+    let router = echo().await;
+    let other = echo().await;
+    let agent = start_connector(address, &secret, "", Access::Closed);
+    let port = router.rsplit(':').next().unwrap();
+    remotehub_connector::access::add_device(
+        agent.dir.path(),
+        &agent.site.journal,
+        Device {
+            name: "router".into(),
+            address: "127.0.0.1".parse().unwrap(),
+            ports: Ports::parse_list(port).unwrap(),
+            groups: Vec::new(),
+        },
+        Changer::CommandLine,
+    )
+    .unwrap();
+    let until = (time::OffsetDateTime::now_utc() + Duration::from_secs(7200))
+        .replace_nanosecond(0)
+        .unwrap();
+    let until_text = until
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap();
+    agent
+        .site
+        .gate
+        .set(
+            Scope::Device {
+                name: "router".into(),
+            },
+            Access::Open { until: Some(until) },
+            Changer::CommandLine,
+        )
+        .unwrap();
+    wait_for(
+        || state.connectors.is_online(id),
+        "the connector to come online",
+    )
+    .await;
+    wait_for(
+        || {
+            state
+                .connectors
+                .access(id)
+                .is_some_and(|a| a.partly && !a.open)
+        },
+        "a partly report",
+    )
+    .await;
+    // remotehub learns what the customer opened, and until when.
+    let listed = send(&app, get("/api/connectors", Some(&token)))
+        .await
+        .json();
+    assert_eq!(listed[0]["access"], "partly");
+    assert_eq!(
+        listed[0]["open_devices"],
+        json!([{ "name": "router", "address": "127.0.0.1", "ports": port,
+                 "until": until_text }])
+    );
+    // The customer's addresses are for administrators only.
+    let bob = send(&app, sign_in_request("bob", "right"))
+        .await
+        .session_token()
+        .unwrap();
+    let seen_by_bob = send(&app, get("/api/connectors", Some(&bob))).await.json();
+    assert_eq!(seen_by_bob[0]["access"], "partly");
+    assert_eq!(seen_by_bob[0]["open_devices"], json!([]));
+
+    let timeout = Duration::from_secs(5);
+    let checked = state.connectors.check(id, &router, timeout).await.unwrap();
+    assert_eq!(
+        checked,
+        Checked {
+            open: true,
+            until: Some(until_text.clone()),
+        }
+    );
+    assert!(
+        !state
+            .connectors
+            .check(id, &other, timeout)
+            .await
+            .unwrap()
+            .open
+    );
+
+    // The device's page asks the same.
+    let device = |name: &str, target: &str| {
+        let (host, port) = target.rsplit_once(':').unwrap();
+        json!({ "folder_id": folder, "name": name, "protocol": "ssh", "host": host,
+                "port": port.parse::<u16>().unwrap(), "auth_mode": "ask", "credential_id": null,
+                "connector_mode": "connector", "connector_id": id })
+    };
+    for (name, target, expected) in [
+        (
+            "router",
+            &router,
+            json!({ "state": "open", "until": until_text }),
+        ),
+        ("other", &other, json!({ "state": "closed", "until": null })),
+    ] {
+        let device = create(&app, &token, "/api/devices", device(name, target)).await;
+        let path = format!("/api/devices/{device}/connector-access");
+        let answer = send(&app, get(&path, Some(&token))).await;
+        assert_eq!(answer.status, 200, "{name}");
+        assert_eq!(answer.json(), expected, "{name}");
+    }
+    assert!(
+        state
+            .connectors
+            .stream(id, &router, None, STREAM_TIMEOUT)
+            .await
+            .is_ok()
+    );
+    let refused = state
+        .connectors
+        .stream(id, &other, None, STREAM_TIMEOUT)
+        .await
+        .err();
+    assert!(
+        matches!(refused, Some(ConnectorError::NotOpen)),
+        "{refused:?}"
+    );
 }
 
 /// A report reaches the audit log and the UI only as a point in time.
@@ -674,6 +824,74 @@ async fn a_report_holds_a_point_in_time_or_none(pool: PgPool) {
     assert_eq!(taken.status, 204);
     assert_eq!(
         state.connectors.access(id).unwrap().until.as_deref(),
+        Some("2026-10-01T16:00:00Z")
+    );
+}
+
+/// The customer's lists in a report are bounded plain text with points in
+/// time (#180); anything else is refused whole.
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn a_report_lists_plain_names_and_points_in_time(pool: PgPool) {
+    let (state, app, token, _folder) = setup(pool).await;
+    let (id, secret) = new_connector(&app, &token, "lab").await;
+    let report = |lists: Value| {
+        let mut body = json!({ "open": false, "until": null, "partly": true });
+        body.as_object_mut()
+            .unwrap()
+            .extend(lists.as_object().unwrap().clone());
+        axum::http::Request::post("/api/connectors/state")
+            .header("authorization", format!("Bearer {secret}"))
+            .header(protocol::HEADER, protocol::VERSION)
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap()
+    };
+    let device = |name: &str, until: Value| json!({ "name": name, "address": "10.0.0.1", "ports": "22", "until": until });
+    let many: Vec<Value> = (0..=protocol::MAX_LISTED)
+        .map(|n| json!({ "name": format!("g{n}"), "until": null }))
+        .collect();
+    for (lists, field) in [
+        (
+            json!({ "devices": [device("sql\u{1b}[2J", json!(null))] }),
+            "devices",
+        ),
+        (
+            json!({ "devices": [device(&"x".repeat(201), json!(null))] }),
+            "devices",
+        ),
+        (json!({ "devices": [device("", json!(null))] }), "devices"),
+        (
+            json!({ "devices": [device("sql", json!("tomorrow"))] }),
+            "devices",
+        ),
+        (json!({ "groups": many }), "groups"),
+        (
+            json!({ "groups": [{ "name": "ERP", "until": "later" }] }),
+            "groups",
+        ),
+    ] {
+        let refused = send(&app, report(lists.clone())).await;
+        assert_eq!(refused.status, 400, "{lists}");
+        assert_eq!(refused.json()["params"]["field"], field, "{lists}");
+    }
+    assert!(state.connectors.access(id).is_none());
+
+    let taken = send(
+        &app,
+        report(json!({
+            "groups": [{ "name": "ERP", "until": "2026-10-01T18:00:00+02:00" }],
+            "devices": [device("sql", json!("2026-10-01T18:00:00+02:00"))],
+        })),
+    )
+    .await;
+    assert_eq!(taken.status, 204);
+    let access = state.connectors.access(id).unwrap();
+    assert_eq!(
+        access.groups[0].until.as_deref(),
+        Some("2026-10-01T16:00:00Z")
+    );
+    assert_eq!(
+        access.devices[0].until.as_deref(),
         Some("2026-10-01T16:00:00Z")
     );
 }

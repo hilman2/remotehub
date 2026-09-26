@@ -17,6 +17,8 @@ use futures_util::{SinkExt, StreamExt};
 use remotehub_connector::protocol::{self, Control, State};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use time::format_description::well_known::Rfc3339;
+use time::{OffsetDateTime, UtcOffset};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
@@ -35,6 +37,9 @@ pub enum ConnectorError {
     Timeout,
     #[error("the connector could not reach the target: {0}")]
     Refused(String),
+    /// The customer opened other devices, not this one (#180).
+    #[error("the customer has not opened the target")]
+    NotOpen,
 }
 
 /// The SHA-256 a connector's token is stored and looked up by.
@@ -71,6 +76,25 @@ pub struct Connectors {
     /// Whether the customer lets remotehub in (#165), as each connector last
     /// reported it.
     access: Mutex<HashMap<Uuid, (State, Instant)>>,
+    /// Checks asked of connectors whether a target is open (#180), with the
+    /// connector asked.
+    checks: Mutex<HashMap<Uuid, (Uuid, oneshot::Sender<Checked>)>>,
+}
+
+/// A connector's answer whether a target is open (#180).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Checked {
+    pub open: bool,
+    /// RFC 3339 in UTC; none while closed or open without end.
+    pub until: Option<String>,
+}
+
+/// `text` as a point in time in RFC 3339 and UTC, written the same way
+/// whatever a connector sent; none if it is not one.
+pub fn utc(text: &str) -> Option<String> {
+    OffsetDateTime::parse(text, &Rfc3339)
+        .ok()
+        .and_then(|at| at.to_offset(UtcOffset::UTC).format(&Rfc3339).ok())
 }
 
 /// A report older than this counts as none: the connector reports every
@@ -101,7 +125,7 @@ impl Drop for Carrying<'_> {
 
 struct Pending {
     connector: Uuid,
-    reply: oneshot::Sender<Result<WebSocket, String>>,
+    reply: oneshot::Sender<Result<WebSocket, ConnectorError>>,
 }
 
 /// A connector's control socket, as long as it is held. A newer one of the
@@ -250,8 +274,7 @@ impl Connectors {
         let result = match asked {
             Err(_) => Err(ConnectorError::Offline),
             Ok(()) => match tokio::time::timeout(timeout, answer).await {
-                Ok(Ok(Ok(socket))) => Ok(socket),
-                Ok(Ok(Err(reason))) => Err(ConnectorError::Refused(reason)),
+                Ok(Ok(result)) => result,
                 Ok(Err(_)) => Err(ConnectorError::Offline),
                 Err(_) => Err(ConnectorError::Timeout),
             },
@@ -268,7 +291,7 @@ impl Connectors {
         &self,
         connector: Uuid,
         id: Uuid,
-    ) -> Option<oneshot::Sender<Result<WebSocket, String>>> {
+    ) -> Option<oneshot::Sender<Result<WebSocket, ConnectorError>>> {
         let mut pending = self.pending.lock().expect("no panics while locked");
         match pending.get(&id) {
             Some(waiting) if waiting.connector == connector => {
@@ -278,10 +301,70 @@ impl Connectors {
         }
     }
 
-    /// The connector reports that it could not open stream `id`.
-    pub fn fail(&self, connector: Uuid, id: Uuid, reason: String) {
+    /// The connector reports that it could not open stream `id`; `not_open`
+    /// if its customer has not opened the target.
+    pub fn fail(&self, connector: Uuid, id: Uuid, reason: String, not_open: bool) {
         if let Some(reply) = self.claim(connector, id) {
-            let _ = reply.send(Err(reason));
+            let _ = reply.send(Err(if not_open {
+                ConnectorError::NotOpen
+            } else {
+                ConnectorError::Refused(reason)
+            }));
+        }
+    }
+
+    /// Whether the connector's customer lets a connection to `target`
+    /// through now, and until when (#180). Only the connector knows: the
+    /// customer's list names hosts that resolve only in their network.
+    pub async fn check(
+        &self,
+        connector: Uuid,
+        target: &str,
+        timeout: Duration,
+    ) -> Result<Checked, ConnectorError> {
+        let control = self
+            .online
+            .lock()
+            .expect("no panics while locked")
+            .get(&connector)
+            .map(|(_, sender)| sender.clone())
+            .ok_or(ConnectorError::Offline)?;
+        let id = random_id();
+        let (reply, answer) = oneshot::channel();
+        self.checks
+            .lock()
+            .expect("no panics while locked")
+            .insert(id, (connector, reply));
+        let asked = control
+            .send(Control::Check {
+                id,
+                target: target.to_owned(),
+            })
+            .await;
+        let result = match asked {
+            Err(_) => Err(ConnectorError::Offline),
+            Ok(()) => match tokio::time::timeout(timeout, answer).await {
+                Ok(Ok(open)) => Ok(open),
+                Ok(Err(_)) => Err(ConnectorError::Offline),
+                Err(_) => Err(ConnectorError::Timeout),
+            },
+        };
+        self.checks
+            .lock()
+            .expect("no panics while locked")
+            .remove(&id);
+        result
+    }
+
+    /// The connector's answer to check `id`.
+    pub fn checked(&self, connector: Uuid, id: Uuid, answer: Checked) {
+        let mut checks = self.checks.lock().expect("no panics while locked");
+        if checks
+            .get(&id)
+            .is_some_and(|(asked, _)| *asked == connector)
+            && let Some((_, reply)) = checks.remove(&id)
+        {
+            let _ = reply.send(answer);
         }
     }
 }
@@ -472,7 +555,7 @@ mod tests {
         assert_eq!(user.as_deref(), Some("alice"));
         assert_eq!(device.as_deref(), Some("router"));
         assert!(connectors.claim(random_id(), id).is_none());
-        connectors.fail(connector, id, "refused".into());
+        connectors.fail(connector, id, "refused".into(), false);
         assert_eq!(
             waiting.await.unwrap(),
             Some(ConnectorError::Refused("refused".into()))

@@ -75,6 +75,7 @@ error_codes! {
     RetargetForbidden = ("retarget_forbidden", FORBIDDEN, "Devices below use credentials you may not use, and would reach another target"),
     ConnectorOffline = ("connector_offline", BAD_GATEWAY, "The device's connector is not connected"),
     ConnectorClosed = ("connector_closed", CONFLICT, "The customer has closed access through the device's connector"),
+    ConnectorTargetClosed = ("connector_target_closed", CONFLICT, "The customer has opened other devices at the connector, not this one"),
     ConnectorProtocol = ("connector_protocol", UPGRADE_REQUIRED, "The connector speaks another protocol version than remotehub"),
     PurposeRequired = ("purpose_required", BAD_REQUEST, "State the purpose of the connection"),
     AccountsUnavailable = ("accounts_unavailable", SERVICE_UNAVAILABLE, "The service for local accounts is not reachable"),

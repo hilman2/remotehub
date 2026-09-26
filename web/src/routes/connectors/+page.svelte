@@ -33,6 +33,12 @@
 
 	const time = new Intl.DateTimeFormat(formatLocale(), { dateStyle: 'short', timeStyle: 'short' });
 
+	/** A group or device the customer opened, with its end. */
+	const openItem = (item: { name: string; until: string | null }) =>
+		item.until
+			? m.connector_open_item_until({ name: item.name, until: time.format(new Date(item.until)) })
+			: m.connector_open_item({ name: item.name });
+
 	async function load() {
 		const result = await loadConnectors();
 		if (result.ok) connectors = result.data;
@@ -149,6 +155,9 @@
 												until: time.format(new Date(connector.open_until))
 											})
 										: m.connector_access_open()}
+								{:else if connector.access === 'partly'}
+									<LockOpen size={13} class="text-warning" aria-hidden="true" />
+									{m.connector_access_partly()}
 								{:else if connector.access === 'closed'}
 									<Lock size={13} class="text-ink-2" aria-hidden="true" />
 									{m.connector_access_closed()}
@@ -157,6 +166,24 @@
 									<span class="text-ink-2">{m.connector_access_unknown()}</span>
 								{/if}
 							</span>
+							{#if connector.open_groups.length > 0}
+								<p class="mt-1 text-xs text-ink-2">
+									{m.connector_open_groups()}
+									{connector.open_groups.map(openItem).join(', ')}
+								</p>
+							{/if}
+							{#if connector.open_devices.length > 0}
+								<p class="mt-1 text-xs text-ink-2">
+									{m.connector_open_devices()}
+									{#each connector.open_devices as device, index (device.name)}
+										<span title={`${device.address} : ${device.ports}`}
+											>{openItem(device)}{index < connector.open_devices.length - 1
+												? ', '
+												: ''}</span
+										>
+									{/each}
+								</p>
+							{/if}
 						</td>
 						<td class="px-4 py-2 text-ink-2 tabular-nums">
 							{m.connectors_streams({ open: connector.streams, total: connector.streams_carried })}

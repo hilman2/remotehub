@@ -23,8 +23,9 @@ use serde::Deserialize;
 use time::macros::format_description;
 use time::{OffsetDateTime, PrimitiveDateTime, UtcOffset};
 
-use crate::access::{Access, Changer};
+use crate::access::{self, Access, ChangeError, Changer, Scope, Snapshot, Stored};
 use crate::agent::Site;
+use crate::inventory::{self, Device, InventoryError, Ports};
 use crate::journal::{Entry, Event};
 use crate::users::Users;
 
@@ -131,6 +132,10 @@ pub fn router(ui: Arc<Ui>) -> Router {
         .route("/sign-in", get(sign_in_page).post(sign_in))
         .route("/sign-out", post(sign_out))
         .route("/access", post(change_access))
+        .route("/devices", post(add_device))
+        .route("/devices/remove", post(remove_device))
+        .route("/groups", post(add_group))
+        .route("/groups/remove", post(remove_group))
         .route("/app.css", get(stylesheet))
         .route("/app.js", get(script))
         .layer(middleware::from_fn(guard))
@@ -405,9 +410,18 @@ async fn status(State(ui): State<Arc<Ui>>, headers: HeaderMap) -> Response {
 
 #[derive(Deserialize)]
 struct Change {
+    /// `hours`, `until`, `permanent` or `close`; `open` with `duration`.
     action: String,
+    /// `network` (the default), `device` or `group`, named `name` (#180).
+    #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
     #[serde(default)]
     hours: Option<i64>,
+    /// A number of hours, or `permanent`.
+    #[serde(default)]
+    duration: Option<String>,
     /// `datetime-local`: `2026-10-01T18:00`, in the browser's zone.
     #[serde(default)]
     until: Option<String>,
@@ -415,6 +429,12 @@ struct Change {
     /// fills it in. UTC without it.
     #[serde(default)]
     offset: Option<i32>,
+}
+
+fn for_hours(hours: i64, now: OffsetDateTime) -> Option<Access> {
+    (1..=24 * 7).contains(&hours).then(|| Access::Open {
+        until: Some(now + time::Duration::hours(hours)),
+    })
 }
 
 async fn change_access(
@@ -430,12 +450,12 @@ async fn change_access(
     let access = match form.action.as_str() {
         "close" => Some(Access::Closed),
         "permanent" => Some(Access::Open { until: None }),
-        "hours" => form
-            .hours
-            .filter(|hours| (1..=24 * 7).contains(hours))
-            .map(|hours| Access::Open {
-                until: Some(now + time::Duration::hours(hours)),
-            }),
+        "hours" => form.hours.and_then(|hours| for_hours(hours, now)),
+        "open" => match form.duration.as_deref() {
+            Some("permanent") => Some(Access::Open { until: None }),
+            Some(hours) => hours.parse().ok().and_then(|hours| for_hours(hours, now)),
+            None => None,
+        },
         "until" => form
             .until
             .as_deref()
@@ -444,7 +464,14 @@ async fn change_access(
             .map(|until| Access::Open { until: Some(until) }),
         _ => None,
     };
-    let Some(access) = access else {
+    let name = form.name.unwrap_or_default();
+    let scope = match form.scope.as_deref() {
+        None | Some("network") => Some(Scope::Network),
+        Some("device") => Some(Scope::Device { name }),
+        Some("group") => Some(Scope::Group { name }),
+        Some(_) => None,
+    };
+    let (Some(access), Some(scope)) = (access, scope) else {
         let error = t(locale, Message::ConnectorUiInvalidUntil {});
         return (
             StatusCode::BAD_REQUEST,
@@ -452,11 +479,154 @@ async fn change_access(
         )
             .into_response();
     };
-    if let Err(error) = ui.site.gate.set(access, Changer::Web { user }) {
-        tracing::error!(%error, "cannot store the access");
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    let changed = ui
+        .site
+        .gate
+        .set(scope, access, Changer::Web { user: user.clone() });
+    after_change(&ui, locale, &user, changed)
+}
+
+/// Back to the page after a change, or the page with why it failed.
+fn after_change(ui: &Ui, locale: Locale, user: &str, changed: Result<(), ChangeError>) -> Response {
+    match changed {
+        Ok(()) => Redirect::to("/").into_response(),
+        Err(ChangeError::Inventory(error)) => {
+            let text = t(locale, inventory_message(&error));
+            (
+                StatusCode::BAD_REQUEST,
+                status_page(ui, locale, user, Some(text)),
+            )
+                .into_response()
+        }
+        Err(ChangeError::Io(error)) => {
+            tracing::error!(%error, "cannot store the change");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
-    Redirect::to("/").into_response()
+}
+
+fn inventory_message(error: &InventoryError) -> Message {
+    match error {
+        InventoryError::InvalidName => Message::ConnectorUiErrorName {},
+        InventoryError::InvalidAddress(value) => Message::ConnectorUiErrorAddress {
+            value: value.clone(),
+        },
+        InventoryError::InvalidPorts(value) => Message::ConnectorUiErrorPorts {
+            value: value.clone(),
+        },
+        InventoryError::NoPorts => Message::ConnectorUiErrorNoPorts {},
+        InventoryError::Exists(name) => Message::ConnectorUiErrorExists { name: name.clone() },
+        InventoryError::Unknown(name) => Message::ConnectorUiErrorUnknown { name: name.clone() },
+    }
+}
+
+/// Adds a device to the list, from a form with `name`, `address`, `ports`
+/// and `group` once per checked group.
+async fn add_device(
+    State(ui): State<Arc<Ui>>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let Some(user) = ui.user(&headers) else {
+        return Redirect::to("/sign-in").into_response();
+    };
+    let locale = locale(&headers);
+    // Checkboxes repeat a name; serde_urlencoded takes each pair.
+    let pairs: Vec<(String, String)> = serde_urlencoded::from_bytes(&body).unwrap_or_default();
+    let field = |key: &str| {
+        pairs
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
+    };
+    let groups = pairs
+        .iter()
+        .filter(|(k, _)| k == "group")
+        .map(|(_, v)| v.clone())
+        .collect();
+    let device = (|| {
+        Ok::<_, InventoryError>(Device {
+            name: inventory::valid_name(&field("name"))?,
+            address: field("address").parse()?,
+            ports: Ports::parse_list(&field("ports"))?,
+            groups,
+        })
+    })();
+    let changed = device.map_err(ChangeError::from).and_then(|device| {
+        let site = &ui.site;
+        let result = access::add_device(
+            site.gate.dir(),
+            site.gate.journal(),
+            device,
+            Changer::Web { user: user.clone() },
+        );
+        site.gate.reload();
+        result
+    });
+    after_change(&ui, locale, &user, changed)
+}
+
+#[derive(Deserialize)]
+struct Named {
+    name: String,
+}
+
+async fn remove_device(
+    State(ui): State<Arc<Ui>>,
+    headers: HeaderMap,
+    Form(form): Form<Named>,
+) -> Response {
+    let Some(user) = ui.user(&headers) else {
+        return Redirect::to("/sign-in").into_response();
+    };
+    let site = &ui.site;
+    let changed = access::remove_device(
+        site.gate.dir(),
+        site.gate.journal(),
+        &form.name,
+        Changer::Web { user: user.clone() },
+    );
+    site.gate.reload();
+    after_change(&ui, locale(&headers), &user, changed)
+}
+
+async fn add_group(
+    State(ui): State<Arc<Ui>>,
+    headers: HeaderMap,
+    Form(form): Form<Named>,
+) -> Response {
+    let Some(user) = ui.user(&headers) else {
+        return Redirect::to("/sign-in").into_response();
+    };
+    let site = &ui.site;
+    let changed = access::add_group(
+        site.gate.dir(),
+        site.gate.journal(),
+        &form.name,
+        Changer::Web { user: user.clone() },
+    );
+    site.gate.reload();
+    after_change(&ui, locale(&headers), &user, changed)
+}
+
+async fn remove_group(
+    State(ui): State<Arc<Ui>>,
+    headers: HeaderMap,
+    Form(form): Form<Named>,
+) -> Response {
+    let Some(user) = ui.user(&headers) else {
+        return Redirect::to("/sign-in").into_response();
+    };
+    let site = &ui.site;
+    let changed = access::remove_group(
+        site.gate.dir(),
+        site.gate.journal(),
+        &form.name,
+        Changer::Web { user: user.clone() },
+    );
+    site.gate.reload();
+    after_change(&ui, locale(&headers), &user, changed)
 }
 
 /// A `datetime-local` value at `offset` minutes east of UTC.
@@ -471,9 +641,11 @@ fn local_time(text: &str, offset: i32) -> Option<OffsetDateTime> {
 }
 
 fn status_page(ui: &Ui, locale: Locale, user: &str, error: Option<String>) -> Html<String> {
-    let stored = ui.site.gate.current();
+    let snapshot = ui.site.gate.current();
+    let stored = snapshot.access.network.clone();
     let now = OffsetDateTime::now_utc();
     let open = stored.access.is_open(now);
+    let partly = !open && snapshot.any_open(now);
     let state = match stored.access {
         Access::Open { until: Some(until) } if open => rich(
             locale,
@@ -481,6 +653,7 @@ fn status_page(ui: &Ui, locale: Locale, user: &str, error: Option<String>) -> Ht
             &[time_element(until)],
         ),
         Access::Open { until: None } => t(locale, Message::ConnectorUiOpenPermanent {}),
+        _ if partly => t(locale, Message::ConnectorUiPartly {}),
         _ => t(locale, Message::ConnectorUiClosed {}),
     };
     let changed = match (&stored.changed_by, stored.changed_at) {
@@ -503,6 +676,8 @@ fn status_page(ui: &Ui, locale: Locale, user: &str, error: Option<String>) -> Ht
     };
     let (class, icon) = if open {
         ("state open", ICON_OPEN)
+    } else if partly {
+        ("state partly", ICON_OPEN)
     } else {
         ("state closed", ICON_CLOSED)
     };
@@ -534,14 +709,14 @@ fn status_page(ui: &Ui, locale: Locale, user: &str, error: Option<String>) -> Ht
          <form method=\"post\" action=\"/sign-out\" class=\"who\"><span>{signed_in}</span>\
          <button type=\"submit\" class=\"quiet\">{sign_out}</button></form></header>\
          <section class=\"card\"><p class=\"{class}\">{icon}<span>{state}</span></p>{changed}{error}</section>\
-         <section class=\"card\"><h2>{change}</h2><div class=\"actions\">{hours}</div>\
+         <section class=\"card\"><h2>{network}</h2><p class=\"hint\">{network_hint}</p><div class=\"actions\">{hours}</div>\
          <form method=\"post\" action=\"/access\" class=\"until\"><input type=\"hidden\" name=\"action\" value=\"until\">\
          <input type=\"hidden\" name=\"offset\" value=\"0\">\
          <label>{until_field}<input type=\"datetime-local\" name=\"until\" required></label>\
          <button type=\"submit\">{until_button}</button></form>\
          <form method=\"post\" action=\"/access\" class=\"permanent\"><input type=\"hidden\" name=\"action\" value=\"permanent\">\
          <button type=\"submit\">{permanent}</button><span class=\"hint\">{permanent_hint}</span></form>{close}</section>\
-         {connections}{log}",
+         {groups}{devices}{connections}{log}",
         title = t(locale, Message::ConnectorUiTitle {}),
         access_for = t(
             locale,
@@ -556,7 +731,10 @@ fn status_page(ui: &Ui, locale: Locale, user: &str, error: Option<String>) -> Ht
             }
         ),
         sign_out = t(locale, Message::ConnectorUiSignOut {}),
-        change = t(locale, Message::ConnectorUiChange {}),
+        network = t(locale, Message::ConnectorUiNetwork {}),
+        network_hint = t(locale, Message::ConnectorUiNetworkHint {}),
+        groups = groups(&snapshot, locale),
+        devices = devices(&snapshot, locale),
         until_field = t(locale, Message::ConnectorUiUntilField {}),
         until_button = t(locale, Message::ConnectorUiOpenUntilButton {}),
         permanent = t(locale, Message::ConnectorUiOpenPermanentButton {}),
@@ -565,6 +743,196 @@ fn status_page(ui: &Ui, locale: Locale, user: &str, error: Option<String>) -> Ht
         log = log(ui, locale),
     );
     page(locale, &body)
+}
+
+/// A row's access: its own, or for a device through an open group.
+fn row_state(stored: &Stored, via: Option<&str>, locale: Locale) -> (bool, String) {
+    let now = OffsetDateTime::now_utc();
+    match stored.access {
+        Access::Open { until: Some(until) } if until > now => (
+            true,
+            rich(
+                locale,
+                Message::ConnectorUiRowOpenUntil { until: slot(0) },
+                &[time_element(until)],
+            ),
+        ),
+        Access::Open { until: None } => (true, t(locale, Message::ConnectorUiRowOpen {})),
+        _ => match via {
+            Some(group) => (
+                true,
+                t(
+                    locale,
+                    Message::ConnectorUiRowOpenVia {
+                        group: group.to_owned(),
+                    },
+                ),
+            ),
+            None => (false, t(locale, Message::ConnectorUiRowClosed {})),
+        },
+    }
+}
+
+/// The state with its icon, and the forms to open, close and remove a
+/// device or group.
+fn row_cells(
+    kind: &str,
+    name: &str,
+    open: bool,
+    own_open: bool,
+    state: &str,
+    locale: Locale,
+) -> String {
+    let name = escape(name);
+    let icon = if open { ICON_OPEN } else { ICON_CLOSED };
+    let class = if open { "open" } else { "closed" };
+    let durations: String = [1, 4, 8]
+        .into_iter()
+        .map(|hours| {
+            format!(
+                "<option value=\"{hours}\">{}</option>",
+                t(locale, Message::ConnectorUiHours { hours })
+            )
+        })
+        .collect();
+    let scope = format!(
+        "<input type=\"hidden\" name=\"scope\" value=\"{kind}\"><input type=\"hidden\" name=\"name\" value=\"{name}\">"
+    );
+    let close = if own_open {
+        format!(
+            "<form method=\"post\" action=\"/access\">{scope}<input type=\"hidden\" name=\"action\" value=\"close\">\
+             <button type=\"submit\" class=\"danger\">{}</button></form>",
+            t(locale, Message::ConnectorUiCloseRow {})
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "<td><span class=\"row-state {class}\">{icon}<span>{state}</span></span></td><td><div class=\"row-actions\">\
+         <form method=\"post\" action=\"/access\">{scope}<input type=\"hidden\" name=\"action\" value=\"open\">\
+         <select name=\"duration\" aria-label=\"{open_label}\">{durations}<option value=\"permanent\">{without_end}</option></select>\
+         <button type=\"submit\">{open_label}</button></form>{close}\
+         <form method=\"post\" action=\"/{kind}s/remove\"><input type=\"hidden\" name=\"name\" value=\"{name}\">\
+         <button type=\"submit\" class=\"quiet\">{remove}</button></form></div></td>",
+        open_label = t(locale, Message::ConnectorUiOpen {}),
+        without_end = t(locale, Message::ConnectorUiWithoutEnd {}),
+        remove = t(locale, Message::ConnectorUiRemove {}),
+    )
+}
+
+fn groups(snapshot: &Snapshot, locale: Locale) -> String {
+    let list = &snapshot.inventory;
+    let rows = if list.groups.is_empty() {
+        format!(
+            "<p class=\"hint\">{}</p>",
+            t(locale, Message::ConnectorUiNoGroups {})
+        )
+    } else {
+        let rows: String = list
+            .groups
+            .iter()
+            .map(|group| {
+                let stored = snapshot.access.get(&Scope::Group {
+                    name: group.clone(),
+                });
+                let (open, state) = row_state(&stored, None, locale);
+                format!(
+                    "<tr><td>{}</td><td>{}</td>{}</tr>",
+                    escape(group),
+                    list.members(group).count(),
+                    row_cells("group", group, open, open, &state, locale)
+                )
+            })
+            .collect();
+        format!(
+            "<table><thead><tr><th>{}</th><th>{}</th><th>{}</th><th></th></tr></thead><tbody>{rows}</tbody></table>",
+            t(locale, Message::ConnectorUiColName {}),
+            t(locale, Message::ConnectorUiColMembers {}),
+            t(locale, Message::ConnectorUiColAccess {}),
+        )
+    };
+    format!(
+        "<section class=\"card\"><h2>{title}</h2>{rows}\
+         <form method=\"post\" action=\"/groups\" class=\"add\">\
+         <label>{name}<input name=\"name\" required maxlength=\"64\"></label>\
+         <button type=\"submit\">{add}</button></form></section>",
+        title = t(locale, Message::ConnectorUiGroups {}),
+        name = t(locale, Message::ConnectorUiColName {}),
+        add = t(locale, Message::ConnectorUiAddGroup {}),
+    )
+}
+
+fn devices(snapshot: &Snapshot, locale: Locale) -> String {
+    let list = &snapshot.inventory;
+    let now = OffsetDateTime::now_utc();
+    let rows = if list.devices.is_empty() {
+        format!(
+            "<p class=\"hint\">{}</p>",
+            t(locale, Message::ConnectorUiNoDevices {})
+        )
+    } else {
+        let rows: String = list
+            .devices
+            .iter()
+            .map(|device| {
+                let stored = snapshot.access.get(&Scope::Device {
+                    name: device.name.clone(),
+                });
+                let via = device.groups.iter().find(|group| {
+                    snapshot
+                        .access
+                        .get(&Scope::Group {
+                            name: (*group).clone(),
+                        })
+                        .access
+                        .is_open(now)
+                });
+                let own_open = stored.access.is_open(now);
+                let (open, state) = row_state(&stored, via.map(String::as_str), locale);
+                format!(
+                    "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td>{}</tr>",
+                    escape(&device.name),
+                    escape(&device.address.to_string()),
+                    escape(&inventory::ports_text(&device.ports)),
+                    escape(&device.groups.join(", ")),
+                    row_cells("device", &device.name, open, own_open, &state, locale)
+                )
+            })
+            .collect();
+        format!(
+            "<table><thead><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th>{}</th><th></th></tr></thead>\
+             <tbody>{rows}</tbody></table>",
+            t(locale, Message::ConnectorUiColName {}),
+            t(locale, Message::ConnectorUiColAddress {}),
+            t(locale, Message::ConnectorUiColPorts {}),
+            t(locale, Message::ConnectorUiColGroups {}),
+            t(locale, Message::ConnectorUiColAccess {}),
+        )
+    };
+    let group_boxes: String = list
+        .groups
+        .iter()
+        .map(|group| {
+            let group = escape(group);
+            format!("<label class=\"check\"><input type=\"checkbox\" name=\"group\" value=\"{group}\">{group}</label>")
+        })
+        .collect();
+    format!(
+        "<section class=\"card\"><h2>{title}</h2>{rows}\
+         <form method=\"post\" action=\"/devices\" class=\"add\">\
+         <label>{name}<input name=\"name\" required maxlength=\"64\"></label>\
+         <label>{address}<input name=\"address\" required maxlength=\"253\" placeholder=\"10.0.0.5\"></label>\
+         <label>{ports}<input name=\"ports\" required maxlength=\"200\" placeholder=\"22, 3389\"></label>\
+         {group_boxes}<button type=\"submit\">{add}</button></form>\
+         <p class=\"hint\">{address_hint} {ports_hint}</p></section>",
+        title = t(locale, Message::ConnectorUiDevices {}),
+        name = t(locale, Message::ConnectorUiColName {}),
+        address = t(locale, Message::ConnectorUiColAddress {}),
+        ports = t(locale, Message::ConnectorUiColPorts {}),
+        add = t(locale, Message::ConnectorUiAddDevice {}),
+        address_hint = t(locale, Message::ConnectorUiAddressHint {}),
+        ports_hint = t(locale, Message::ConnectorUiPortsHint {}),
+    )
 }
 
 fn connections(ui: &Ui, locale: Locale) -> String {
@@ -653,30 +1021,109 @@ fn labelled(device: Option<&str>, target: &str) -> String {
     }
 }
 
+/// What a journal entry opened or closed, as a phrase in a sentence.
+fn what(locale: Locale, scope: &Scope) -> String {
+    i18n::render(
+        locale,
+        &match scope {
+            Scope::Network => Message::ConnectorLogWhatNetwork {},
+            Scope::Device { name } => Message::ConnectorLogWhatDevice { name: name.clone() },
+            Scope::Group { name } => Message::ConnectorLogWhatGroup { name: name.clone() },
+        },
+    )
+}
+
+/// Who changed the list, as the subject of a sentence.
+fn who(locale: Locale, by: &Changer) -> String {
+    match by {
+        Changer::Web { user } => user.clone(),
+        _ => i18n::render(locale, &Message::ConnectorLogCommandLine {}),
+    }
+}
+
 /// A journal entry in words, as HTML.
 fn describe(locale: Locale, entry: &Entry) -> String {
     let someone = |user: &Option<String>| user.clone().unwrap_or_else(|| "remotehub".to_owned());
     match &entry.event {
-        Event::Opened { by, until } => {
+        Event::Opened { by, until, scope } => {
             let until_element = until.map(time_element);
+            let what = what(locale, scope);
             let message = match (by, until) {
                 (Changer::Web { user }, Some(_)) => Message::ConnectorLogOpenedUntil {
                     who: user.clone(),
+                    what,
                     until: slot(0),
                 },
-                (Changer::Web { user }, None) => {
-                    Message::ConnectorLogOpenedPermanent { who: user.clone() }
-                }
-                (_, Some(_)) => Message::ConnectorLogOpenedUntilCli { until: slot(0) },
-                (_, None) => Message::ConnectorLogOpenedPermanentCli {},
+                (Changer::Web { user }, None) => Message::ConnectorLogOpenedPermanent {
+                    who: user.clone(),
+                    what,
+                },
+                (_, Some(_)) => Message::ConnectorLogOpenedUntilCli {
+                    what,
+                    until: slot(0),
+                },
+                (_, None) => Message::ConnectorLogOpenedPermanentCli { what },
             };
             rich(locale, message, until_element.as_slice())
         }
         Event::Closed {
             by: Changer::Web { user },
-        } => t(locale, Message::ConnectorLogClosed { who: user.clone() }),
-        Event::Closed { .. } => t(locale, Message::ConnectorLogClosedCli {}),
-        Event::Expired => t(locale, Message::ConnectorLogExpired {}),
+            scope,
+        } => t(
+            locale,
+            Message::ConnectorLogClosed {
+                who: user.clone(),
+                what: what(locale, scope),
+            },
+        ),
+        Event::Closed { scope, .. } => t(
+            locale,
+            Message::ConnectorLogClosedCli {
+                what: what(locale, scope),
+            },
+        ),
+        Event::Expired { scope } => t(
+            locale,
+            Message::ConnectorLogExpired {
+                what: what(locale, scope),
+            },
+        ),
+        Event::DeviceAdded {
+            by,
+            name,
+            address,
+            ports,
+            ..
+        } => t(
+            locale,
+            Message::ConnectorLogDeviceAdded {
+                who: who(locale, by),
+                name: name.clone(),
+                address: address.clone(),
+                ports: ports.clone(),
+            },
+        ),
+        Event::DeviceRemoved { by, name } => t(
+            locale,
+            Message::ConnectorLogDeviceRemoved {
+                who: who(locale, by),
+                name: name.clone(),
+            },
+        ),
+        Event::GroupAdded { by, name } => t(
+            locale,
+            Message::ConnectorLogGroupAdded {
+                who: who(locale, by),
+                name: name.clone(),
+            },
+        ),
+        Event::GroupRemoved { by, name } => t(
+            locale,
+            Message::ConnectorLogGroupRemoved {
+                who: who(locale, by),
+                name: name.clone(),
+            },
+        ),
         Event::ConnectionStarted {
             target,
             device,

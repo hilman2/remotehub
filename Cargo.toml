@@ -75,6 +75,9 @@ rcgen = "0.14"
 time = "0.3"
 # The site connector (#165): ends running connections when access closes.
 tokio-util = "0.7.19"
+# Already in the tree through axum: forms with a name that repeats, such as
+# the connector's group checkboxes (#180).
+serde_urlencoded = "0.7.1"
 # The site connector as a Windows service (#166), and its event log.
 windows-service = "0.8.1"
 windows-sys = "0.61.2"

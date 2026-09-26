@@ -14,7 +14,7 @@
 //!   to, separated by commas; all if unset
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -39,10 +39,11 @@ use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::access::{Gate, Stored};
+use crate::access::{Gate, Snapshot, later};
+use crate::inventory::{self, Address};
 use crate::journal::{Event, Journal};
 use crate::network::Network;
-use crate::protocol::{self, Control, Report, State};
+use crate::protocol::{self, Control, OpenDevice, OpenGroup, Report, State};
 use crate::settings::{ConfigError, invalid, read_setting};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -142,6 +143,19 @@ pub struct Running {
     pub sent: Arc<AtomicU64>,
     /// Bytes from the device so far.
     pub received: Arc<AtomicU64>,
+    /// Where it went, for checking it again when the access changes.
+    reached: Reached,
+    /// Ends this connection alone, when its device closes (#180).
+    ends: CancellationToken,
+}
+
+/// Where a connection went: the host as asked, the address it resolved to,
+/// and the port.
+#[derive(Clone)]
+struct Reached {
+    host: String,
+    ip: IpAddr,
+    port: u16,
 }
 
 /// The connections the connector carries now, for the web interface.
@@ -173,8 +187,8 @@ pub async fn run(settings: AgentSettings, site: Site) {
     );
 }
 
-/// Connected to remotehub while the access is open, and not at all while it
-/// is closed.
+/// Connected to remotehub while anything is open, the network or a device,
+/// and not at all while everything is closed.
 async fn supervise(settings: &AgentSettings, site: &Site) {
     let mut access = site.gate.subscribe();
     loop {
@@ -185,17 +199,17 @@ async fn supervise(settings: &AgentSettings, site: &Site) {
         let _ends = ends.clone().drop_guard();
         tokio::select! {
             () = connected(settings, site, &ends) => {}
-            () = until_closed(&mut access) => {}
+            () = while_open(&mut access, site) => {}
         }
         tracing::info!("access closed: disconnected from remotehub");
     }
 }
 
-fn open_now(access: &watch::Receiver<Stored>) -> bool {
-    access.borrow().access.is_open(OffsetDateTime::now_utc())
+fn open_now(access: &watch::Receiver<Snapshot>) -> bool {
+    access.borrow().any_open(OffsetDateTime::now_utc())
 }
 
-async fn until_open(access: &mut watch::Receiver<Stored>) {
+async fn until_open(access: &mut watch::Receiver<Snapshot>) {
     while !open_now(access) {
         if access.changed().await.is_err() {
             std::future::pending::<()>().await;
@@ -203,14 +217,26 @@ async fn until_open(access: &mut watch::Receiver<Stored>) {
     }
 }
 
-/// Returns when the access closes: by a change, or when its time runs out.
-async fn until_closed(access: &mut watch::Receiver<Stored>) {
+/// Returns when nothing is open any more. Before, on every change and every
+/// time something runs out, ends the connections the access no longer lets
+/// through: a device can close while the network stays closed and another
+/// device stays open.
+async fn while_open(access: &mut watch::Receiver<Snapshot>, site: &Site) {
     loop {
-        let closes_at = access.borrow_and_update().access.closes_at();
-        if !open_now(access) {
+        let snapshot = access.borrow_and_update().clone();
+        let now = OffsetDateTime::now_utc();
+        if !snapshot.any_open(now) {
             return;
         }
-        let remaining = closes_at
+        for running in site.connections.list() {
+            let Reached { host, ip, port } = &running.reached;
+            if !permitted(&snapshot, host, *ip, *port).await {
+                tracing::info!(target = %running.target, "no longer open: disconnecting");
+                running.ends.cancel();
+            }
+        }
+        let remaining = snapshot
+            .next_end(now)
             .map(|at| Duration::try_from(at - OffsetDateTime::now_utc()).unwrap_or(Duration::ZERO));
         tokio::select! {
             changed = access.changed() => {
@@ -220,6 +246,47 @@ async fn until_closed(access: &mut watch::Receiver<Stored>) {
             }
             () = sleep_or_forever(remaining) => {}
         }
+    }
+}
+
+/// Whether the access lets a connection to `host`, resolved to `ip`, on
+/// `port` through: the whole network is open, or an open device covers the
+/// address and the port. A device's host name is resolved here, in the
+/// customer's network.
+async fn permitted(snapshot: &Snapshot, host: &str, ip: IpAddr, port: u16) -> bool {
+    open_until(snapshot, host, ip, port).await.is_some()
+}
+
+/// Until when the access lets such a connection through: the latest end of
+/// the network and the devices that cover it, `Some(None)` without end, none
+/// if it does not.
+async fn open_until(
+    snapshot: &Snapshot,
+    host: &str,
+    ip: IpAddr,
+    port: u16,
+) -> Option<Option<OffsetDateTime>> {
+    let now = OffsetDateTime::now_utc();
+    let mut until = snapshot.network_until(now);
+    for device in snapshot.open_devices(now) {
+        if !device.ports.iter().any(|ports| ports.contains(port)) {
+            continue;
+        }
+        let resolved = match &device.address {
+            Address::Host(name) => resolve(name).await,
+            Address::Range(_) => Vec::new(),
+        };
+        if device.address.covers(host, ip, &resolved) {
+            until = later(until, snapshot.device_until(device, now));
+        }
+    }
+    until
+}
+
+async fn resolve(name: &str) -> Vec<IpAddr> {
+    match tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::lookup_host((name, 0))).await {
+        Ok(Ok(addresses)) => addresses.map(|a| a.ip()).collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -273,6 +340,21 @@ async fn control(
                             ends.child_token(),
                         ));
                     }
+                    Ok(Control::Check { id, target }) => {
+                        let (allow, gate, reports) =
+                            (settings.allow.clone(), site.gate.clone(), reports.clone());
+                        tokio::spawn(async move {
+                            let checked = match resolve_target(&allow, &gate.current(), &target).await {
+                                Ok(resolved) => Report::Checked {
+                                    id,
+                                    open: true,
+                                    until: resolved.until.and_then(|at| at.format(&Rfc3339).ok()),
+                                },
+                                Err(_) => Report::Checked { id, open: false, until: None },
+                            };
+                            let _ = reports.send(checked).await;
+                        });
+                    }
                     Err(error) => tracing::warn!(%error, "unknown message from remotehub"),
                 },
                 Some(Ok(Message::Close(_))) | None => return Ok(()),
@@ -315,9 +397,9 @@ async fn stream(
         device,
     } = request;
     let name = device.as_deref().unwrap_or_default();
-    let connection = match reach(&settings.allow, &target).await {
-        Ok(connection) => connection,
-        Err(reason) => {
+    let (connection, reached) = match reach(&settings.allow, &site.gate.current(), &target).await {
+        Ok(reached) => reached,
+        Err(Refusal { reason, not_open }) => {
             tracing::warn!(device = name, %target, reason, "cannot reach the target");
             site.journal.append(Event::ConnectionRefused {
                 target: target.clone(),
@@ -325,7 +407,13 @@ async fn stream(
                 user,
                 reason: reason.clone(),
             });
-            let _ = reports.send(Report::Failed { id, reason }).await;
+            let _ = reports
+                .send(Report::Failed {
+                    id,
+                    reason,
+                    not_open,
+                })
+                .await;
             return;
         }
     };
@@ -343,6 +431,8 @@ async fn stream(
         since: OffsetDateTime::now_utc(),
         sent: Arc::default(),
         received: Arc::default(),
+        reached,
+        ends: ends.clone(),
     };
     site.connections
         .0
@@ -377,8 +467,44 @@ async fn stream(
     });
 }
 
-/// A TCP connection to `target` (`host:port`), to an address `allow` covers.
-async fn reach(allow: &[Network], target: &str) -> Result<TcpStream, String> {
+/// Why the connector does not connect; `not_open` if the customer has not
+/// opened the target.
+struct Refusal {
+    reason: String,
+    not_open: bool,
+}
+
+impl From<String> for Refusal {
+    fn from(reason: String) -> Self {
+        Refusal {
+            reason,
+            not_open: false,
+        }
+    }
+}
+
+/// Where the access lets a connection to a target through.
+struct Resolved {
+    host: String,
+    port: u16,
+    /// What the target resolves to, `allow` covers and the access lets
+    /// through.
+    addresses: Vec<SocketAddr>,
+    /// The latest end of the access to them; none without end.
+    until: Option<OffsetDateTime>,
+}
+
+/// The addresses `target` (`host:port`) resolves to that `allow` covers and
+/// the access lets through, with the host and port as asked.
+async fn resolve_target(
+    allow: &[Network],
+    access: &Snapshot,
+    target: &str,
+) -> Result<Resolved, Refusal> {
+    let (host, port) = target
+        .rsplit_once(':')
+        .and_then(|(host, port)| Some((host.trim_matches(['[', ']']), port.parse().ok()?)))
+        .ok_or_else(|| format!("not host:port: {target}"))?;
     let addresses: Vec<SocketAddr> =
         tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::lookup_host(target))
             .await
@@ -390,12 +516,49 @@ async fn reach(allow: &[Network], target: &str) -> Result<TcpStream, String> {
         .filter(|address| allow.is_empty() || allow.iter().any(|n| n.contains(address.ip())))
         .collect();
     if allowed.is_empty() {
-        return Err("not allowed".to_owned());
+        return Err("not allowed".to_owned().into());
     }
-    tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(&allowed[..]))
+    let mut open = Vec::new();
+    let mut until = None;
+    for address in allowed {
+        if let Some(end) = open_until(access, host, address.ip(), port).await {
+            open.push(address);
+            until = later(until, Some(end));
+        }
+    }
+    match until {
+        Some(until) => Ok(Resolved {
+            host: host.to_owned(),
+            port,
+            addresses: open,
+            until,
+        }),
+        None => Err(Refusal {
+            reason: "not opened".to_owned(),
+            not_open: true,
+        }),
+    }
+}
+
+/// A TCP connection to `target` (`host:port`), to an address `allow` covers
+/// and `access` lets through.
+async fn reach(
+    allow: &[Network],
+    access: &Snapshot,
+    target: &str,
+) -> Result<(TcpStream, Reached), Refusal> {
+    let Resolved {
+        host,
+        port,
+        addresses,
+        ..
+    } = resolve_target(allow, access, target).await?;
+    let connection = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(&addresses[..]))
         .await
         .map_err(|_| "timed out".to_owned())?
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    let ip = connection.peer_addr().map_err(|e| e.to_string())?.ip();
+    Ok((connection, Reached { host, ip, port }))
 }
 
 trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
@@ -484,15 +647,7 @@ fn refusal(status: StatusCode, theirs: Option<&HeaderValue>) -> String {
 async fn report(settings: &AgentSettings, gate: &Gate) {
     let mut access = gate.subscribe();
     loop {
-        let stored = access.borrow_and_update().access;
-        let open = stored.is_open(OffsetDateTime::now_utc());
-        let state = State {
-            open,
-            until: stored
-                .closes_at()
-                .filter(|_| open)
-                .and_then(|at| at.format(&Rfc3339).ok()),
-        };
+        let state = state(&access.borrow_and_update(), OffsetDateTime::now_utc());
         if let Err(error) = post_state(settings, &state).await {
             tracing::warn!(%error, "cannot report the access to remotehub");
         }
@@ -504,6 +659,39 @@ async fn report(settings: &AgentSettings, gate: &Gate) {
             }
             () = tokio::time::sleep(protocol::STATE_EVERY) => {}
         }
+    }
+}
+
+/// What the connector reports about `snapshot` at `now`: the whole network,
+/// and the open groups and devices of the list, at most
+/// [`protocol::MAX_LISTED`] of each.
+fn state(snapshot: &Snapshot, now: OffsetDateTime) -> State {
+    let text = |at: Option<OffsetDateTime>| at.and_then(|at| at.format(&Rfc3339).ok());
+    let open = snapshot.network_open(now);
+    State {
+        open,
+        until: snapshot.network_until(now).and_then(text),
+        partly: !open && snapshot.any_open(now),
+        groups: snapshot
+            .open_groups(now)
+            .into_iter()
+            .take(protocol::MAX_LISTED)
+            .map(|(name, until)| OpenGroup {
+                name: name.to_owned(),
+                until: text(until),
+            })
+            .collect(),
+        devices: snapshot
+            .open_devices(now)
+            .into_iter()
+            .take(protocol::MAX_LISTED)
+            .map(|device| OpenDevice {
+                name: device.name.clone(),
+                address: device.address.to_string(),
+                ports: inventory::ports_text(&device.ports),
+                until: text(snapshot.device_until(device, now).flatten()),
+            })
+            .collect(),
     }
 }
 
@@ -588,24 +776,141 @@ async fn carry(device: TcpStream, socket: WebSocketStream<Box<dyn Io>>, running:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::access::{Access, AccessFile, Stored};
+    use crate::inventory::{Device, Ports};
 
     #[tokio::test]
     async fn only_allowed_addresses_are_reached() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let target = listener.local_addr().unwrap().to_string();
-        assert!(reach(&[], &target).await.is_ok());
+        let open = Snapshot {
+            access: AccessFile {
+                network: Stored {
+                    access: Access::Open { until: None },
+                    ..Stored::default()
+                },
+                ..AccessFile::default()
+            },
+            ..Snapshot::default()
+        };
+        let refused = |result: Result<_, Refusal>| result.err().map(|r| r.reason);
+        assert!(reach(&[], &open, &target).await.is_ok());
         assert!(
-            reach(&["127.0.0.0/8".parse().unwrap()], &target)
+            reach(&["127.0.0.0/8".parse().unwrap()], &open, &target)
                 .await
                 .is_ok()
         );
         assert_eq!(
-            reach(&["10.0.0.0/8".parse().unwrap()], &target)
-                .await
-                .err()
-                .as_deref(),
+            refused(reach(&["10.0.0.0/8".parse().unwrap()], &open, &target).await).as_deref(),
             Some("not allowed")
         );
+    }
+
+    /// With the network closed, only a port of an open device goes through,
+    /// whether the device is open itself or through its group (#180).
+    #[tokio::test]
+    async fn a_closed_network_lets_through_only_open_devices() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let target = format!("127.0.0.1:{port}");
+        let device = |name: &str, address: &str, ports: &str, groups: &[&str]| Device {
+            name: name.into(),
+            address: address.parse().unwrap(),
+            ports: Ports::parse_list(ports).unwrap(),
+            groups: groups.iter().map(|g| (*g).to_owned()).collect(),
+        };
+        let open = Stored {
+            access: Access::Open { until: None },
+            ..Stored::default()
+        };
+        let mut snapshot = Snapshot::default();
+        snapshot.inventory.groups = vec!["ERP".into()];
+        snapshot.inventory.devices = vec![
+            device("sql", "127.0.0.1", &port.to_string(), &["ERP"]),
+            device("other port", "127.0.0.1", "1", &[]),
+            device("other host", "10.0.0.1", &port.to_string(), &[]),
+        ];
+        let not_open = |result: Result<_, Refusal>| result.err().is_some_and(|r| r.not_open);
+
+        assert!(not_open(reach(&[], &snapshot, &target).await));
+        snapshot
+            .access
+            .devices
+            .insert("other port".into(), open.clone());
+        snapshot
+            .access
+            .devices
+            .insert("other host".into(), open.clone());
+        assert!(not_open(reach(&[], &snapshot, &target).await));
+        snapshot.access.groups.insert("ERP".into(), open.clone());
+        assert!(reach(&[], &snapshot, &target).await.is_ok());
+        snapshot.access.groups.clear();
+        snapshot.access.devices.insert("sql".into(), open);
+        assert!(reach(&[], &snapshot, &target).await.is_ok());
+        // The outer limit still holds.
+        assert!(!not_open(
+            reach(&["10.0.0.0/8".parse().unwrap()], &snapshot, &target).await
+        ));
+    }
+
+    /// The report and the answer to a check name the latest end of what
+    /// opens a device: the device itself or one of its groups.
+    #[tokio::test]
+    async fn a_device_is_open_until_the_latest_end() {
+        let now = OffsetDateTime::now_utc().replace_nanosecond(0).unwrap();
+        let until = |hours: i64| Stored {
+            access: Access::Open {
+                until: Some(now + time::Duration::hours(hours)),
+            },
+            ..Stored::default()
+        };
+        let mut snapshot = Snapshot::default();
+        snapshot.inventory.groups = vec!["ERP".into(), "closed".into()];
+        snapshot.inventory.devices = vec![Device {
+            name: "sql".into(),
+            address: "127.0.0.1".parse().unwrap(),
+            ports: Ports::parse_list("1433").unwrap(),
+            groups: vec!["ERP".into(), "closed".into()],
+        }];
+        snapshot.access.devices.insert("sql".into(), until(1));
+        snapshot.access.groups.insert("ERP".into(), until(3));
+        let three = (now + time::Duration::hours(3)).format(&Rfc3339).unwrap();
+
+        let reported = state(&snapshot, now);
+        assert!(!reported.open && reported.partly);
+        assert_eq!(
+            reported.groups,
+            vec![OpenGroup {
+                name: "ERP".into(),
+                until: Some(three.clone()),
+            }]
+        );
+        assert_eq!(
+            reported.devices,
+            vec![OpenDevice {
+                name: "sql".into(),
+                address: "127.0.0.1".into(),
+                ports: "1433".into(),
+                until: Some(three.clone()),
+            }]
+        );
+        let resolved = resolve_target(&[], &snapshot, "127.0.0.1:1433").await;
+        assert_eq!(
+            resolved.ok().and_then(|r| r.until),
+            Some(now + time::Duration::hours(3))
+        );
+
+        // Without end wins over any point in time.
+        snapshot.access.devices.insert(
+            "sql".into(),
+            Stored {
+                access: Access::Open { until: None },
+                ..Stored::default()
+            },
+        );
+        assert_eq!(state(&snapshot, now).devices[0].until, None);
+        let resolved = resolve_target(&[], &snapshot, "127.0.0.1:1433").await;
+        assert!(resolved.is_ok_and(|r| r.until.is_none()));
     }
 
     #[test]

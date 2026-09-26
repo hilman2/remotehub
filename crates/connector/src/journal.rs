@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::access::Changer;
+use crate::access::{Changer, Scope};
 
 /// `access.log` moves to `access.log.1` beyond this size, replacing the
 /// previous one.
@@ -23,16 +23,44 @@ const ROTATE_AT: u64 = 10 * 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
+    /// The network, a device or a group opened (#180).
     Opened {
         by: Changer,
         #[serde(with = "time::serde::rfc3339::option")]
         until: Option<OffsetDateTime>,
+        #[serde(default)]
+        scope: Scope,
     },
     Closed {
         by: Changer,
+        #[serde(default)]
+        scope: Scope,
     },
-    /// The access closed when its time ran out.
-    Expired,
+    /// It closed when its time ran out.
+    Expired {
+        #[serde(default)]
+        scope: Scope,
+    },
+    /// The customer's list changed (#180).
+    DeviceAdded {
+        by: Changer,
+        name: String,
+        address: String,
+        ports: String,
+        groups: Vec<String>,
+    },
+    DeviceRemoved {
+        by: Changer,
+        name: String,
+    },
+    GroupAdded {
+        by: Changer,
+        name: String,
+    },
+    GroupRemoved {
+        by: Changer,
+        name: String,
+    },
     /// `device` is the device's name in remotehub and `user` the remotehub
     /// user, both as remotehub reports them; the connector cannot check
     /// them. `target` is what it connected to.
@@ -152,7 +180,9 @@ mod tests {
         let journal = Journal::new(dir.path());
         assert!(journal.recent(5).is_empty());
         journal.append(Event::Locked { user: "a".into() });
-        journal.append(Event::Expired);
+        journal.append(Event::Expired {
+            scope: Scope::Network,
+        });
         std::fs::OpenOptions::new()
             .append(true)
             .open(dir.path().join("access.log"))
@@ -160,7 +190,31 @@ mod tests {
             .write_all(b"not json\n")
             .unwrap();
         let events: Vec<Event> = journal.recent(5).into_iter().map(|e| e.event).collect();
-        assert_eq!(events, [Event::Expired, Event::Locked { user: "a".into() }]);
+        assert_eq!(
+            events,
+            [
+                Event::Expired {
+                    scope: Scope::Network
+                },
+                Event::Locked { user: "a".into() }
+            ]
+        );
         assert_eq!(journal.recent(1).len(), 1);
+    }
+
+    /// Lines written before #180 name no scope: they meant the network.
+    #[test]
+    fn older_lines_mean_the_network() {
+        let old: Entry = serde_json::from_str(
+            r#"{"at":"2026-09-26T10:00:00Z","event":"closed","by":{"via":"command_line"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            old.event,
+            Event::Closed {
+                by: Changer::CommandLine,
+                scope: Scope::Network
+            }
+        );
     }
 }

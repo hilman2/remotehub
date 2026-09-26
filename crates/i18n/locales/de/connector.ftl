@@ -20,7 +20,6 @@ connector-ui-open-permanent = Offen ohne Ende. remotehub erreicht die Geräte, d
 connector-ui-changed-by = Zuletzt geändert von { $who } am { $at }.
 connector-ui-changed-cli = Zuletzt auf der Kommandozeile geändert am { $at }.
 connector-ui-changed-expiry = Geschlossen am { $at }, als die Zeit abgelaufen war.
-connector-ui-change = Zugang ändern
 connector-ui-open-for = { $hours ->
     [one] 1 Stunde öffnen
    *[other] { $hours } Stunden öffnen
@@ -45,13 +44,57 @@ connector-ui-no-log = Noch nichts protokolliert.
 connector-ui-col-time = Zeit
 connector-ui-col-event = Ereignis
 
-connector-log-opened-until = { $who } hat den Zugang bis { $until } geöffnet.
-connector-log-opened-until-cli = Zugang auf der Kommandozeile bis { $until } geöffnet.
-connector-log-opened-permanent = { $who } hat den Zugang ohne Ende geöffnet.
-connector-log-opened-permanent-cli = Zugang auf der Kommandozeile ohne Ende geöffnet.
-connector-log-closed = { $who } hat den Zugang geschlossen.
-connector-log-closed-cli = Zugang auf der Kommandozeile geschlossen.
-connector-log-expired = Zugang geschlossen: Die Zeit ist abgelaufen.
+connector-ui-partly = Teilweise offen. remotehub erreicht nur die offenen Geräte, auf ihren Ports.
+connector-ui-network = Ganzes Netz
+connector-ui-network-hint = Jede Adresse, die dieser Konnektor erlaubt, auf jedem Port.
+connector-ui-groups = Gruppen
+connector-ui-no-groups = Noch keine Gruppen. Eine Gruppe öffnet mehrere Geräte auf einmal.
+connector-ui-devices = Geräte
+connector-ui-no-devices = Noch keine Geräte. Trag die ein, die remotehub einzeln erreichen darf.
+connector-ui-col-name = Name
+connector-ui-col-address = Adresse
+connector-ui-col-ports = Ports
+connector-ui-col-groups = Gruppen
+connector-ui-col-members = Geräte
+connector-ui-col-access = Zugang
+connector-ui-row-closed = geschlossen
+connector-ui-row-open-until = offen bis { $until }
+connector-ui-row-open = offen ohne Ende
+connector-ui-row-open-via = offen über { $group }
+connector-ui-hours = { $hours ->
+    [one] 1 Stunde
+   *[other] { $hours } Stunden
+}
+connector-ui-without-end = ohne Ende
+connector-ui-open = Öffnen
+connector-ui-close-row = Schließen
+connector-ui-remove = Entfernen
+connector-ui-add-device = Gerät hinzufügen
+connector-ui-add-group = Gruppe hinzufügen
+connector-ui-address-hint = Eine Adresse, ein Bereich wie 10.0.0.0/24 oder ein Hostname.
+connector-ui-ports-hint = Ports wie 22, 3389, 8000-8100.
+connector-ui-error-name = Ein Name hat 1 bis 64 Zeichen.
+connector-ui-error-address = { $value } ist weder eine Adresse noch ein Bereich noch ein Hostname.
+connector-ui-error-ports = { $value } ist kein Port und kein Portbereich.
+connector-ui-error-no-ports = Ein Gerät braucht mindestens einen Port.
+connector-ui-error-exists = { $name } gibt es schon.
+connector-ui-error-unknown = { $name } gibt es nicht.
+
+connector-log-what-network = den Zugang
+connector-log-what-device = das Gerät { $name }
+connector-log-what-group = die Gruppe { $name }
+connector-log-opened-until = { $who } hat { $what } bis { $until } geöffnet.
+connector-log-opened-until-cli = Auf der Kommandozeile { $what } bis { $until } geöffnet.
+connector-log-opened-permanent = { $who } hat { $what } ohne Ende geöffnet.
+connector-log-opened-permanent-cli = Auf der Kommandozeile { $what } ohne Ende geöffnet.
+connector-log-closed = { $who } hat { $what } geschlossen.
+connector-log-closed-cli = Auf der Kommandozeile { $what } geschlossen.
+connector-log-expired = Die Zeit ist abgelaufen: { $what } geschlossen.
+connector-log-command-line = Die Kommandozeile
+connector-log-device-added = { $who } hat das Gerät { $name } hinzugefügt: { $address }, Ports { $ports }.
+connector-log-device-removed = { $who } hat das Gerät { $name } entfernt.
+connector-log-group-added = { $who } hat die Gruppe { $name } hinzugefügt.
+connector-log-group-removed = { $who } hat die Gruppe { $name } entfernt.
 connector-log-connection-started = { $user } hat sich mit { $target } verbunden.
 connector-log-connection-ended = { $user } hat die Verbindung mit { $target } nach { $minutes ->
     [one] 1 Minute
@@ -81,3 +124,13 @@ connector-cli-installed = Der Windows-Dienst remotehub-connector läuft und meld
 connector-cli-updated = Der Dienst läuft jetzt mit Release { $version }.
 connector-cli-uninstalled = Dienst und Programm sind entfernt.
 connector-cli-data-kept = Die Daten bleiben in { $path }; uninstall --purge entfernt sie.
+
+connector-cli-device-added = Gerät { $name } hinzugefügt. Es ist geschlossen.
+connector-cli-device-removed = Gerät { $name } entfernt.
+connector-cli-group-added = Gruppe { $name } hinzugefügt. Sie ist geschlossen.
+connector-cli-group-removed = Gruppe { $name } entfernt.
+connector-cli-item-closed = { $name }: geschlossen
+connector-cli-item-open-until = { $name }: offen bis { $until }
+connector-cli-item-open-permanent = { $name }: offen ohne Ende
+connector-cli-groups-label = Gruppen:
+connector-cli-devices-label = Geräte:
