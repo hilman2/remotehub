@@ -788,13 +788,19 @@ pub async fn update_device(
         )?;
     }
     require_connector(&state, device.connector_id).await?;
-    // The device's own password or key goes only to the target it was
-    // entered for: whoever changes the target enters it again, like a linked
-    // credential needs its right to be used (above).
+    // The device's own password or key goes to another target only with
+    // someone who may read it (#174): pointing the device at a host of one's
+    // own would hand one the password. `edit` includes `reveal` today, so
+    // this holds for everyone who gets here; the audit entry says the secret
+    // went along. Should the roles ever part, the others enter it again, as
+    // a linked credential needs its right to be used (above).
+    let may_carry =
+        !target_changed || require(&catalog, &subject, Role::Reveal, ObjectId::Device(id)).is_ok();
     let keeps = before.auth_mode == "device"
         && before.secret_version > 0
         && before.secret_kind == device.secret_kind
-        && !target_changed;
+        && may_carry;
+    let secret_kept = keeps && target_changed && device.secrets.is_none();
     let secret_version = match (&device.secrets, device.auth_mode) {
         (Some(_), _) => before.secret_version + 1,
         (None, "device") if keeps => before.secret_version,
@@ -868,6 +874,7 @@ pub async fn update_device(
         "keyboard_layout": device.keyboard_layout, "connector_id": device.connector_id,
         "username": device.username, "domain": device.domain, "secret_kind": device.secret_kind,
         "key_fingerprint": key_fingerprint, "secret_changed": device.secrets.is_some(),
+        "secret_kept": secret_kept,
     });
     audit::record(
         &mut *tx,

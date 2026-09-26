@@ -1362,7 +1362,9 @@ async fn a_device_keeps_credentials_of_its_own(pool: PgPool) {
     assert!(!shown.to_string().contains("Own-S3cret!"));
     assert_eq!(device_secrets(&pool, &db01).await, [1]);
 
-    // The same target keeps its password; another target needs it again.
+    // The same target keeps its password, and so does another one: whoever
+    // may change the device may read the password anyway (#174). The audit
+    // entry says it went along.
     let uri = format!("/api/devices/{db01}");
     let put = |body: Value| call(&f.app, &f.alice, "PUT", &uri, Some(body));
     assert_eq!(
@@ -1370,10 +1372,20 @@ async fn a_device_keeps_credentials_of_its_own(pool: PgPool) {
         StatusCode::NO_CONTENT
     );
     assert_eq!(device_secrets(&pool, &db01).await, [1]);
-    assert_eq!(
-        put(device("evil.example", None)).await.json()["params"]["field"],
-        "password"
-    );
+    let moved = put(device("db01.site", None)).await;
+    assert_eq!(moved.status, StatusCode::NO_CONTENT, "{}", moved.json());
+    assert_eq!(device_secrets(&pool, &db01).await, [1]);
+    let updates: Vec<bool> = call(&f.app, &f.alice, "GET", "/api/audit", None)
+        .await
+        .json()
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["action"] == "device.updated")
+        .map(|e| e["details"]["secret_kept"].as_bool().unwrap())
+        .collect();
+    // Newest first: moved with the password, then kept on the same target.
+    assert_eq!(updates, [true, false]);
     assert_eq!(
         put(device("db01.lab", Some("N3w-S3cret!"))).await.status,
         StatusCode::NO_CONTENT

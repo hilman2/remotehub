@@ -61,17 +61,21 @@
 
 	// Keys are SSH's; the other protocols sign in with passwords.
 	const kind = $derived<CredentialKind>(protocol === 'ssh' ? secretKind : 'password');
-	// The server keeps the device's own secret only for the target it was
-	// entered for; another target, another kind, or a device without one
+	// The server keeps the device's own secret for another target only when
+	// the user may read it (#174); another kind, or a device without one,
 	// needs it anew.
+	const targetChanged = $derived(
+		!!start &&
+			(start.protocol !== protocol ||
+				start.host !== host.trim() ||
+				start.port !== Number(port) ||
+				(start.connector_id ?? '') !== connectorId)
+	);
 	const retarget = $derived(
 		!start ||
 			start.auth_mode !== 'device' ||
 			start.secret_kind !== kind ||
-			start.protocol !== protocol ||
-			start.host !== host.trim() ||
-			start.port !== Number(port) ||
-			(start.connector_id ?? '') !== connectorId
+			(targetChanged && !allows(start.role, 'reveal'))
 	);
 
 	// Layouts by name in the UI's language; Unicode last.
