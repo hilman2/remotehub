@@ -11,6 +11,7 @@
 	import { fetchServerState } from '$lib/api/health';
 	import { m } from '$lib/paraglide/messages';
 	import {
+		SERVED,
 		dockerCommands,
 		dockerUpdate,
 		windowsCommands,
@@ -23,6 +24,8 @@
 	type Way = 'docker' | 'windows';
 	let way = $state<Way>('docker');
 	let version = $state<string | null>(null);
+	/** Whether remotehub serves the connector for Windows itself (#188). */
+	let served = $state(false);
 	/** Which block was copied last, for its button's check mark. */
 	let copied = $state<string | null>(null);
 
@@ -30,6 +33,13 @@
 		fetchServerState().then((server) => {
 			if (server.kind !== 'unreachable') version = server.version;
 		});
+		// The hash line is small and names the program only where it is served.
+		fetch(SERVED.sums)
+			.then(async (response) =>
+				response.ok ? (await response.text()).includes('remotehub-connector.exe') : false
+			)
+			.catch(() => false)
+			.then((found) => (served = found));
 	});
 
 	async function copy(key: string, text: string) {
@@ -121,31 +131,39 @@
 			</div>
 		{/if}
 	{:else}
-		{@const downloads = windowsDownloads(version)}
+		{@const downloads = windowsDownloads(version, served ? origin : null)}
 		<div class="mt-3 flex flex-wrap gap-2">
-			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- a download from GitHub -->
+			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- a file, from remotehub or GitHub -->
 			<a class={link} href={downloads.program}>
 				<Download size={14} aria-hidden="true" />
 				{m.connectors_setup_windows_program({ version })}
 			</a>
-			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- a download from GitHub -->
+			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- a file, from remotehub or GitHub -->
 			<a class={link} href={downloads.sums}>
 				<Download size={14} aria-hidden="true" />
 				{m.connectors_setup_windows_sums()}
 			</a>
 		</div>
-		<p class="mt-3 text-sm text-ink-2">{m.connectors_setup_windows_hint()}</p>
+		<p class="mt-3 text-sm text-ink-2">
+			{served ? m.connectors_setup_windows_served_hint() : m.connectors_setup_windows_hint()}
+		</p>
 		<div class="mt-2">
-			{@render copyable('windows', m.connectors_setup_windows_commands(), windowsCommands(origin))}
+			{@render copyable(
+				'windows',
+				m.connectors_setup_windows_commands(),
+				windowsCommands(origin, served)
+			)}
 		</div>
 		{#if !token}
 			<h3 class="mt-5 text-sm font-semibold">{m.connectors_update_title()}</h3>
-			<p class="mt-2 text-sm text-ink-2">{m.connectors_update_windows_hint()}</p>
+			<p class="mt-2 text-sm text-ink-2">
+				{served ? m.connectors_update_windows_served_hint() : m.connectors_update_windows_hint()}
+			</p>
 			<div class="mt-2">
 				{@render copyable(
 					'windows-update',
 					m.connectors_update_windows_commands(),
-					windowsUpdate()
+					windowsUpdate(origin, served)
 				)}
 			</div>
 		{/if}

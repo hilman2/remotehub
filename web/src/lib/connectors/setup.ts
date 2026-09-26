@@ -1,15 +1,33 @@
 /**
  * How to start a site connector (#171) and move it to a new release (#186),
  * with remotehub's address and release filled in, as docs/install.md
- * describes it. The token appears in
- * none of the commands: on Linux it goes into a file, on Windows the
- * installer asks for it.
+ * describes it. The token appears in none of the commands: on Linux it goes
+ * into a file, on Windows the installer asks for it.
+ *
+ * remotehub serves the connector for Windows itself (#188), for servers that
+ * reach remotehub but not GitHub. Where it does not, as in development, the
+ * program comes from the GitHub release.
  */
 
 const RELEASES = 'https://github.com/hilman2/remotehub/releases/download';
 
-/** Where the connector for Windows and its hashes are for `version`. */
-export function windowsDownloads(version: string): { program: string; sums: string } {
+/** Where remotehub serves the connector for Windows and its hash. */
+export const SERVED = {
+	program: '/downloads/remotehub-connector.exe',
+	sums: '/downloads/SHA256SUMS'
+};
+
+/**
+ * Where the connector for Windows and its hashes are: on remotehub at
+ * `origin` if it serves them, else in the GitHub release of `version`.
+ */
+export function windowsDownloads(
+	version: string,
+	served: string | null = null
+): { program: string; sums: string } {
+	if (served !== null) {
+		return { program: `${served}${SERVED.program}`, sums: `${served}${SERVED.sums}` };
+	}
 	const base = `${RELEASES}/v${version}`;
 	return { program: `${base}/remotehub-connector.exe`, sums: `${base}/SHA256SUMS` };
 }
@@ -49,20 +67,47 @@ function dockerRun(origin: string, version: string): string {
 	].join('\n');
 }
 
-const HASHES = [
+/**
+ * Lines that fetch the program and its hash from remotehub at `origin` into
+ * a folder of their own, outside C:\Program Files, and stop if the hash does
+ * not match. Without the progress bar, Windows PowerShell downloads many
+ * times faster.
+ */
+function fetchFrom(origin: string): string[] {
+	return [
+		"$ProgressPreference = 'SilentlyContinue'",
+		'Set-Location (New-Item -ItemType Directory -Force "$env:TEMP\\remotehub-connector")',
+		`Invoke-WebRequest ${origin}${SERVED.program} -OutFile remotehub-connector.exe`,
+		`Invoke-WebRequest ${origin}${SERVED.sums} -OutFile SHA256SUMS`,
+		"$sum = (Get-Content .\\SHA256SUMS).Split(' ')[0]",
+		"if ((Get-FileHash .\\remotehub-connector.exe -Algorithm SHA256).Hash -ne $sum) { throw 'remotehub-connector.exe does not match SHA256SUMS' }"
+	];
+}
+
+/** Lines that show both hashes of files downloaded by hand, to compare. */
+const SHOW_HASHES = [
 	'(Get-FileHash .\\remotehub-connector.exe -Algorithm SHA256).Hash',
 	'Select-String remotehub-connector.exe .\\SHA256SUMS'
 ];
 
-/** PowerShell lines: compare the hash, then install; the installer asks for the token. */
-export function windowsCommands(origin: string): string {
-	return [...HASHES, `.\\remotehub-connector.exe install --url ${origin}`].join('\n');
+/**
+ * PowerShell lines that install the service; the installer asks for the
+ * token. With `served`, remotehub's origin, they fetch the program first.
+ */
+export function windowsCommands(origin: string, served = false): string {
+	return [
+		...(served ? fetchFrom(origin) : SHOW_HASHES),
+		`.\\remotehub-connector.exe install --url ${origin}`
+	].join('\n');
 }
 
 /**
- * PowerShell lines that move the installed service to the downloaded
- * release (#186); token and settings stay.
+ * PowerShell lines that move the installed service to the release (#186);
+ * token and settings stay. With `served`, remotehub's origin, they fetch the
+ * program first.
  */
-export function windowsUpdate(): string {
-	return [...HASHES, '.\\remotehub-connector.exe update'].join('\n');
+export function windowsUpdate(origin: string, served = false): string {
+	return [...(served ? fetchFrom(origin) : SHOW_HASHES), '.\\remotehub-connector.exe update'].join(
+		'\n'
+	);
 }

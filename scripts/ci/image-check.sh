@@ -26,15 +26,20 @@ docker build --quiet "$@" --file deploy/browser/Dockerfile --build-arg VERSION="
   --tag "${browser_image}:${tag}" .
 docker build --quiet "$@" --file deploy/connector/Dockerfile --build-arg VERSION="$version" \
   --tag "${connector_image}:${tag}" .
-# The connector for Windows (#166), as release.sh builds it: clippy checks
-# its code, only a build shows that it links.
+# The connector for Windows (#166) comes in remotehub's image (#188), which
+# serves it and from which release.sh takes it: clippy checks its code, only
+# the build shows that it links.
 windows="${PWD}/.windows-check"
 rm -rf "$windows"
-docker build --quiet "$@" --file deploy/connector/windows.Dockerfile --output "type=local,dest=${windows}" .
-[ "$(head -c 2 "${windows}/remotehub-connector.exe")" = MZ ] || {
-  echo "FAILED: no Windows program in ${windows}"
+mkdir -p "$windows"
+built="$(docker create "${image}:${tag}")"
+docker cp -q "${built}:/usr/share/remotehub/connector/remotehub-connector.exe" "${windows}/" || true
+docker rm -f "$built" >/dev/null
+[ "$(head -c 2 "${windows}/remotehub-connector.exe" 2>/dev/null)" = MZ ] || {
+  echo "FAILED: no Windows program in ${image}:${tag}"
   exit 1
 }
+windows_sum="$(sha256sum "${windows}/remotehub-connector.exe" | cut -d ' ' -f 1)"
 rm -rf "$windows"
 
 dir="${PWD}/.image-check"
@@ -100,6 +105,11 @@ curl -fsS "http://${remotehub}:8080/api/ssh-ca.pub" | grep -q '^ssh-ed25519 ' ||
   fail "the SSH CA's public key is not served"
 curl -fsS "http://${remotehub}:8080/devices/any" | grep -q '<html' ||
   fail "routes of the SPA do not fall back to index.html"
+# The connector for Windows, to anyone and before setup (#188).
+[ "$(curl -fsS "http://${remotehub}:8080/downloads/remotehub-connector.exe" | sha256sum | cut -d ' ' -f 1)" = "$windows_sum" ] ||
+  fail "remotehub does not serve the connector for Windows of its image"
+curl -fsS "http://${remotehub}:8080/downloads/SHA256SUMS" | grep -qx "${windows_sum}  remotehub-connector.exe" ||
+  fail "remotehub does not serve the hash of the connector for Windows"
 
 echo "── Setup"
 # A fresh installation serves only the setup wizard (#143), whose link the

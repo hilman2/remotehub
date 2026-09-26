@@ -40,6 +40,7 @@ pub fn settings() -> Settings {
         ssh_ca: None,
         kratos: None,
         caddy: None,
+        downloads: None,
     }
 }
 

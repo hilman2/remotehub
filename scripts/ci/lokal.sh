@@ -90,7 +90,7 @@ job_base() {
     wanted="$(sed -n "s/^channel = \"\(.*\)\"/\1/p" rust-toolchain.toml)"
     echo "rust-toolchain.toml: ${wanted}"
     for file in scripts/ci/tools.Dockerfile deploy/dev/rust.Dockerfile deploy/Dockerfile deploy/browser/Dockerfile \
-      deploy/connector/Dockerfile deploy/connector/windows.Dockerfile; do
+      deploy/connector/Dockerfile; do
       grep -q "^FROM rust:${wanted}-" "$file" || {
         echo "${file} does not use rust:${wanted}"
         exit 1

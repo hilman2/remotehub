@@ -1,6 +1,7 @@
-# Production image of remotehub: the server binary and the built web UI,
-# nothing else. No shell, no package manager; runs as the unprivileged user
-# 65532 and needs no writable file system. Build from the repository root:
+# Production image of remotehub: the server binary, the built web UI and the
+# site connector for Windows it serves (#188), nothing else. No shell, no
+# package manager; runs as the unprivileged user 65532 and needs no writable
+# file system. Build from the repository root:
 #
 #   docker build -f deploy/Dockerfile --build-arg VERSION=0.1.0 -t remotehub .
 #
@@ -20,16 +21,23 @@ RUN REMOTEHUB_WEB_VERSION="${VERSION}" pnpm build
 
 # Keep in sync with rust-toolchain.toml (the CI job `base` checks it).
 FROM rust:1.98.1-trixie AS server
+# The site connector for Windows (#166) is cross-built with mingw-w64.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 \
+  && rm -rf /var/lib/apt/lists/*
+RUN rustup target add x86_64-pc-windows-gnu
 WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates crates
 COPY migrations migrations
-# The caches only speed up rebuilds on the same machine; the binary is
+# The caches only speed up rebuilds on the same machine; the programs are
 # copied out of them, since a cache mount is gone after this step.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked --package remotehub-server \
- && cp target/release/remotehub /remotehub
+ && cargo build --release --locked --target x86_64-pc-windows-gnu --package remotehub-connector \
+ && cp target/release/remotehub /remotehub \
+ && cp target/x86_64-pc-windows-gnu/release/remotehub-connector.exe /remotehub-connector.exe
 
 # The C runtime (glibc, libgcc) and CA certificates for LDAPS, as user 65532.
 FROM gcr.io/distroless/cc-debian13:nonroot
@@ -41,7 +49,10 @@ LABEL org.opencontainers.image.title="remotehub" \
       org.opencontainers.image.version="${VERSION}"
 COPY --from=server /remotehub /usr/local/bin/remotehub
 COPY --from=web /web/build /usr/share/remotehub/web
-ENV REMOTEHUB_WEB_DIR=/usr/share/remotehub/web
+# The release publishes this very file, taken from the image (release.sh).
+COPY --from=server /remotehub-connector.exe /usr/share/remotehub/connector/remotehub-connector.exe
+ENV REMOTEHUB_WEB_DIR=/usr/share/remotehub/web \
+    REMOTEHUB_CONNECTOR_DOWNLOADS=/usr/share/remotehub/connector
 USER 65532:65532
 EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=6s --start-period=60s --retries=3 \

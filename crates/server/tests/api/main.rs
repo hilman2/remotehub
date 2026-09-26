@@ -17,6 +17,7 @@ mod connector_requests;
 mod connectors;
 mod directory;
 mod display;
+mod downloads;
 mod generated;
 mod groups;
 mod http;
