@@ -936,9 +936,9 @@ test('an administrator sets up a site connector and a device names it', async ({
 	await dialog.getByLabel('Name', { exact: true }).fill(`switch ${run}`);
 	await dialog.getByLabel('Host name or IP address').fill('10.20.0.2');
 	await expect(dialog.getByLabel('Reached through')).toHaveValue('inherit');
-	await expect(
-		dialog.getByLabel('Reached through').locator('option[value="inherit"]')
-	).toHaveText(`From the folder: ${site}`);
+	await expect(dialog.getByLabel('Reached through').locator('option[value="inherit"]')).toHaveText(
+		`From the folder: ${site}`
+	);
 	await dialog.getByRole('button', { name: 'Create' }).click();
 	await expect(page.getByRole('heading', { name: `switch ${run}` })).toBeVisible();
 	await expect(page.getByText(`${site} · not connected`)).toBeVisible();
