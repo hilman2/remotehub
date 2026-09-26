@@ -1,6 +1,7 @@
 /**
- * How to start a new site connector (#171), with remotehub's address and
- * release filled in, as docs/install.md describes it. The token appears in
+ * How to start a site connector (#171) and move it to a new release (#186),
+ * with remotehub's address and release filled in, as docs/install.md
+ * describes it. The token appears in
  * none of the commands: on Linux it goes into a file, on Windows the
  * installer asks for it.
  */
@@ -19,6 +20,24 @@ export function dockerCommands(origin: string, version: string): string {
 		'sudo install -d -m 700 /opt/remotehub-connector',
 		"sudo sh -c 'cat > /opt/remotehub-connector/token'",
 		'sudo chown 65532 /opt/remotehub-connector/token && sudo chmod 400 /opt/remotehub-connector/token',
+		dockerRun(origin, version)
+	].join('\n');
+}
+
+/**
+ * Shell commands that move a running connector to `version` (#186): the
+ * container is replaced, the token file and the data volume stay.
+ */
+export function dockerUpdate(origin: string, version: string): string {
+	return [
+		`sudo docker pull ghcr.io/hilman2/remotehub-connector:${version}`,
+		'sudo docker rm -f remotehub-connector',
+		dockerRun(origin, version)
+	].join('\n');
+}
+
+function dockerRun(origin: string, version: string): string {
+	return [
 		'sudo docker run -d --name remotehub-connector --restart unless-stopped --read-only \\',
 		'  --cap-drop ALL --security-opt no-new-privileges \\',
 		'  -v /opt/remotehub-connector/token:/run/secrets/token:ro \\',
@@ -30,11 +49,20 @@ export function dockerCommands(origin: string, version: string): string {
 	].join('\n');
 }
 
+const HASHES = [
+	'(Get-FileHash .\\remotehub-connector.exe -Algorithm SHA256).Hash',
+	'Select-String remotehub-connector.exe .\\SHA256SUMS'
+];
+
 /** PowerShell lines: compare the hash, then install; the installer asks for the token. */
 export function windowsCommands(origin: string): string {
-	return [
-		'(Get-FileHash .\\remotehub-connector.exe -Algorithm SHA256).Hash',
-		'Select-String remotehub-connector.exe .\\SHA256SUMS',
-		`.\\remotehub-connector.exe install --url ${origin}`
-	].join('\n');
+	return [...HASHES, `.\\remotehub-connector.exe install --url ${origin}`].join('\n');
+}
+
+/**
+ * PowerShell lines that move the installed service to the downloaded
+ * release (#186); token and settings stay.
+ */
+export function windowsUpdate(): string {
+	return [...HASHES, '.\\remotehub-connector.exe update'].join('\n');
 }
