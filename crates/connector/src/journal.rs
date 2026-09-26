@@ -33,17 +33,22 @@ pub enum Event {
     },
     /// The access closed when its time ran out.
     Expired,
-    /// `user` is the remotehub user as remotehub reports it; the connector
-    /// cannot check it.
+    /// `device` is the device's name in remotehub and `user` the remotehub
+    /// user, both as remotehub reports them; the connector cannot check
+    /// them. `target` is what it connected to.
     ConnectionStarted {
         id: Uuid,
         target: String,
+        #[serde(default)]
+        device: Option<String>,
         user: Option<String>,
     },
     /// `sent` went to the device, `received` came from it, in bytes.
     ConnectionEnded {
         id: Uuid,
         target: String,
+        #[serde(default)]
+        device: Option<String>,
         user: Option<String>,
         seconds: u64,
         sent: u64,
@@ -51,6 +56,8 @@ pub enum Event {
     },
     ConnectionRefused {
         target: String,
+        #[serde(default)]
+        device: Option<String>,
         user: Option<String>,
         reason: String,
     },

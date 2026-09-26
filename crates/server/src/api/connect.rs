@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use super::problem::{ErrorCode, Problem};
 use crate::audit::{Action, Actor, Entry};
-use crate::connectors::{Forward, towards};
+use crate::connectors::{Forward, Requester, towards};
 use crate::session::Session;
 use crate::{AppState, catalog, secrets};
 
@@ -122,7 +122,10 @@ pub async fn route(
         state.connectors.clone(),
         connector,
         authority(&target.host, port),
-        user.to_owned(),
+        Requester {
+            user: user.to_owned(),
+            device: target.name.clone(),
+        },
         bind,
         peers,
     )

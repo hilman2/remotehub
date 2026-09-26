@@ -204,6 +204,7 @@ async fn reported_names_are_escaped() {
     setup.site.journal.append(Event::ConnectionStarted {
         id: uuid::Uuid::nil(),
         target: "<script>x</script>:22".into(),
+        device: Some("<b>router</b>".into()),
         user: Some("\"><img src=x>".into()),
     });
     let cookie = sign_in(&setup).await;
@@ -216,8 +217,22 @@ async fn reported_names_are_escaped() {
     )
     .await;
     assert!(!page.contains("<script>x"), "{page}");
-    assert!(!page.contains("<img"), "{page}");
-    assert!(page.contains("&lt;script&gt;x&lt;/script&gt;:22"), "{page}");
+    assert!(!page.contains("<img") && !page.contains("<b>"), "{page}");
+    assert!(
+        page.contains("&lt;b&gt;router&lt;/b&gt; (&lt;script&gt;x&lt;/script&gt;:22)"),
+        "{page}"
+    );
+}
+
+/// The journal names the device first and the address it went to (#177).
+#[test]
+fn a_connection_names_its_device_and_address() {
+    assert_eq!(
+        labelled(Some("router"), "10.0.0.1:22"),
+        "router (10.0.0.1:22)"
+    );
+    assert_eq!(labelled(Some("  "), "10.0.0.1:22"), "10.0.0.1:22");
+    assert_eq!(labelled(None, "10.0.0.1:22"), "10.0.0.1:22");
 }
 
 #[test]
