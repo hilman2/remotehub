@@ -892,10 +892,22 @@ test('an administrator sets up a site connector and a device names it', async ({
 	await page.getByRole('button', { name: 'New connector' }).click();
 	await dialog.getByLabel('Name', { exact: true }).fill(site);
 	await dialog.getByRole('button', { name: 'Create' }).click();
-	// The token, once, with the address the connector needs.
-	const settings = dialog.getByLabel('Settings for the connector');
-	await expect(settings).toContainText('REMOTEHUB_CONNECTOR_TOKEN=rhc_');
-	await expect(settings).toContainText('REMOTEHUB_URL=http');
+	// The token, once, and how to start the connector of this release with
+	// this address; the token stays out of the commands (#171).
+	const token = (await dialog.getByLabel('Token for the connector').textContent()) ?? '';
+	expect(token).toMatch(/^rhc_/);
+	const { version } = await (await page.request.get('/api/health')).json();
+	const docker = dialog.getByLabel('Commands for Docker');
+	await expect(docker).toContainText(`ghcr.io/hilman2/remotehub-connector:${version}`);
+	await expect(docker).toContainText('REMOTEHUB_URL=http');
+	await expect(docker).not.toContainText(token);
+	await dialog.getByRole('button', { name: 'Windows server' }).click();
+	await expect(
+		dialog.getByRole('link', { name: `remotehub-connector.exe (${version})` })
+	).toHaveAttribute('href', new RegExp(`/releases/download/v${version}/remotehub-connector.exe$`));
+	const windows = dialog.getByLabel('Commands for PowerShell');
+	await expect(windows).toContainText('install --url http');
+	await expect(windows).not.toContainText(token);
 	await dialog.getByRole('button', { name: 'Close', exact: true }).last().click();
 	const row = page.getByRole('row', { name: new RegExp(site) });
 	await expect(row).toContainText('not connected');
