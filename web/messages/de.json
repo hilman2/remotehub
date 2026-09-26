@@ -311,6 +311,8 @@
 	"connectors_setup_windows_sums": "SHA256SUMS",
 	"connectors_setup_windows_hint": "Beide Dateien auf den Windows-Server laden. In einer PowerShell als Administrator, in ihrem Ordner: Beide Hashes müssen gleich sein, dann fragt die Installation nach dem Token.",
 	"connectors_setup_windows_commands": "Befehle für PowerShell",
+	"connectors_setup_windows_served_hint": "In einer PowerShell als Administrator auf dem Windows-Server: Die Befehle laden beide Dateien von remotehub in einen eigenen Ordner, brechen ab, wenn der Hash nicht passt, und installieren den Dienst; die Installation fragt nach dem Token.",
+	"connectors_update_windows_served_hint": "In einer PowerShell als Administrator auf dem Windows-Server: Die Befehle laden beide Dateien von remotehub, brechen ab, wenn der Hash nicht passt, und der Dienst übernimmt dieses Release. Token und Einstellungen bleiben.",
 	"connectors_download": "Konnektor herunterladen",
 	"connectors_download_hint": "Für einen Konnektor, den es schon gibt: auf einem weiteren Host, neu installiert oder in einem neuen Release. Die Befehle fragen nach seinem Token, dem beim Anlegen angezeigten.",
 	"connectors_update_title": "Einen installierten Konnektor aktualisieren",

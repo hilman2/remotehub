@@ -60,7 +60,9 @@ export default defineConfig({
 		proxy: {
 			'/api': { target: server, changeOrigin: true, ws: true },
 			// The root certificate of Caddy's own CA (#146).
-			'^/ca\\.(crt|cer)$': { target: server, changeOrigin: true }
+			'^/ca\\.(crt|cer)$': { target: server, changeOrigin: true },
+			// The site connector for Windows (#188).
+			'/downloads': { target: server, changeOrigin: true }
 		}
 	},
 	test: {

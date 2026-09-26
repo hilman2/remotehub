@@ -11,6 +11,7 @@ use remotehub_i18n::{self as i18n, Locale, Message};
 use remotehub_server::api::health;
 use remotehub_server::audit::{Action, Actor, Entry};
 use remotehub_server::config::{self, Config};
+use remotehub_server::downloads::Downloads;
 use remotehub_server::{
     AppState, Settings, VERSION, app, audit, break_glass, db, escrow, session, setup,
 };
@@ -177,6 +178,18 @@ async fn serve() -> anyhow::Result<()> {
             .as_ref()
             .map(remotehub_server::kratos::Kratos::new),
         caddy: None,
+        downloads: match config.connector_downloads.as_deref().map(Downloads::load) {
+            Some(Ok(Some(downloads))) => Some(Arc::new(downloads)),
+            Some(Ok(None)) => {
+                tracing::warn!("no remotehub-connector.exe to serve under /downloads");
+                None
+            }
+            Some(Err(error)) => {
+                tracing::error!(%error, "cannot read remotehub-connector.exe");
+                None
+            }
+            None => None,
+        },
     };
     settings.caddy = config
         .caddy

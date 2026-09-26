@@ -43,6 +43,8 @@ pub struct Config {
     pub database_password: Option<SecretString>,
     /// Built SPA (web/build) to serve; in development Vite serves the UI.
     pub web_dir: Option<PathBuf>,
+    /// Directory with `remotehub-connector.exe` to serve (#188).
+    pub connector_downloads: Option<PathBuf>,
     /// Log as JSON lines instead of human-readable text.
     pub log_json: bool,
     /// Origin under which people open remotehub (`https://remotehub.example.com`).
@@ -121,6 +123,7 @@ impl Config {
         let listen = listen_address(&lookup)?;
         let (database_url, database_password) = database(&lookup)?;
         let web_dir = setting("REMOTEHUB_WEB_DIR")?.map(PathBuf::from);
+        let connector_downloads = setting("REMOTEHUB_CONNECTOR_DOWNLOADS")?.map(PathBuf::from);
 
         let log_json = match setting("REMOTEHUB_LOG_FORMAT")?.as_deref() {
             None | Some("text") => false,
@@ -244,6 +247,7 @@ impl Config {
             database_url,
             database_password,
             web_dir,
+            connector_downloads,
             log_json,
             public_origin,
             session,
@@ -339,6 +343,7 @@ impl fmt::Debug for Config {
             .field("database_url", &"<redacted>")
             .field("database_password", &"<redacted>")
             .field("web_dir", &self.web_dir)
+            .field("connector_downloads", &self.connector_downloads)
             .field("log_json", &self.log_json)
             .field("public_origin", &self.public_origin)
             .field("session", &self.session)

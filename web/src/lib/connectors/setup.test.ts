@@ -30,14 +30,33 @@ describe('starting a connector', () => {
 		expect(update).toContain('remotehub-connector-data:/var/lib/remotehub-connector');
 	});
 
-	it('updates the Windows service from the downloaded file', () => {
-		const lines = windowsUpdate().split('\n');
-		expect(lines.at(-1)).toBe('.\\remotehub-connector.exe update');
-		expect(lines[0]).toContain('Get-FileHash');
+	it('fetches the program from remotehub where remotehub serves it', () => {
+		for (const commands of [windowsCommands(origin, true), windowsUpdate(origin, true)]) {
+			expect(commands).toContain(
+				`Invoke-WebRequest ${origin}/downloads/remotehub-connector.exe -OutFile remotehub-connector.exe`
+			);
+			expect(commands).toContain(`Invoke-WebRequest ${origin}/downloads/SHA256SUMS`);
+			// Stops before running a program whose hash does not match.
+			const lines = commands.split('\n');
+			const check = lines.findIndex((line) => line.includes('-ne $sum) { throw'));
+			const run = lines.findIndex((line) => line.startsWith('.\\remotehub-connector.exe '));
+			expect(check).toBeGreaterThan(-1);
+			expect(run).toBeGreaterThan(check);
+		}
+		expect(windowsCommands(origin, true)).toContain(`install --url ${origin}`);
+		expect(windowsUpdate(origin, true).split('\n').at(-1)).toBe(
+			'.\\remotehub-connector.exe update'
+		);
+		expect(windowsDownloads('0.3.0', origin)).toEqual({
+			program: `${origin}/downloads/remotehub-connector.exe`,
+			sums: `${origin}/downloads/SHA256SUMS`
+		});
 	});
 
-	it('installs the Windows service for this remotehub', () => {
+	it('falls back to the GitHub release where remotehub serves nothing', () => {
+		expect(windowsCommands(origin)).not.toContain('Invoke-WebRequest');
 		expect(windowsCommands(origin)).toContain(`install --url ${origin}`);
+		expect(windowsUpdate(origin).split('\n').at(-1)).toBe('.\\remotehub-connector.exe update');
 		expect(windowsDownloads('0.3.0')).toEqual({
 			program:
 				'https://github.com/hilman2/remotehub/releases/download/v0.3.0/remotehub-connector.exe',

@@ -80,13 +80,16 @@ tools="$(ci_image scripts/ci/tools.Dockerfile)"
 ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" "$IMAGE" "$GUACD_IMAGE" "$BROWSER_IMAGE" "$CONNECTOR_IMAGE" \
   "$version" --pull
 
-echo "── Build the site connector for Windows"
-# From the commit, not the working copy; image-check.sh built it the same way.
+echo "── Take the site connector for Windows from the image"
+# The very file remotehub serves under /downloads (#188), so the release's
+# SHA256SUMS and remotehub's agree.
 windows="${CI_ABLAGE}/windows-${version}"
 rm -rf "$windows"
-git archive --format=tar "$CI_SHA" |
-  docker build --quiet --pull --file deploy/connector/windows.Dockerfile --output "type=local,dest=${windows}" -
-[ -s "${windows}/remotehub-connector.exe" ] || ci_fehler "no remotehub-connector.exe in ${windows}"
+mkdir -p "$windows"
+built="$(docker create "${IMAGE}:${version}")"
+docker cp -q "${built}:/usr/share/remotehub/connector/remotehub-connector.exe" "${windows}/" || true
+docker rm -f "$built" >/dev/null
+[ -s "${windows}/remotehub-connector.exe" ] || ci_fehler "no remotehub-connector.exe in ${IMAGE}:${version}"
 
 ops="${CI_ABLAGE}/remotehub-ops-${version}.tar.gz"
 # LF line endings whatever Git for Windows' core.autocrlf says, as the CI

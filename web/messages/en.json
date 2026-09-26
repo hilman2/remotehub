@@ -311,6 +311,8 @@
 	"connectors_setup_windows_sums": "SHA256SUMS",
 	"connectors_setup_windows_hint": "Download both files to the Windows server. In a PowerShell as administrator, in their folder: both hashes must match, then the installer asks for the token.",
 	"connectors_setup_windows_commands": "Commands for PowerShell",
+	"connectors_setup_windows_served_hint": "In a PowerShell as administrator on the Windows server: the commands download both files from remotehub into a folder of their own, stop if the hash does not match, and install the service; the installer asks for the token.",
+	"connectors_update_windows_served_hint": "In a PowerShell as administrator on the Windows server: the commands download both files from remotehub, stop if the hash does not match, and the service takes this release. Token and settings stay.",
 	"connectors_download": "Download connector",
 	"connectors_download_hint": "For a connector that exists: on another host, again, or in a new release. The commands ask for its token, the one shown when it was created.",
 	"connectors_update_title": "Update an installed connector",

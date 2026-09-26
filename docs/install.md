@@ -384,21 +384,23 @@ its network, list the ranges it may reach in `REMOTEHUB_CONNECTOR_ALLOW`.
 
 ### Start the connector on a Windows server
 
-Each release has `remotehub-connector.exe`, a Windows service in one file. It is not signed yet. Download it
-with PowerShell, which marks nothing as coming from the internet, and compare its hash with the release's
-`SHA256SUMS`:
+`remotehub-connector.exe` is a Windows service in one file. It is not signed yet. remotehub serves the one
+of its release under `/downloads/`, so the server needs no way to GitHub. *Download connector* on the
+connectors page shows the commands with your address filled in. They download the program and its hash with
+PowerShell, which marks nothing as coming from the internet, and stop if the hash does not match:
 
 ```powershell
-$version = "0.3.0"  # your remotehub's release
-$base = "https://github.com/hilman2/remotehub/releases/download/v$version"
-Invoke-WebRequest "$base/remotehub-connector.exe" -OutFile remotehub-connector.exe
-Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
-(Get-FileHash remotehub-connector.exe -Algorithm SHA256).Hash
-Select-String "remotehub-connector.exe" SHA256SUMS
+$ProgressPreference = 'SilentlyContinue'
+Set-Location (New-Item -ItemType Directory -Force "$env:TEMP\remotehub-connector")
+Invoke-WebRequest https://remotehub.example.com/downloads/remotehub-connector.exe -OutFile remotehub-connector.exe
+Invoke-WebRequest https://remotehub.example.com/downloads/SHA256SUMS -OutFile SHA256SUMS
+$sum = (Get-Content .\SHA256SUMS).Split(' ')[0]
+if ((Get-FileHash .\remotehub-connector.exe -Algorithm SHA256).Hash -ne $sum) { throw 'remotehub-connector.exe does not match SHA256SUMS' }
 ```
 
-Both hashes must match (`Get-FileHash` writes it in capitals). Then, in a PowerShell as administrator, install
-the service and paste the token when asked. It never goes on the command line:
+The same file is attached to each GitHub release, with its hash in the release's `SHA256SUMS`. Then, in a
+PowerShell as administrator, install the service and paste the token when asked. It never goes on the
+command line:
 
 ```powershell
 .\remotehub-connector.exe install --url https://remotehub.example.com
@@ -415,7 +417,8 @@ The web interface is at `https://localhost:8480` on the server. To reach it from
 restart the service (`Restart-Service remotehub-connector`).
 
 `.\remotehub-connector.exe update`, run as administrator from the new release's file, replaces the program and
-restarts the service. `uninstall` removes the service and the program and keeps the data; `uninstall --purge`
+restarts the service. After upgrading remotehub, *Download connector* shows the commands that fetch the new
+file and update. `uninstall` removes the service and the program and keeps the data; `uninstall --purge`
 removes that too. Run both from a copy outside `C:\Program Files\remotehub-connector`.
 
 ### Open and close access

@@ -12,6 +12,7 @@ pub mod config;
 pub mod connectors;
 pub mod db;
 pub mod directory;
+pub mod downloads;
 pub mod escrow;
 pub mod kratos;
 pub mod mail;
@@ -80,6 +81,8 @@ pub struct Settings {
     /// Caddy of the ops package (#146); none behind a reverse proxy of
     /// your own.
     pub caddy: Option<Arc<caddy::Caddy>>,
+    /// The site connector for Windows to serve (#188); none in development.
+    pub downloads: Option<Arc<downloads::Downloads>>,
 }
 
 impl Settings {
@@ -123,7 +126,9 @@ pub fn app(state: AppState, web_dir: Option<&Path>) -> Router {
         .nest("/api", api::router(state.clone()))
         // The root of Caddy's own CA, for clients to trust (#146).
         .route("/ca.crt", axum::routing::get(api::certificate::root_pem))
-        .route("/ca.cer", axum::routing::get(api::certificate::root_der));
+        .route("/ca.cer", axum::routing::get(api::certificate::root_der))
+        // The site connector for Windows (#188), for servers without GitHub.
+        .route("/downloads/{file}", axum::routing::get(downloads::file));
     if let Some(dir) = web_dir {
         let spa = ServeDir::new(dir).fallback(ServeFile::new(dir.join("index.html")));
         app = app.fallback_service(spa);
