@@ -13,9 +13,13 @@ RUN apt-get update \
 # Image builds run without CAP_SYS_ADMIN, so security.* xattrs cannot be
 # written; xattr_tdb keeps them in a tdb instead (as Samba's own test suite
 # does).
+# remotehub knows users and groups by SID only (#170). A fixed domain SID,
+# with users.sh creating the accounts in the same order, gives a rebuilt
+# domain the same SIDs, so the rights in a development database still hold.
 RUN rm -f /etc/samba/smb.conf \
   && samba-tool domain provision \
        --realm=REMOTEHUB.TEST --domain=REMOTEHUB --server-role=dc \
+       --domain-sid=S-1-5-21-60990459-207271012-1830765421 \
        --dns-backend=SAMBA_INTERNAL --host-name=dc \
        --adminpass='Admin-Passw0rd!' \
        --option="vfs objects = dfs_samba4 acl_xattr xattr_tdb" \
