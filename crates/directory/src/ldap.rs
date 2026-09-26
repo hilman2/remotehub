@@ -402,6 +402,44 @@ impl IdentityProvider for LdapDirectory {
         groups
     }
 
+    async fn group_names(&self, sids: &[Sid]) -> Result<Vec<Group>, AuthError> {
+        let mut found = Vec::new();
+        // A bounded filter per search; a user rarely has more groups.
+        for chunk in sids.chunks(100) {
+            let any: String = chunk
+                .iter()
+                .map(|sid| format!("(objectSid={})", escape_binary(&sid.to_bytes())))
+                .collect();
+            let filter = format!("(&(objectCategory=group)(|{any}))");
+            let mut ldap = self.service().await?;
+            let SearchResult(entries, result) = ldap
+                .with_timeout(self.config.timeout)
+                .search(
+                    &self.config.base_dn,
+                    Scope::Subtree,
+                    &filter,
+                    vec!["cn", "objectSid"],
+                )
+                .await
+                .map_err(unavailable)?;
+            let _ = ldap.unbind().await;
+            if result.rc != 0 {
+                return Err(AuthError::Directory(format!(
+                    "group lookup failed with code {}: {}",
+                    result.rc, result.text
+                )));
+            }
+            found.extend(entries.into_iter().filter_map(|entry| {
+                let entry = SearchEntry::construct(entry);
+                Some(Group {
+                    sid: Sid::from_bytes(first_binary(&entry, "objectSid")?.as_slice()).ok()?,
+                    name: first_text(&entry, "cn")?,
+                })
+            }));
+        }
+        Ok(found)
+    }
+
     async fn search(&self, query: &str, limit: i32) -> Result<Vec<Principal>, AuthError> {
         if query.trim().chars().count() < 2 {
             return Ok(Vec::new());

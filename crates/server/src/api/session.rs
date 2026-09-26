@@ -228,6 +228,11 @@ pub async fn sign_in(
         .await?;
     }
     let token = session::create(&mut *tx, user_id, &groups, state.settings.session.max).await?;
+    crate::directory::remember_group_names(
+        state.db.clone(),
+        directory.clone(),
+        identity.groups.clone(),
+    );
     let mut cookies = vec![session::set_cookie(&token)];
     if state.settings.own_account_connections {
         let key =

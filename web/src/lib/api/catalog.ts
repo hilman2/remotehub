@@ -228,13 +228,24 @@ export const deleteCredential = (id: string) => api('DELETE', `/api/credentials/
 
 export const loadGrants = (kind: ObjectKind, id: string) =>
 	api<{ direct: GrantRow[]; inherited: GrantRow[] }>('GET', `/api/grants?kind=${kind}&id=${id}`);
-export const addGrant = (kind: ObjectKind, id: string, principal: Principal, role: Role) =>
+/**
+ * Grants `role`; `expiresAt` (RFC 3339) makes a grant of its own that ends
+ * by itself (#178), beside one without end.
+ */
+export const addGrant = (
+	kind: ObjectKind,
+	id: string,
+	principal: Principal,
+	role: Role,
+	expiresAt: string | null = null
+) =>
 	api('POST', '/api/grants', {
 		object: { kind, id },
 		principal_kind: principal.kind,
 		principal_sid: principal.sid,
 		principal_name: principal.name,
-		role
+		role,
+		expires_at: expiresAt
 	});
 export const removeGrant = (id: string) => api('DELETE', `/api/grants/${id}`);
 

@@ -116,13 +116,13 @@ test('a wrong code keeps an account with a second factor out', async ({ page }) 
 	expect(me).toBe(401);
 });
 
-test('an administrator invites an account on the users page and blocks it', async ({
+test('an administrator invites an account on the access page and blocks it', async ({
 	page,
 	browser
 }) => {
 	// alice administers through the directory.
 	await typeDirectory(page, 'alice', 'Alice-Passw0rd!');
-	await page.getByRole('link', { name: 'Users' }).click();
+	await page.getByRole('link', { name: 'Access', exact: true }).click();
 
 	const email = address('invited');
 	const name = `Ines ${email.split('@')[0]}`;
@@ -141,13 +141,14 @@ test('an administrator invites an account on the users page and blocks it', asyn
 	await accept(ines, link, code, `Invited-Passw0rd-${run}`);
 
 	await page.reload();
+	await page.getByRole('searchbox', { name: 'Search name, username or group' }).fill(email);
 	const row = page.getByTestId('user-row').filter({ hasText: email });
 	await expect(row).toContainText('Local');
 	await expect(row).toContainText('Active');
-	await row.getByRole('button', { name: `Actions for ${name}` }).click();
-	await page.getByRole('menuitem', { name: 'Block' }).click();
+	await row.getByRole('link', { name }).click();
+	await page.getByRole('button', { name: 'Block', exact: true }).click();
 	await dialog.getByRole('button', { name: 'Block' }).click();
-	await expect(row).toContainText('Blocked');
+	await expect(page.getByText('Blocked', { exact: true })).toBeVisible();
 
 	// Her session is gone: the next request sends her to the sign-in.
 	await ines.reload();
@@ -381,7 +382,7 @@ test('a directory account signs in with a security key remotehub keeps', async (
 
 test('an invitation goes out by mail, and its link and code work', async ({ page, browser }) => {
 	await typeDirectory(page, 'alice', 'Alice-Passw0rd!');
-	await page.getByRole('link', { name: 'Users' }).click();
+	await page.getByRole('link', { name: 'Access', exact: true }).click();
 	const email = address('mailed');
 	const dialog = page.getByRole('dialog');
 	await page.getByRole('button', { name: 'Invite', exact: true }).click();

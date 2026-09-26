@@ -54,18 +54,9 @@
 		{ href: resolve('/'), label: m.nav_devices },
 		{ href: resolve('/vault'), label: m.nav_vault },
 		{ href: resolve('/requests'), label: m.nav_requests },
-		...(session.user?.admin
-			? [
-					{ href: resolve('/users'), label: m.nav_users },
-					{ href: resolve('/connectors'), label: m.nav_connectors }
-				]
-			: []),
-		...(isAuditor(session.user)
-			? [
-					{ href: resolve('/audit'), label: m.nav_audit },
-					{ href: resolve('/permissions'), label: m.nav_permissions }
-				]
-			: []),
+		...(isAuditor(session.user) ? [{ href: resolve('/access'), label: m.nav_access }] : []),
+		...(session.user?.admin ? [{ href: resolve('/connectors'), label: m.nav_connectors }] : []),
+		...(isAuditor(session.user) ? [{ href: resolve('/audit'), label: m.nav_audit }] : []),
 		...(session.user?.admin || isSecurityOfficer(session.user)
 			? [{ href: resolve('/recovery'), label: m.nav_recovery }]
 			: []),

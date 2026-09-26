@@ -1657,10 +1657,14 @@ pub struct NewGrant {
     principal_sid: String,
     principal_name: String,
     role: String,
+    /// RFC 3339, when the grant ends by itself (#178); none: it stays.
+    #[serde(default)]
+    expires_at: Option<String>,
 }
 
-/// Grants a role; an existing grant for the same principal on the same
-/// object is changed to the new role.
+/// Grants a role; an existing grant without end for the same principal on
+/// the same object is changed to the new role. A grant with an end is one
+/// of its own beside it.
 pub async fn add_grant(
     State(state): State<AppState>,
     session: Session,
@@ -1678,6 +1682,18 @@ pub async fn add_grant(
         .parse()
         .map_err(|_| invalid("principal_sid"))?;
     let principal_name = name(&input.principal_name, "principal_name")?;
+    // Checked here, stored by the database from the same text.
+    let rfc3339 = &time::format_description::well_known::Rfc3339;
+    let expires_at = match input.expires_at.as_deref() {
+        None => None,
+        Some(text) => Some(
+            time::OffsetDateTime::parse(text, rfc3339)
+                .ok()
+                .filter(|at| *at > time::OffsetDateTime::now_utc())
+                .and_then(|at| at.format(rfc3339).ok())
+                .ok_or_else(|| invalid("expires_at"))?,
+        ),
+    };
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Manage, target)?;
     if !sid.check(&state.db, &input.principal_kind).await? {
@@ -1690,10 +1706,12 @@ pub async fn add_grant(
         ObjectId::Credential(id) => (None, None, Some(id)),
     };
     let mut tx = state.db.begin().await?;
+    // The conflict only ever arises without an end: the unique index covers
+    // grants without one.
     sqlx::query(
         "INSERT INTO grants (folder_id, device_id, credential_id, principal_kind, principal_sid,
-                             principal_name, role, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                             principal_name, role, created_by, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz)
          ON CONFLICT (folder_id, device_id, credential_id, principal_sid) WHERE expires_at IS NULL
          DO UPDATE SET role = EXCLUDED.role, principal_name = EXCLUDED.principal_name",
     )
@@ -1705,11 +1723,12 @@ pub async fn add_grant(
     .bind(&principal_name)
     .bind(role.as_str())
     .bind(session.user_id)
+    .bind(expires_at)
     .execute(&mut *tx)
     .await?;
     let details = json!({
         "principal_kind": input.principal_kind, "principal_sid": sid.to_string(),
-        "principal_name": principal_name, "role": role,
+        "principal_name": principal_name, "role": role, "expires_at": input.expires_at,
     });
     audit::record(
         &mut *tx,

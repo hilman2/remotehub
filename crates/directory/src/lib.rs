@@ -106,6 +106,16 @@ pub trait IdentityProvider: Send + Sync {
     /// gone or no longer matches the user filter.
     fn refresh(&self, sid: &Sid) -> impl Future<Output = Result<Vec<Sid>, AuthError>> + Send;
 
+    /// The names of the groups with `sids`, as far as the directory knows
+    /// them (#178): sign-in reads only the SIDs. None by default.
+    fn group_names(
+        &self,
+        sids: &[Sid],
+    ) -> impl Future<Output = Result<Vec<Group>, AuthError>> + Send {
+        let _ = sids;
+        async { Ok(Vec::new()) }
+    }
+
     /// The LAPS password of the computer that `host` names, read now.
     fn laps_password(
         &self,
