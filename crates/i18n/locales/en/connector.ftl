@@ -20,7 +20,6 @@ connector-ui-open-permanent = Open without end. remotehub can reach the devices 
 connector-ui-changed-by = Last changed by { $who } at { $at }.
 connector-ui-changed-cli = Last changed on the command line at { $at }.
 connector-ui-changed-expiry = Closed at { $at } when the time ran out.
-connector-ui-change = Change access
 connector-ui-open-for = Open for { $hours ->
     [one] 1 hour
    *[other] { $hours } hours
@@ -45,13 +44,57 @@ connector-ui-no-log = Nothing logged yet.
 connector-ui-col-time = Time
 connector-ui-col-event = Event
 
-connector-log-opened-until = { $who } opened access until { $until }.
-connector-log-opened-until-cli = Access opened on the command line until { $until }.
-connector-log-opened-permanent = { $who } opened access without end.
-connector-log-opened-permanent-cli = Access opened on the command line without end.
-connector-log-closed = { $who } closed access.
-connector-log-closed-cli = Access closed on the command line.
-connector-log-expired = Access closed: its time ran out.
+connector-ui-partly = Partly open. remotehub reaches only the open devices, on their ports.
+connector-ui-network = Whole network
+connector-ui-network-hint = Every address this connector allows, on every port.
+connector-ui-groups = Groups
+connector-ui-no-groups = No groups yet. A group opens several devices at once.
+connector-ui-devices = Devices
+connector-ui-no-devices = No devices yet. Add those remotehub may reach one by one.
+connector-ui-col-name = Name
+connector-ui-col-address = Address
+connector-ui-col-ports = Ports
+connector-ui-col-groups = Groups
+connector-ui-col-members = Devices
+connector-ui-col-access = Access
+connector-ui-row-closed = closed
+connector-ui-row-open-until = open until { $until }
+connector-ui-row-open = open without end
+connector-ui-row-open-via = open through { $group }
+connector-ui-hours = { $hours ->
+    [one] 1 hour
+   *[other] { $hours } hours
+}
+connector-ui-without-end = without end
+connector-ui-open = Open
+connector-ui-close-row = Close
+connector-ui-remove = Remove
+connector-ui-add-device = Add device
+connector-ui-add-group = Add group
+connector-ui-address-hint = An address, a range such as 10.0.0.0/24, or a host name.
+connector-ui-ports-hint = Ports such as 22, 3389, 8000-8100.
+connector-ui-error-name = A name has 1 to 64 characters.
+connector-ui-error-address = { $value } is neither an address, a range nor a host name.
+connector-ui-error-ports = { $value } is not a port or a range of ports.
+connector-ui-error-no-ports = A device needs at least one port.
+connector-ui-error-exists = { $name } exists already.
+connector-ui-error-unknown = There is no { $name }.
+
+connector-log-what-network = access
+connector-log-what-device = the device { $name }
+connector-log-what-group = the group { $name }
+connector-log-opened-until = { $who } opened { $what } until { $until }.
+connector-log-opened-until-cli = On the command line, opened { $what } until { $until }.
+connector-log-opened-permanent = { $who } opened { $what } without end.
+connector-log-opened-permanent-cli = On the command line, opened { $what } without end.
+connector-log-closed = { $who } closed { $what }.
+connector-log-closed-cli = On the command line, closed { $what }.
+connector-log-expired = The time ran out: closed { $what }.
+connector-log-command-line = The command line
+connector-log-device-added = { $who } added the device { $name }: { $address }, ports { $ports }.
+connector-log-device-removed = { $who } removed the device { $name }.
+connector-log-group-added = { $who } added the group { $name }.
+connector-log-group-removed = { $who } removed the group { $name }.
 connector-log-connection-started = { $user } connected to { $target }.
 connector-log-connection-ended = { $user } disconnected from { $target } after { $minutes ->
     [one] 1 minute
@@ -81,3 +124,13 @@ connector-cli-installed = The Windows service remotehub-connector runs and repor
 connector-cli-updated = The service runs release { $version } now.
 connector-cli-uninstalled = The service and the program are removed.
 connector-cli-data-kept = The data stays in { $path }; uninstall --purge removes it.
+
+connector-cli-device-added = Device { $name } added. It is closed.
+connector-cli-device-removed = Device { $name } removed.
+connector-cli-group-added = Group { $name } added. It is closed.
+connector-cli-group-removed = Group { $name } removed.
+connector-cli-item-closed = { $name }: closed
+connector-cli-item-open-until = { $name }: open until { $until }
+connector-cli-item-open-permanent = { $name }: open without end
+connector-cli-groups-label = Groups:
+connector-cli-devices-label = Devices:

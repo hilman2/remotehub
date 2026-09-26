@@ -1,6 +1,6 @@
 # ADR 0011: The customer opens and closes access at the connector
 
-- Status: accepted
+- Status: accepted, extended by [ADR 0012](0012-access-per-device.md) (access per device)
 - Date: 2026-09-26
 
 ## Context

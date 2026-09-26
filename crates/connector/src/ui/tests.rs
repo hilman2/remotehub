@@ -120,7 +120,7 @@ async fn a_signed_in_user_opens_and_closes_access() {
     )
     .await;
     assert_eq!(status, StatusCode::SEE_OTHER);
-    let stored = setup.site.gate.current();
+    let stored = setup.site.gate.current().access.network;
     let until = stored.access.closes_at().unwrap();
     let minutes = (until - OffsetDateTime::now_utc()).whole_minutes();
     assert!((239..=240).contains(&minutes), "{minutes} minutes");
@@ -162,7 +162,77 @@ async fn a_signed_in_user_opens_and_closes_access() {
     )
     .await;
     assert_eq!(status, StatusCode::SEE_OTHER);
-    assert_eq!(setup.site.gate.current().access, Access::Closed);
+    assert_eq!(
+        setup.site.gate.current().access.network.access,
+        Access::Closed
+    );
+}
+
+/// The customer keeps devices and groups and opens them one by one (#180).
+#[tokio::test]
+async fn devices_and_groups_open_on_their_own() {
+    let setup = setup();
+    let cookie = sign_in(&setup).await;
+    let post = |path: &'static str, body: &'static str| {
+        let (router, cookie) = (setup.router.clone(), cookie.clone());
+        async move { send(&router, form(path, body, Some(&cookie))).await }
+    };
+    assert_eq!(post("/groups", "name=ERP").await.0, StatusCode::SEE_OTHER);
+    let added = post(
+        "/devices",
+        "name=sql&address=10.0.0.5&ports=1433%2C+3389&group=ERP",
+    )
+    .await;
+    assert_eq!(added.0, StatusCode::SEE_OTHER);
+    let (status, _, page) = post("/devices", "name=bad&address=a+b&ports=22").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(page.contains("a b is neither"), "{page}");
+
+    let opened = post("/access", "action=open&scope=group&name=ERP&duration=4").await;
+    assert_eq!(opened.0, StatusCode::SEE_OTHER);
+    let snapshot = setup.site.gate.current();
+    let now = OffsetDateTime::now_utc();
+    assert!(!snapshot.network_open(now));
+    let open: Vec<&str> = snapshot
+        .open_devices(now)
+        .iter()
+        .map(|d| d.name.as_str())
+        .collect();
+    assert_eq!(open, ["sql"]);
+
+    let (_, _, page) = send(
+        &setup.router,
+        Request::get("/")
+            .header(header::COOKIE, &cookie)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert!(page.contains("Partly open."), "{page}");
+    assert!(page.contains("open through ERP"), "{page}");
+    assert!(
+        page.contains("carol opened the group ERP until <time"),
+        "{page}"
+    );
+
+    // A device that is not on the list cannot be opened.
+    let unknown = post(
+        "/access",
+        "action=open&scope=device&name=nowhere&duration=1",
+    )
+    .await;
+    assert_eq!(unknown.0, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        post("/groups/remove", "name=ERP").await.0,
+        StatusCode::SEE_OTHER
+    );
+    assert!(
+        !setup
+            .site
+            .gate
+            .current()
+            .any_open(OffsetDateTime::now_utc())
+    );
 }
 
 /// Another site's form cannot act for a signed-in user.
@@ -194,7 +264,10 @@ async fn changes_come_only_from_the_own_origin() {
         // forms, and every change would be refused like these.
         assert_eq!(headers[header::REFERRER_POLICY], "same-origin");
     }
-    assert_eq!(setup.site.gate.current().access, Access::Closed);
+    assert_eq!(
+        setup.site.gate.current().access.network.access,
+        Access::Closed
+    );
 }
 
 /// What remotehub reports ends up in the page as text, never as markup.

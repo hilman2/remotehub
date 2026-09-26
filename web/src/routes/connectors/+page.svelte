@@ -149,6 +149,9 @@
 												until: time.format(new Date(connector.open_until))
 											})
 										: m.connector_access_open()}
+								{:else if connector.access === 'partly'}
+									<LockOpen size={13} class="text-warning" aria-hidden="true" />
+									{m.connector_access_partly()}
 								{:else if connector.access === 'closed'}
 									<Lock size={13} class="text-ink-2" aria-hidden="true" />
 									{m.connector_access_closed()}

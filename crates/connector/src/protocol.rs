@@ -28,14 +28,26 @@ pub enum Control {
         #[serde(default)]
         device: Option<String>,
     },
+    /// Say whether the customer's access lets a connection to `target`
+    /// through now (#180), without connecting. The connector answers with
+    /// [`Report::Checked`]; only it can resolve the customer's host names.
+    Check { id: Uuid, target: String },
 }
 
 /// What a connector sends on the control socket.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Report {
-    /// The stream `id` could not be opened.
-    Failed { id: Uuid, reason: String },
+    /// The stream `id` could not be opened; `not_open` if the customer has
+    /// not opened the target (#180).
+    Failed {
+        id: Uuid,
+        reason: String,
+        #[serde(default)]
+        not_open: bool,
+    },
+    /// The answer to [`Control::Check`] `id`.
+    Checked { id: Uuid, open: bool },
 }
 
 /// Where a connector reports whether its customer lets remotehub in (#165),
@@ -47,9 +59,15 @@ pub const STATE_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
+    /// Whether the whole network is open.
     pub open: bool,
-    /// RFC 3339; none while closed or open without end.
+    /// RFC 3339, the end of the whole network's access; none while closed or
+    /// open without end.
     pub until: Option<String>,
+    /// Whether single devices or groups are open while the whole network is
+    /// not (#180). Which ones stays with the customer.
+    #[serde(default)]
+    pub partly: bool,
 }
 
 #[cfg(test)]
@@ -79,7 +97,8 @@ mod tests {
             failed,
             Report::Failed {
                 id,
-                reason: "refused".into()
+                reason: "refused".into(),
+                not_open: false,
             }
         );
     }

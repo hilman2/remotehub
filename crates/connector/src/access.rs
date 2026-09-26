@@ -1,11 +1,14 @@
-//! Whether the customer lets remotehub into this network (#165): closed,
-//! open until a point in time, or open without end.
+//! Whether the customer lets remotehub into this network (#165): the whole
+//! network, or single devices and groups of the customer's own list (#180),
+//! each closed, open until a point in time, or open without end.
 //!
-//! The state lives in `access.json` in the data directory. The web interface
-//! and the command line both change it through [`change`], which also writes
-//! the journal; the running connector follows the file through a [`Gate`],
-//! so a change from the command line reaches it too.
+//! The state lives in `access.json`, the list in `inventory.json`, both in
+//! the data directory. The web interface and the command line change them
+//! through the functions here, which also write the journal; the running
+//! connector follows the files through a [`Gate`], so a change from the
+//! command line reaches it too.
 
+use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -15,16 +18,17 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio::sync::watch;
 
+use crate::inventory::{self, Device, Inventory, InventoryError};
 use crate::journal::{Event, Journal};
 
-/// How often the connector reads the file for changes from the command line
-/// and checks whether the time ran out.
+/// How often the connector reads the files for changes from the command line
+/// and checks whether a time ran out.
 const FOLLOW: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum Access {
-    /// remotehub cannot reach the network: the default.
+    /// remotehub cannot reach it: the default.
     #[default]
     Closed,
     /// Open until `until`, or without end.
@@ -35,7 +39,7 @@ pub enum Access {
 }
 
 impl Access {
-    /// Whether remotehub may reach the network at `now`.
+    /// Whether remotehub may reach it at `now`.
     pub fn is_open(&self, now: OffsetDateTime) -> bool {
         match self {
             Access::Closed => false,
@@ -66,7 +70,22 @@ pub enum Changer {
     Expiry,
 }
 
-/// What `access.json` holds: the access and its last change.
+/// What can be opened on its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Scope {
+    /// Every address `REMOTEHUB_CONNECTOR_ALLOW` covers, on every port.
+    #[default]
+    Network,
+    Device {
+        name: String,
+    },
+    Group {
+        name: String,
+    },
+}
+
+/// The access of one scope and its last change.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Stored {
     pub access: Access,
@@ -75,52 +94,279 @@ pub struct Stored {
     pub changed_at: Option<OffsetDateTime>,
 }
 
+/// What `access.json` holds; what it does not name is closed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AccessFile {
+    #[serde(default)]
+    pub network: Stored,
+    #[serde(default)]
+    pub devices: BTreeMap<String, Stored>,
+    #[serde(default)]
+    pub groups: BTreeMap<String, Stored>,
+}
+
+impl AccessFile {
+    pub fn get(&self, scope: &Scope) -> Stored {
+        match scope {
+            Scope::Network => Some(&self.network),
+            Scope::Device { name } => self.devices.get(name),
+            Scope::Group { name } => self.groups.get(name),
+        }
+        .cloned()
+        .unwrap_or_default()
+    }
+
+    fn set(&mut self, scope: &Scope, stored: Stored) {
+        match scope {
+            Scope::Network => self.network = stored,
+            Scope::Device { name } => {
+                self.devices.insert(name.clone(), stored);
+            }
+            Scope::Group { name } => {
+                self.groups.insert(name.clone(), stored);
+            }
+        }
+    }
+
+    /// Every scope with its access.
+    fn all(&self) -> impl Iterator<Item = (Scope, &Stored)> {
+        std::iter::once((Scope::Network, &self.network))
+            .chain(
+                self.devices
+                    .iter()
+                    .map(|(name, s)| (Scope::Device { name: name.clone() }, s)),
+            )
+            .chain(
+                self.groups
+                    .iter()
+                    .map(|(name, s)| (Scope::Group { name: name.clone() }, s)),
+            )
+    }
+}
+
+/// Everything the connector decides by: the access and the list.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Snapshot {
+    pub access: AccessFile,
+    pub inventory: Inventory,
+}
+
+impl Snapshot {
+    pub fn network_open(&self, now: OffsetDateTime) -> bool {
+        self.access.network.access.is_open(now)
+    }
+
+    /// The devices open at `now`, themselves or through one of their groups.
+    pub fn open_devices(&self, now: OffsetDateTime) -> Vec<&Device> {
+        let open = |scope: Scope| self.access.get(&scope).access.is_open(now);
+        self.inventory
+            .devices
+            .iter()
+            .filter(|device| {
+                open(Scope::Device {
+                    name: device.name.clone(),
+                }) || device.groups.iter().any(|group| {
+                    open(Scope::Group {
+                        name: group.clone(),
+                    })
+                })
+            })
+            .collect()
+    }
+
+    /// Whether anything is open: the network, or a device.
+    pub fn any_open(&self, now: OffsetDateTime) -> bool {
+        self.network_open(now) || !self.open_devices(now).is_empty()
+    }
+
+    /// The next point in time something open closes by itself.
+    pub fn next_end(&self, now: OffsetDateTime) -> Option<OffsetDateTime> {
+        self.access
+            .all()
+            .filter(|(_, stored)| stored.access.is_open(now))
+            .filter_map(|(_, stored)| stored.access.closes_at())
+            .min()
+    }
+
+    /// The scopes whose time ran out and that are not closed yet.
+    fn ran_out(&self, now: OffsetDateTime) -> Vec<Scope> {
+        self.access
+            .all()
+            .filter(|(_, stored)| {
+                stored.access.closes_at().is_some() && !stored.access.is_open(now)
+            })
+            .map(|(scope, _)| scope)
+            .collect()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ChangeError {
+    #[error(transparent)]
+    Inventory(#[from] InventoryError),
+    #[error(transparent)]
+    Io(#[from] io::Error),
+}
+
 fn path(dir: &Path) -> PathBuf {
     dir.join("access.json")
 }
 
-/// The stored state; closed if nothing was stored yet.
-pub fn load(dir: &Path) -> io::Result<Stored> {
+fn load_access(dir: &Path) -> io::Result<AccessFile> {
     match std::fs::read(path(dir)) {
         Ok(bytes) => serde_json::from_slice(&bytes).map_err(io::Error::other),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Stored::default()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(AccessFile::default()),
         Err(error) => Err(error),
     }
 }
 
-/// Stores `access` as changed by `by` now, and writes the change to the
-/// journal. Times keep whole seconds: nobody opens access to the
-/// nanosecond, and the log reads better without.
-pub fn change(dir: &Path, journal: &Journal, access: Access, by: Changer) -> io::Result<Stored> {
-    let seconds = |at: OffsetDateTime| at.replace_nanosecond(0).unwrap_or(at);
+fn save_access(dir: &Path, access: &AccessFile) -> io::Result<()> {
+    // Written beside it and renamed, so a reader never sees half a file.
+    let temporary = dir.join("access.json.new");
+    std::fs::write(&temporary, serde_json::to_vec_pretty(access)?)?;
+    std::fs::rename(&temporary, path(dir))
+}
+
+/// The stored state and list; closed and empty if nothing was stored yet.
+pub fn load(dir: &Path) -> io::Result<Snapshot> {
+    Ok(Snapshot {
+        access: load_access(dir)?,
+        inventory: inventory::load(dir)?,
+    })
+}
+
+/// Whole seconds: nobody opens access to the nanosecond, and the log reads
+/// better without.
+fn seconds(at: OffsetDateTime) -> OffsetDateTime {
+    at.replace_nanosecond(0).unwrap_or(at)
+}
+
+/// Stores `access` for `scope` as changed by `by` now, and writes the change
+/// to the journal. A device or group must be on the list.
+pub fn change(
+    dir: &Path,
+    journal: &Journal,
+    scope: Scope,
+    access: Access,
+    by: Changer,
+) -> Result<(), ChangeError> {
+    let list = inventory::load(dir)?;
+    let known = match &scope {
+        Scope::Network => true,
+        Scope::Device { name } => list.device(name).is_some(),
+        Scope::Group { name } => list.has_group(name),
+    };
+    if !known {
+        let name = match &scope {
+            Scope::Device { name } | Scope::Group { name } => name.clone(),
+            Scope::Network => String::new(),
+        };
+        return Err(InventoryError::Unknown(name).into());
+    }
     let access = match access {
         Access::Open { until } => Access::Open {
             until: until.map(seconds),
         },
         Access::Closed => Access::Closed,
     };
-    let stored = Stored {
-        access,
-        changed_by: Some(by.clone()),
-        changed_at: Some(seconds(OffsetDateTime::now_utc())),
-    };
-    // Written beside it and renamed, so a reader never sees half a file.
-    let temporary = dir.join("access.json.new");
-    std::fs::write(&temporary, serde_json::to_vec_pretty(&stored)?)?;
-    std::fs::rename(&temporary, path(dir))?;
+    let mut file = load_access(dir)?;
+    file.set(
+        &scope,
+        Stored {
+            access,
+            changed_by: Some(by.clone()),
+            changed_at: Some(seconds(OffsetDateTime::now_utc())),
+        },
+    );
+    save_access(dir, &file)?;
     journal.append(match access {
-        Access::Closed if by == Changer::Expiry => Event::Expired,
-        Access::Closed => Event::Closed { by },
-        Access::Open { until } => Event::Opened { by, until },
+        Access::Closed if by == Changer::Expiry => Event::Expired { scope },
+        Access::Closed => Event::Closed { by, scope },
+        Access::Open { until } => Event::Opened { by, until, scope },
     });
-    Ok(stored)
+    Ok(())
+}
+
+/// Adds a device to the list, closed.
+pub fn add_device(
+    dir: &Path,
+    journal: &Journal,
+    device: Device,
+    by: Changer,
+) -> Result<(), ChangeError> {
+    let mut list = inventory::load(dir)?;
+    let event = Event::DeviceAdded {
+        by,
+        name: device.name.clone(),
+        address: device.address.to_string(),
+        ports: inventory::ports_text(&device.ports),
+        groups: device.groups.clone(),
+    };
+    list.add_device(device)?;
+    inventory::save(dir, &list)?;
+    journal.append(event);
+    Ok(())
+}
+
+/// Removes a device from the list; its connections end, as if it closed.
+pub fn remove_device(
+    dir: &Path,
+    journal: &Journal,
+    name: &str,
+    by: Changer,
+) -> Result<(), ChangeError> {
+    let mut list = inventory::load(dir)?;
+    list.remove_device(name)?;
+    let mut file = load_access(dir)?;
+    file.devices.remove(name);
+    save_access(dir, &file)?;
+    inventory::save(dir, &list)?;
+    journal.append(Event::DeviceRemoved {
+        by,
+        name: name.to_owned(),
+    });
+    Ok(())
+}
+
+pub fn add_group(
+    dir: &Path,
+    journal: &Journal,
+    name: &str,
+    by: Changer,
+) -> Result<(), ChangeError> {
+    let name = inventory::valid_name(name)?;
+    let mut list = inventory::load(dir)?;
+    list.add_group(name.clone())?;
+    inventory::save(dir, &list)?;
+    journal.append(Event::GroupAdded { by, name });
+    Ok(())
+}
+
+/// Removes a group, from its devices too; what it opened closes.
+pub fn remove_group(
+    dir: &Path,
+    journal: &Journal,
+    name: &str,
+    by: Changer,
+) -> Result<(), ChangeError> {
+    let mut list = inventory::load(dir)?;
+    list.remove_group(name)?;
+    let mut file = load_access(dir)?;
+    file.groups.remove(name);
+    save_access(dir, &file)?;
+    inventory::save(dir, &list)?;
+    journal.append(Event::GroupRemoved {
+        by,
+        name: name.to_owned(),
+    });
+    Ok(())
 }
 
 /// The access as the running connector sees it.
 pub struct Gate {
     dir: PathBuf,
     journal: Arc<Journal>,
-    state: watch::Sender<Stored>,
+    state: watch::Sender<Snapshot>,
 }
 
 impl Gate {
@@ -133,132 +379,69 @@ impl Gate {
         }))
     }
 
-    pub fn current(&self) -> Stored {
+    pub fn current(&self) -> Snapshot {
         self.state.borrow().clone()
     }
 
     /// Sees every change from now on.
-    pub fn subscribe(&self) -> watch::Receiver<Stored> {
+    pub fn subscribe(&self) -> watch::Receiver<Snapshot> {
         self.state.subscribe()
     }
 
-    /// Changes the access, as the web interface does.
-    pub fn set(&self, access: Access, by: Changer) -> io::Result<()> {
-        let stored = change(&self.dir, &self.journal, access, by)?;
-        self.state.send_replace(stored);
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    pub fn journal(&self) -> &Journal {
+        &self.journal
+    }
+
+    /// Changes the access of a scope, as the web interface does.
+    pub fn set(&self, scope: Scope, access: Access, by: Changer) -> Result<(), ChangeError> {
+        change(&self.dir, &self.journal, scope, access, by)?;
+        self.reload();
         Ok(())
     }
 
+    /// Reads the files again after a change made here.
+    pub fn reload(&self) {
+        match load(&self.dir) {
+            Ok(snapshot) => {
+                self.state.send_replace(snapshot);
+            }
+            Err(error) => tracing::warn!(%error, "cannot read the access state"),
+        }
+    }
+
     /// Runs until the process ends: takes over changes from the command line,
-    /// and closes the access when its time runs out.
+    /// and closes what is open when its time runs out.
     pub async fn follow(self: Arc<Self>) {
         let mut tick = tokio::time::interval(FOLLOW);
         loop {
             tick.tick().await;
             match load(&self.dir) {
-                Ok(stored) => {
+                Ok(snapshot) => {
                     let taken = self.state.send_if_modified(|current| {
-                        let changed = *current != stored;
-                        *current = stored.clone();
+                        let changed = *current != snapshot;
+                        *current = snapshot.clone();
                         changed
                     });
                     // The command line's own process wrote the journal; the
                     // log output of the running connector says it, too.
                     if taken {
-                        tracing::info!(access = ?stored.access, by = ?stored.changed_by, "access changed");
+                        tracing::info!(network = ?snapshot.access.network.access, "access changed");
                     }
                 }
-                Err(error) => tracing::warn!(%error, "cannot read access.json"),
+                Err(error) => tracing::warn!(%error, "cannot read the access state"),
             }
-            let current = self.current().access;
-            let ran_out =
-                current.closes_at().is_some() && !current.is_open(OffsetDateTime::now_utc());
-            if ran_out && let Err(error) = self.set(Access::Closed, Changer::Expiry) {
-                tracing::warn!(%error, "cannot close the access");
+            for scope in self.current().ran_out(OffsetDateTime::now_utc()) {
+                if let Err(error) = self.set(scope, Access::Closed, Changer::Expiry) {
+                    tracing::warn!(%error, "cannot close what ran out");
+                }
             }
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use time::macros::datetime;
-
-    use super::*;
-
-    #[test]
-    fn open_means_before_its_end() {
-        let now = datetime!(2026-10-01 12:00 UTC);
-        assert!(!Access::Closed.is_open(now));
-        assert!(Access::Open { until: None }.is_open(now));
-        let until = Access::Open {
-            until: Some(datetime!(2026-10-01 13:00 UTC)),
-        };
-        assert!(until.is_open(now));
-        assert!(!until.is_open(datetime!(2026-10-01 13:00 UTC)));
-    }
-
-    #[test]
-    fn nothing_stored_is_closed_and_a_change_is_read_back() {
-        let dir = tempfile::tempdir().unwrap();
-        let journal = Journal::new(dir.path());
-        assert_eq!(load(dir.path()).unwrap().access, Access::Closed);
-        let until = Some(datetime!(2026-10-01 13:00 UTC));
-        change(
-            dir.path(),
-            &journal,
-            Access::Open { until },
-            Changer::CommandLine,
-        )
-        .unwrap();
-        let stored = load(dir.path()).unwrap();
-        assert_eq!(stored.access, Access::Open { until });
-        assert_eq!(stored.changed_by, Some(Changer::CommandLine));
-        let logged = journal.recent(10);
-        assert_eq!(
-            logged[0].event,
-            Event::Opened {
-                by: Changer::CommandLine,
-                until
-            }
-        );
-    }
-
-    /// The running connector takes over a change the command line wrote, and
-    /// closes the access itself once its time ran out.
-    #[tokio::test]
-    async fn the_gate_follows_the_file_and_the_clock() {
-        let dir = tempfile::tempdir().unwrap();
-        let journal = Arc::new(Journal::new(dir.path()));
-        let gate = Gate::new(dir.path(), journal.clone()).unwrap();
-        let mut seen = gate.subscribe();
-        let _follow = tokio::spawn(gate.clone().follow());
-
-        let until = OffsetDateTime::now_utc() + Duration::from_secs(2);
-        change(
-            dir.path(),
-            &journal,
-            Access::Open { until: Some(until) },
-            Changer::CommandLine,
-        )
-        .unwrap();
-        tokio::time::timeout(Duration::from_secs(5), seen.changed())
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(
-            seen.borrow_and_update()
-                .access
-                .is_open(OffsetDateTime::now_utc())
-        );
-
-        tokio::time::timeout(Duration::from_secs(5), seen.changed())
-            .await
-            .unwrap()
-            .unwrap();
-        let closed = seen.borrow().clone();
-        assert_eq!(closed.access, Access::Closed);
-        assert_eq!(closed.changed_by, Some(Changer::Expiry));
-        assert_eq!(journal.recent(1)[0].event, Event::Expired);
-    }
-}
+mod tests;

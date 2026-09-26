@@ -170,7 +170,6 @@ messages! {
     ConnectorUiChangedBy = "connector-ui-changed-by" { who: String, at: String }
     ConnectorUiChangedCli = "connector-ui-changed-cli" { at: String }
     ConnectorUiChangedExpiry = "connector-ui-changed-expiry" { at: String }
-    ConnectorUiChange = "connector-ui-change" {}
     ConnectorUiOpenFor = "connector-ui-open-for" { hours: i64 }
     ConnectorUiUntilField = "connector-ui-until-field" {}
     ConnectorUiOpenUntilButton = "connector-ui-open-until-button" {}
@@ -191,14 +190,56 @@ messages! {
     ConnectorUiNoLog = "connector-ui-no-log" {}
     ConnectorUiColTime = "connector-ui-col-time" {}
     ConnectorUiColEvent = "connector-ui-col-event" {}
-    /// The connector's journal as the web interface shows it.
-    ConnectorLogOpenedUntil = "connector-log-opened-until" { who: String, until: String }
-    ConnectorLogOpenedUntilCli = "connector-log-opened-until-cli" { until: String }
-    ConnectorLogOpenedPermanent = "connector-log-opened-permanent" { who: String }
-    ConnectorLogOpenedPermanentCli = "connector-log-opened-permanent-cli" {}
-    ConnectorLogClosed = "connector-log-closed" { who: String }
-    ConnectorLogClosedCli = "connector-log-closed-cli" {}
-    ConnectorLogExpired = "connector-log-expired" {}
+    /// Access per device and group (#180): the list and each row's state.
+    ConnectorUiPartly = "connector-ui-partly" {}
+    ConnectorUiNetwork = "connector-ui-network" {}
+    ConnectorUiNetworkHint = "connector-ui-network-hint" {}
+    ConnectorUiGroups = "connector-ui-groups" {}
+    ConnectorUiNoGroups = "connector-ui-no-groups" {}
+    ConnectorUiDevices = "connector-ui-devices" {}
+    ConnectorUiNoDevices = "connector-ui-no-devices" {}
+    ConnectorUiColName = "connector-ui-col-name" {}
+    ConnectorUiColAddress = "connector-ui-col-address" {}
+    ConnectorUiColPorts = "connector-ui-col-ports" {}
+    ConnectorUiColGroups = "connector-ui-col-groups" {}
+    ConnectorUiColMembers = "connector-ui-col-members" {}
+    ConnectorUiColAccess = "connector-ui-col-access" {}
+    ConnectorUiRowClosed = "connector-ui-row-closed" {}
+    ConnectorUiRowOpenUntil = "connector-ui-row-open-until" { until: String }
+    ConnectorUiRowOpen = "connector-ui-row-open" {}
+    ConnectorUiRowOpenVia = "connector-ui-row-open-via" { group: String }
+    ConnectorUiHours = "connector-ui-hours" { hours: i64 }
+    ConnectorUiWithoutEnd = "connector-ui-without-end" {}
+    ConnectorUiOpen = "connector-ui-open" {}
+    ConnectorUiCloseRow = "connector-ui-close-row" {}
+    ConnectorUiRemove = "connector-ui-remove" {}
+    ConnectorUiAddDevice = "connector-ui-add-device" {}
+    ConnectorUiAddGroup = "connector-ui-add-group" {}
+    ConnectorUiAddressHint = "connector-ui-address-hint" {}
+    ConnectorUiPortsHint = "connector-ui-ports-hint" {}
+    ConnectorUiErrorName = "connector-ui-error-name" {}
+    ConnectorUiErrorAddress = "connector-ui-error-address" { value: String }
+    ConnectorUiErrorPorts = "connector-ui-error-ports" { value: String }
+    ConnectorUiErrorNoPorts = "connector-ui-error-no-ports" {}
+    ConnectorUiErrorExists = "connector-ui-error-exists" { name: String }
+    ConnectorUiErrorUnknown = "connector-ui-error-unknown" { name: String }
+    /// The connector's journal as the web interface shows it. `what` is one
+    /// of the `connector-log-what-*` messages.
+    ConnectorLogWhatNetwork = "connector-log-what-network" {}
+    ConnectorLogWhatDevice = "connector-log-what-device" { name: String }
+    ConnectorLogWhatGroup = "connector-log-what-group" { name: String }
+    ConnectorLogOpenedUntil = "connector-log-opened-until" { who: String, what: String, until: String }
+    ConnectorLogOpenedUntilCli = "connector-log-opened-until-cli" { what: String, until: String }
+    ConnectorLogOpenedPermanent = "connector-log-opened-permanent" { who: String, what: String }
+    ConnectorLogOpenedPermanentCli = "connector-log-opened-permanent-cli" { what: String }
+    ConnectorLogClosed = "connector-log-closed" { who: String, what: String }
+    ConnectorLogClosedCli = "connector-log-closed-cli" { what: String }
+    ConnectorLogExpired = "connector-log-expired" { what: String }
+    ConnectorLogCommandLine = "connector-log-command-line" {}
+    ConnectorLogDeviceAdded = "connector-log-device-added" { who: String, name: String, address: String, ports: String }
+    ConnectorLogDeviceRemoved = "connector-log-device-removed" { who: String, name: String }
+    ConnectorLogGroupAdded = "connector-log-group-added" { who: String, name: String }
+    ConnectorLogGroupRemoved = "connector-log-group-removed" { who: String, name: String }
     ConnectorLogConnectionStarted = "connector-log-connection-started" { user: String, target: String }
     ConnectorLogConnectionEnded = "connector-log-connection-ended" { user: String, target: String, minutes: i64, sent: String, received: String }
     ConnectorLogConnectionRefused = "connector-log-connection-refused" { user: String, target: String, reason: String }
@@ -224,6 +265,16 @@ messages! {
     ConnectorCliUpdated = "connector-cli-updated" { version: String }
     ConnectorCliUninstalled = "connector-cli-uninstalled" {}
     ConnectorCliDataKept = "connector-cli-data-kept" { path: String }
+    /// The customer's list on the command line (#180).
+    ConnectorCliDeviceAdded = "connector-cli-device-added" { name: String }
+    ConnectorCliDeviceRemoved = "connector-cli-device-removed" { name: String }
+    ConnectorCliGroupAdded = "connector-cli-group-added" { name: String }
+    ConnectorCliGroupRemoved = "connector-cli-group-removed" { name: String }
+    ConnectorCliItemClosed = "connector-cli-item-closed" { name: String }
+    ConnectorCliItemOpenUntil = "connector-cli-item-open-until" { name: String, until: String }
+    ConnectorCliItemOpenPermanent = "connector-cli-item-open-permanent" { name: String }
+    ConnectorCliGroupsLabel = "connector-cli-groups-label" {}
+    ConnectorCliDevicesLabel = "connector-cli-devices-label" {}
 }
 
 /// The catalog files of a locale, embedded in the binary.

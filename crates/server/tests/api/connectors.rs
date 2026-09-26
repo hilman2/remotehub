@@ -6,12 +6,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use remotehub_connector::access::{Access, Changer, Gate};
+use remotehub_connector::access::{Access, Changer, Gate, Scope};
 use remotehub_connector::agent::{self, AgentSettings, Site};
+use remotehub_connector::inventory::{Device, Ports};
 use remotehub_connector::journal::{Event, Journal};
 use remotehub_connector::protocol;
 use remotehub_server::AppState;
-use remotehub_server::connectors::{Forward, Requester, STREAM_TIMEOUT};
+use remotehub_server::connectors::{ConnectorError, Forward, Requester, STREAM_TIMEOUT};
 use secrecy::SecretString;
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -73,8 +74,14 @@ pub fn start_connector(
     };
     let dir = tempfile::tempdir().unwrap();
     let journal = Arc::new(Journal::new(dir.path()));
-    remotehub_connector::access::change(dir.path(), &journal, access, Changer::CommandLine)
-        .unwrap();
+    remotehub_connector::access::change(
+        dir.path(),
+        &journal,
+        Scope::Network,
+        access,
+        Changer::CommandLine,
+    )
+    .unwrap();
     let site = Site {
         gate: Gate::new(dir.path(), journal.clone()).unwrap(),
         journal,
@@ -483,7 +490,11 @@ async fn the_customer_opens_and_closes_access(pool: PgPool) {
     agent
         .site
         .gate
-        .set(Access::Open { until: Some(until) }, carol.clone())
+        .set(
+            Scope::Network,
+            Access::Open { until: Some(until) },
+            carol.clone(),
+        )
         .unwrap();
     wait_for(
         || state.connectors.is_online(id),
@@ -502,7 +513,11 @@ async fn the_customer_opens_and_closes_access(pool: PgPool) {
     .unwrap();
     assert_eq!(reported.unix_timestamp(), until.unix_timestamp());
 
-    agent.site.gate.set(Access::Closed, carol).unwrap();
+    agent
+        .site
+        .gate
+        .set(Scope::Network, Access::Closed, carol)
+        .unwrap();
     wait_for(|| !state.connectors.is_online(id), "the connector to go").await;
     wait_for(
         || reported_open(&state, id) == Some(false),
@@ -562,6 +577,7 @@ async fn closing_ends_running_connections(pool: PgPool) {
         .site
         .gate
         .set(
+            Scope::Network,
             Access::Closed,
             Changer::Web {
                 user: "carol".into(),
@@ -597,7 +613,11 @@ async fn closing_ends_running_connections(pool: PgPool) {
     agent
         .site
         .gate
-        .set(Access::Open { until: Some(until) }, Changer::CommandLine)
+        .set(
+            Scope::Network,
+            Access::Open { until: Some(until) },
+            Changer::CommandLine,
+        )
         .unwrap();
     wait_for(
         || state.connectors.is_online(id),
@@ -614,14 +634,10 @@ async fn closing_ends_running_connections(pool: PgPool) {
         "a closed report",
     )
     .await;
-    assert!(
-        agent
-            .site
-            .journal
-            .recent(10)
-            .iter()
-            .any(|e| e.event == Event::Expired)
-    );
+    assert!(agent.site.journal.recent(10).iter().any(|e| e.event
+        == Event::Expired {
+            scope: Scope::Network
+        }));
 }
 
 /// The command line changes the file; the running connector follows.
@@ -639,6 +655,7 @@ async fn the_command_line_opens_a_running_connector(pool: PgPool) {
     remotehub_connector::access::change(
         agent.dir.path(),
         &Journal::new(agent.dir.path()),
+        Scope::Network,
         Access::Open { until: None },
         Changer::CommandLine,
     )
@@ -648,6 +665,82 @@ async fn the_command_line_opens_a_running_connector(pool: PgPool) {
         "the connector to come online",
     )
     .await;
+}
+
+/// With only one device open (#180), the connector stays online, remotehub
+/// asks it about each target, and a stream to another device is refused as
+/// not open rather than as unreachable.
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn one_open_device_lets_only_itself_through(pool: PgPool) {
+    let (state, app, token, _folder) = setup(pool).await;
+    let (id, secret) = new_connector(&app, &token, "lab").await;
+    let address = serve(state.clone()).await;
+    let router = echo().await;
+    let other = echo().await;
+    let agent = start_connector(address, &secret, "", Access::Closed);
+    let port = router.rsplit(':').next().unwrap();
+    remotehub_connector::access::add_device(
+        agent.dir.path(),
+        &agent.site.journal,
+        Device {
+            name: "router".into(),
+            address: "127.0.0.1".parse().unwrap(),
+            ports: Ports::parse_list(port).unwrap(),
+            groups: Vec::new(),
+        },
+        Changer::CommandLine,
+    )
+    .unwrap();
+    agent
+        .site
+        .gate
+        .set(
+            Scope::Device {
+                name: "router".into(),
+            },
+            Access::Open { until: None },
+            Changer::CommandLine,
+        )
+        .unwrap();
+    wait_for(
+        || state.connectors.is_online(id),
+        "the connector to come online",
+    )
+    .await;
+    wait_for(
+        || {
+            state
+                .connectors
+                .access(id)
+                .is_some_and(|a| a.partly && !a.open)
+        },
+        "a partly report",
+    )
+    .await;
+    let listed = send(&app, get("/api/connectors", Some(&token)))
+        .await
+        .json();
+    assert_eq!(listed[0]["access"], "partly");
+
+    let timeout = Duration::from_secs(5);
+    assert!(state.connectors.check(id, &router, timeout).await.unwrap());
+    assert!(!state.connectors.check(id, &other, timeout).await.unwrap());
+    assert!(
+        state
+            .connectors
+            .stream(id, &router, None, STREAM_TIMEOUT)
+            .await
+            .is_ok()
+    );
+    let refused = state
+        .connectors
+        .stream(id, &other, None, STREAM_TIMEOUT)
+        .await
+        .err();
+    assert!(
+        matches!(refused, Some(ConnectorError::NotOpen)),
+        "{refused:?}"
+    );
 }
 
 /// A report reaches the audit log and the UI only as a point in time.

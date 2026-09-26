@@ -23,6 +23,8 @@ use crate::connectors::{Forward, Requester, towards};
 use crate::session::Session;
 use crate::{AppState, catalog, secrets};
 
+/// How long a connector may take to say whether a target is open.
+const CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 const PASSWORD_FIELD: &str = "password";
 const PRIVATE_KEY_FIELD: &str = "private_key";
 const PASSPHRASE_FIELD: &str = "passphrase";
@@ -98,17 +100,30 @@ pub async fn route(
             _forward: None,
         });
     };
+    let reported = state.connectors.access(connector);
     if !state.connectors.is_online(connector) {
         // A closed connector keeps no control socket, but still reports.
-        let closed = state
-            .connectors
-            .access(connector)
-            .is_some_and(|access| !access.open);
+        let closed = reported
+            .as_ref()
+            .is_some_and(|access| !access.open && !access.partly);
         return Err(Problem::new(if closed {
             ErrorCode::ConnectorClosed
         } else {
             ErrorCode::ConnectorOffline
         }));
+    }
+    // With only some devices open (#180), the connector says whether this is
+    // one of them; the user learns it now instead of from a failed
+    // connection. Without an answer in time, the connector decides when the
+    // engine connects.
+    if reported.is_some_and(|access| access.partly) {
+        let open = state
+            .connectors
+            .check(connector, &authority(&target.host, port), CHECK_TIMEOUT)
+            .await;
+        if open == Ok(false) {
+            return Err(Problem::new(ErrorCode::ConnectorTargetClosed));
+        }
     }
     let loopback = IpAddr::from(Ipv4Addr::LOCALHOST);
     let (bind, peers) = match engine {

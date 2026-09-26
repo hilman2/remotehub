@@ -392,12 +392,19 @@ pub mod eventlog {
         Error,
     }
 
-    /// A journal entry as an event: ID 1 for changes of the access, 2 for
-    /// connections, 3 for sign-ins to the web interface. `line` is the
-    /// journal's JSON line, which log collectors can read.
+    /// A journal entry as an event: ID 1 for changes of the access and of
+    /// the list of devices, 2 for connections, 3 for sign-ins to the web
+    /// interface. `line` is the journal's JSON line, which log collectors
+    /// can read.
     pub fn journal(event: &Event, line: &str) {
         let (kind, id) = match event {
-            Event::Opened { .. } | Event::Closed { .. } | Event::Expired => (Kind::Information, 1),
+            Event::Opened { .. }
+            | Event::Closed { .. }
+            | Event::Expired { .. }
+            | Event::DeviceAdded { .. }
+            | Event::DeviceRemoved { .. }
+            | Event::GroupAdded { .. }
+            | Event::GroupRemoved { .. } => (Kind::Information, 1),
             Event::ConnectionStarted { .. } | Event::ConnectionEnded { .. } => {
                 (Kind::Information, 2)
             }

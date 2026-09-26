@@ -286,6 +286,11 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   its own web interface or on its command line (`crates/connector/src/access.rs`, `ui.rs`). Closed, it has no
   control socket and posts its state to `/api/connectors/state`; `connect::route` then answers
   `connector_closed`. The connector keeps its own journal (`access.log`) of changes and connections.
+  Access can also be open for single devices and groups of the customer's own list (ADR 0012,
+  `crates/connector/src/inventory.rs`). The connector then reports `partly`, and `connect::route` asks it
+  with `Check` whether the target is open before it opens a forward; a closed one gets
+  `connector_target_closed`. The connector decides again for every stream and ends running connections to
+  devices that close.
 - All engines sit behind the trait `ProtocolEngine`, so an own RDP engine (IronRDP) can replace guacd later
   without changing API or UI.
 

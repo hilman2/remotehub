@@ -36,6 +36,7 @@ export const ERROR_CODES = [
 	'retarget_forbidden',
 	'connector_offline',
 	'connector_closed',
+	'connector_target_closed',
 	'connector_protocol',
 	'purpose_required',
 	'accounts_unavailable',

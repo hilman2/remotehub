@@ -346,10 +346,12 @@ All sessions of the service run as one Unix user. Why, and what that means: [ADR
 A site connector runs in a network that remotehub cannot reach and opens the way from there. It needs outbound
 HTTPS to `REMOTEHUB_PUBLIC_URL` and nothing inbound. It is the image `ghcr.io/hilman2/remotehub-connector`.
 
-The customer decides when remotehub may enter. Access starts closed: the connector does not connect to
-remotehub until someone opens it, for some hours, until a point in time, or without end. Closing, or the
-time running out, ends running connections at once. The connector keeps its own log of every change and every
-connection. Why the switch sits at the connector: [ADR 0011](adr/0011-customer-controls-access.md).
+The customer decides when remotehub may enter, and where. Access starts closed: the connector does not connect
+to remotehub until someone opens it, for some hours, until a point in time, or without end. It opens the whole
+network or only single devices and groups the customer lists. Closing, or the time running out, ends running
+connections at once. The connector keeps its own log of every change and every connection. Why the switch
+sits at the connector: [ADR 0011](adr/0011-customer-controls-access.md) and
+[ADR 0012](adr/0012-access-per-device.md).
 
 ### Start the connector on Linux
 
@@ -436,8 +438,9 @@ On Windows, run the same commands in a PowerShell as administrator, e.g.
 `user list`, `user reset NAME` and `user delete NAME` manage them. Five wrong attempts lock a name for five
 minutes.
 
-After signing in, the page shows whether access is open, and offers to open it for 1, 4 or 8 hours, until a
-chosen time, or without end, and to close it. Below are the running connections and the latest log entries.
+After signing in, the page shows whether access to the whole network is open, and offers to open it for 1, 4
+or 8 hours, until a chosen time, or without end, and to close it. Below are the groups and devices, each with
+its own switch, then the running connections and the latest log entries.
 
 The same works on the command line, e.g. from a script or a scheduled task:
 
@@ -449,10 +452,32 @@ sudo docker exec remotehub-connector remotehub-connector close
 sudo docker exec remotehub-connector remotehub-connector status
 ```
 
+### Open single devices
+
+Suppose remotehub should reach only the servers of your ERP system, for a two-hour maintenance window. List
+them on the connector, each with its address and the ports remotehub needs, and put them into a group:
+
+```bash
+sudo docker exec remotehub-connector remotehub-connector group add ERP
+sudo docker exec remotehub-connector remotehub-connector device add haproxy --address 10.20.0.5 --ports 22 --group ERP
+sudo docker exec remotehub-connector remotehub-connector device add sql --address sql01.corp.local --ports 3389,1433 --group ERP
+sudo docker exec remotehub-connector remotehub-connector open --group ERP --hours 2
+```
+
+The web interface offers the same under *Groups* and *Devices*. An address is an IP, a range such as
+`10.20.0.0/24`, or a host name, which the connector resolves in your network. A device can be in several
+groups; `--group` may be repeated. New devices and groups start closed. `open --device NAME` opens a single
+device, `close --group ERP` closes the group again. `device remove`, `group remove`, `device list` and
+`group list` do what they say.
+
+A connection goes through when its target is a listed port of an open device, alone or through an open group,
+or anywhere while the whole network is open. `REMOTEHUB_CONNECTOR_ALLOW` still limits all of it. remotehub
+shows such a connector as *open in part* and refuses devices you have not opened.
+
 ### The log
 
-Every opening and closing, and every connection with its device, the remotehub user, its duration and the bytes
-transferred, go to `access.log` in the data directory, one JSON object per line, and to the container's log
+Every opening and closing, naming the device or group, every change to the list, and every connection with
+its device, the remotehub user, its duration and the bytes transferred, go to `access.log` in the data directory, one JSON object per line, and to the container's log
 output. On Windows, the same lines also go to the event log (*Application*, source `remotehub-connector`): ID 1
 for openings and closings, 2 for connections, 3 for sign-ins to the web interface; refused connections and
 failed sign-ins are warnings. The remotehub user is the name remotehub reports; the connector cannot check it.

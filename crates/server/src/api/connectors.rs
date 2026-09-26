@@ -56,8 +56,8 @@ pub struct ConnectorView {
     /// Connections it has carried since remotehub started.
     #[sqlx(skip)]
     streams_carried: u64,
-    /// `open` or `closed`, as the connector reports it; none without a
-    /// recent report.
+    /// `open`, `partly` (some devices, #180) or `closed`, as the connector
+    /// reports it; none without a recent report.
     #[sqlx(skip)]
     access: Option<&'static str>,
     /// RFC 3339; while open until a point in time.
@@ -103,7 +103,13 @@ pub async fn list(
         connector.streams = state.connectors.streams(connector.id);
         connector.streams_carried = state.connectors.streams_carried(connector.id);
         if let Some(access) = state.connectors.access(connector.id) {
-            connector.access = Some(if access.open { "open" } else { "closed" });
+            connector.access = Some(if access.open {
+                "open"
+            } else if access.partly {
+                "partly"
+            } else {
+                "closed"
+            });
             connector.open_until = access.until;
         }
     }
@@ -250,7 +256,10 @@ async fn run_control(mut socket: WebSocket, state: AppState, connector: Uuid) {
             }
             message = socket.recv() => match message {
                 Some(Ok(Message::Text(text))) => match serde_json::from_str::<Report>(&text) {
-                    Ok(Report::Failed { id, reason }) => state.connectors.fail(connector, id, reason),
+                    Ok(Report::Failed { id, reason, not_open }) => {
+                        state.connectors.fail(connector, id, reason, not_open);
+                    }
+                    Ok(Report::Checked { id, open }) => state.connectors.checked(connector, id, open),
                     Err(error) => tracing::warn!(%connector, %error, "unknown message from a connector"),
                 },
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,

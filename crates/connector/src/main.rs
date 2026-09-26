@@ -2,8 +2,9 @@ use std::path::Path;
 
 use anyhow::Context;
 use clap::{ArgGroup, Parser, Subcommand};
-use remotehub_connector::access::{self, Access, Changer};
+use remotehub_connector::access::{self, Access, Changer, Scope};
 use remotehub_connector::daemon::{self, Logs};
+use remotehub_connector::inventory::{self, Device, Ports};
 use remotehub_connector::journal::Journal;
 use remotehub_connector::users::{Issued, Users};
 use remotehub_connector::{files, settings};
@@ -27,7 +28,8 @@ struct Cli {
 enum Command {
     /// Run the connector and its web interface (the default).
     Run,
-    /// Let remotehub in: for some hours, until a point in time, or without
+    /// Let remotehub in: to the whole network, or with --device or --group
+    /// to one of the list; for some hours, until a point in time, or without
     /// end. The running connector follows within a second.
     #[command(group(ArgGroup::new("how").required(true).args(["hours", "until", "permanent"])))]
     Open {
@@ -41,11 +43,27 @@ enum Command {
         /// Until someone closes it.
         #[arg(long)]
         permanent: bool,
+        #[command(flatten)]
+        scope: ScopeArgs,
     },
-    /// Keep remotehub out; running connections end at once.
-    Close,
-    /// Show whether access is open.
+    /// Keep remotehub out, of the whole network or with --device or --group
+    /// of one of the list; running connections there end at once.
+    Close {
+        #[command(flatten)]
+        scope: ScopeArgs,
+    },
+    /// Show what is open.
     Status,
+    /// Manage the devices remotehub can be let in to one by one.
+    Device {
+        #[command(subcommand)]
+        action: DeviceAction,
+    },
+    /// Manage groups of devices, which open together.
+    Group {
+        #[command(subcommand)]
+        action: GroupAction,
+    },
     /// Manage the users of the web interface.
     User {
         #[command(subcommand)]
@@ -75,6 +93,59 @@ enum Command {
     #[cfg(windows)]
     #[command(hide = true)]
     Service,
+}
+
+/// The whole network, unless one of these names a device or group.
+#[derive(clap::Args)]
+#[group(multiple = false)]
+struct ScopeArgs {
+    /// A device of the list.
+    #[arg(long)]
+    device: Option<String>,
+    /// A group of the list.
+    #[arg(long)]
+    group: Option<String>,
+}
+
+impl ScopeArgs {
+    fn scope(self) -> Scope {
+        match (self.device, self.group) {
+            (Some(name), _) => Scope::Device { name },
+            (None, Some(name)) => Scope::Group { name },
+            (None, None) => Scope::Network,
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum DeviceAction {
+    /// Add a device, closed.
+    Add {
+        name: String,
+        /// An address, a range such as 10.0.0.0/24, or a host name.
+        #[arg(long)]
+        address: String,
+        /// Ports such as 22,3389,8000-8100.
+        #[arg(long)]
+        ports: String,
+        /// A group it belongs to; repeat for several.
+        #[arg(long = "group")]
+        groups: Vec<String>,
+    },
+    /// Remove a device; its connections end.
+    Remove { name: String },
+    /// List the devices.
+    List,
+}
+
+#[derive(Subcommand)]
+enum GroupAction {
+    /// Add a group, closed.
+    Add { name: String },
+    /// Remove a group, also from its devices.
+    Remove { name: String },
+    /// List the groups.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -119,6 +190,7 @@ fn main() -> anyhow::Result<()> {
             hours,
             until,
             permanent,
+            scope,
         } => {
             let until = match (hours, until) {
                 _ if permanent => None,
@@ -126,14 +198,16 @@ fn main() -> anyhow::Result<()> {
                 (None, Some(text)) => Some(parse_until(&text)?),
                 (None, None) => unreachable!("clap requires one of them"),
             };
-            change(&data, Access::Open { until })?;
+            change(&data, scope.scope(), Access::Open { until })?;
             print_status(&data, locale)
         }
-        Command::Close => {
-            change(&data, Access::Closed)?;
+        Command::Close { scope } => {
+            change(&data, scope.scope(), Access::Closed)?;
             print_status(&data, locale)
         }
         Command::Status => print_status(&data, locale),
+        Command::Device { action } => manage_devices(&data, locale, action),
+        Command::Group { action } => manage_groups(&data, locale, action),
         Command::User { action } => manage_users(&data, locale, action),
         #[cfg(windows)]
         Command::Install { url, allow } => {
@@ -164,9 +238,79 @@ fn cli_locale() -> Locale {
     Locale::En
 }
 
-fn change(data: &Path, access: Access) -> anyhow::Result<()> {
+fn change(data: &Path, scope: Scope, access: Access) -> anyhow::Result<()> {
     files::data_dir(data).with_context(|| format!("creating {}", data.display()))?;
-    access::change(data, &Journal::new(data), access, Changer::CommandLine)?;
+    access::change(
+        data,
+        &Journal::new(data),
+        scope,
+        access,
+        Changer::CommandLine,
+    )?;
+    Ok(())
+}
+
+fn manage_devices(data: &Path, locale: Locale, action: DeviceAction) -> anyhow::Result<()> {
+    files::data_dir(data).with_context(|| format!("creating {}", data.display()))?;
+    let journal = Journal::new(data);
+    let say = |message: Message| println!("{}", i18n::render(locale, &message));
+    match action {
+        DeviceAction::Add {
+            name,
+            address,
+            ports,
+            groups,
+        } => {
+            let device = Device {
+                name: inventory::valid_name(&name)?,
+                address: address.parse()?,
+                ports: Ports::parse_list(&ports)?,
+                groups,
+            };
+            let name = device.name.clone();
+            access::add_device(data, &journal, device, Changer::CommandLine)?;
+            say(Message::ConnectorCliDeviceAdded { name });
+        }
+        DeviceAction::Remove { name } => {
+            access::remove_device(data, &journal, &name, Changer::CommandLine)?;
+            say(Message::ConnectorCliDeviceRemoved { name });
+        }
+        DeviceAction::List => {
+            for device in inventory::load(data)?.devices {
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    device.name,
+                    device.address,
+                    inventory::ports_text(&device.ports),
+                    device.groups.join(", ")
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn manage_groups(data: &Path, locale: Locale, action: GroupAction) -> anyhow::Result<()> {
+    files::data_dir(data).with_context(|| format!("creating {}", data.display()))?;
+    let journal = Journal::new(data);
+    let say = |message: Message| println!("{}", i18n::render(locale, &message));
+    match action {
+        GroupAction::Add { name } => {
+            access::add_group(data, &journal, &name, Changer::CommandLine)?;
+            say(Message::ConnectorCliGroupAdded { name });
+        }
+        GroupAction::Remove { name } => {
+            access::remove_group(data, &journal, &name, Changer::CommandLine)?;
+            say(Message::ConnectorCliGroupRemoved { name });
+        }
+        GroupAction::List => {
+            let list = inventory::load(data)?;
+            for group in &list.groups {
+                let members: Vec<&str> = list.members(group).map(|d| d.name.as_str()).collect();
+                println!("{group}\t{}", members.join(", "));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -189,18 +333,52 @@ fn parse_until(text: &str) -> anyhow::Result<OffsetDateTime> {
 }
 
 fn print_status(data: &Path, locale: Locale) -> anyhow::Result<()> {
-    let stored = access::load(data)?;
+    let snapshot = access::load(data)?;
     let now = OffsetDateTime::now_utc();
-    let message = match stored.access {
+    let say = |message: Message| println!("{}", i18n::render(locale, &message));
+    let network = snapshot.access.network.access;
+    say(match network {
         Access::Open { until: None } => Message::ConnectorCliOpenPermanent {},
-        Access::Open { until: Some(until) } if stored.access.is_open(now) => {
+        Access::Open { until: Some(until) } if network.is_open(now) => {
             Message::ConnectorCliOpenUntil {
                 until: until.format(&Rfc3339)?,
             }
         }
         _ => Message::ConnectorCliClosed {},
+    });
+    // Each group and device of the list with its own access.
+    let item = |name: &str, scope: Scope| -> anyhow::Result<Message> {
+        let access = snapshot.access.get(&scope).access;
+        let name = name.to_owned();
+        Ok(match access {
+            Access::Open { until: None } => Message::ConnectorCliItemOpenPermanent { name },
+            Access::Open { until: Some(until) } if access.is_open(now) => {
+                Message::ConnectorCliItemOpenUntil {
+                    name,
+                    until: until.format(&Rfc3339)?,
+                }
+            }
+            _ => Message::ConnectorCliItemClosed { name },
+        })
     };
-    println!("{}", i18n::render(locale, &message));
+    if !snapshot.inventory.groups.is_empty() {
+        say(Message::ConnectorCliGroupsLabel {});
+        for group in &snapshot.inventory.groups {
+            let scope = Scope::Group {
+                name: group.clone(),
+            };
+            println!("  {}", i18n::render(locale, &item(group, scope)?));
+        }
+    }
+    if !snapshot.inventory.devices.is_empty() {
+        say(Message::ConnectorCliDevicesLabel {});
+        for device in &snapshot.inventory.devices {
+            let scope = Scope::Device {
+                name: device.name.clone(),
+            };
+            println!("  {}", i18n::render(locale, &item(&device.name, scope)?));
+        }
+    }
     Ok(())
 }
 
