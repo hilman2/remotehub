@@ -124,6 +124,8 @@ audit_actions! {
     VaultRecoveryCancelled = "vault_recovery.cancelled",
     VaultRecoveryOpened = "vault_recovery.opened",
     VaultRecoveryCompleted = "vault_recovery.completed",
+    ExtensionConnected = "extension.connected",
+    ExtensionDisconnected = "extension.disconnected",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).

@@ -10,6 +10,7 @@
 	import Logo from '$lib/components/Logo.svelte';
 	import ServerStatus from '$lib/components/ServerStatus.svelte';
 	import ThemeSwitch from '$lib/components/ThemeSwitch.svelte';
+	import { connectHref, rememberConnect, takePendingConnect } from '$lib/extension/connect';
 	import { getLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
 	import {
@@ -33,6 +34,9 @@
 	const signInPage = $derived(page.url.pathname.startsWith(resolve('/sign-in')));
 	// The setup wizard (#143) stands alone, like the sign-in pages.
 	const setupPage = $derived(page.url.pathname === resolve('/setup'));
+	// So does the page that connects the browser extension (#201): it opens
+	// in a window of its own, from the extension.
+	const connectPage = $derived(page.url.pathname === resolve('/extension/connect'));
 	/** Setup is open, and waits for whoever looks at this page. */
 	const setupWaits = $derived(
 		setup.phase === 'pending' || (setup.phase === 'administrator' && !!session.user?.admin)
@@ -96,7 +100,16 @@
 		// does not find the vault open either.
 		tabs.clear();
 		unlocked.key = null;
+		// Every way of signing in ends on the start page; the extension's
+		// request waits for the effect below to come back to it.
+		if (connectPage) rememberConnect(page.url.search);
 		if (!signInPage && !setupPage) goto(resolve('/sign-in'));
+	});
+
+	$effect(() => {
+		if (!session.user || connectPage) return;
+		const pending = takePendingConnect();
+		if (pending) goto(connectHref(pending));
 	});
 
 	// A reload or a closed tab ends every session: the browser asks first.
@@ -124,6 +137,8 @@
 		<LocaleSwitch />
 		<ThemeSwitch />
 	</div>
+	{@render children()}
+{:else if connectPage && session.user}
 	{@render children()}
 {:else if session.user}
 	<a

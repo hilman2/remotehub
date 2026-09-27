@@ -41,8 +41,12 @@ pub fn settings() -> Settings {
         kratos: None,
         caddy: None,
         downloads: None,
+        extension_ids: vec![EXTENSION_ID.to_owned()],
     }
 }
+
+/// The browser extension the tests connect (#201).
+pub const EXTENSION_ID: &str = "abcdefghijklmnopabcdefghijklmnop";
 
 /// A pool whose database does not exist, for behaviour without a database.
 pub fn unreachable_pool() -> PgPool {

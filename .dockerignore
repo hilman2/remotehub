@@ -5,6 +5,9 @@ target
 web/node_modules
 web/.svelte-kit
 web/build
+web/build-extension
+web/build-extension-e2e
+web/build-extension-packed
 web/src/lib/paraglide
 web/test-results
 deploy/testlab

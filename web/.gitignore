@@ -7,6 +7,9 @@ node_modules
 .wrangler
 /.svelte-kit
 /build
+/build-extension
+/build-extension-e2e
+/build-extension-packed
 
 # OS
 .DS_Store

@@ -178,19 +178,31 @@ async fn serve() -> anyhow::Result<()> {
             .as_ref()
             .map(remotehub_server::kratos::Kratos::new),
         caddy: None,
-        downloads: match config.connector_downloads.as_deref().map(Downloads::load) {
+        downloads: match config.downloads.as_deref().map(Downloads::load) {
             Some(Ok(Some(downloads))) => Some(Arc::new(downloads)),
             Some(Ok(None)) => {
-                tracing::warn!("no remotehub-connector.exe to serve under /downloads");
+                tracing::warn!("nothing to serve under /downloads");
                 None
             }
             Some(Err(error)) => {
-                tracing::error!(%error, "cannot read remotehub-connector.exe");
+                tracing::error!(%error, "cannot read the files to serve under /downloads");
                 None
             }
             None => None,
         },
+        extension_ids: config.extension_ids.clone(),
     };
+    if settings
+        .downloads
+        .as_deref()
+        .and_then(Downloads::extension)
+        .is_some_and(|served| served.id == remotehub_server::downloads::DEVELOPMENT_EXTENSION)
+    {
+        tracing::warn!(
+            "the browser extension under /downloads is signed with the public development key; \
+             build the image with the secret extension_key (deploy/Dockerfile)"
+        );
+    }
     settings.caddy = config
         .caddy
         .clone()

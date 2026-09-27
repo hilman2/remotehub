@@ -121,30 +121,36 @@ pub async fn vault(
     State(state): State<AppState>,
     session: Session,
 ) -> Result<Json<Vault>, Problem> {
+    Ok(Json(load(&state, session.user_id).await?))
+}
+
+/// The vault of `user_id` as its owner's browser reads it; the browser
+/// extension (#201) reads the same.
+pub(super) async fn load(state: &AppState, user_id: Uuid) -> Result<Vault, Problem> {
     let unlocks = sqlx::query_as(
         "SELECT id, kind, params, wrapped_key, label FROM personal_vault_unlocks
          WHERE user_id = $1 ORDER BY created_at",
     )
-    .bind(session.user_id)
+    .bind(user_id)
     .fetch_all(&state.db)
     .await?;
     let entries = sqlx::query_as(
         "SELECT id, nonce, ciphertext FROM personal_entries WHERE user_id = $1 ORDER BY created_at",
     )
-    .bind(session.user_id)
+    .bind(user_id)
     .fetch_all(&state.db)
     .await?;
     let search = sqlx::query_as("SELECT nonce, ciphertext FROM personal_search WHERE user_id = $1")
-        .bind(session.user_id)
+        .bind(user_id)
         .fetch_optional(&state.db)
         .await?;
-    Ok(Json(Vault {
+    Ok(Vault {
         scheme: SCHEME,
         unlocks,
         entries,
         search,
         organisation_key: organisation_key(&state.db).await?,
-    }))
+    })
 }
 
 #[derive(Deserialize)]

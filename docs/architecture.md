@@ -237,6 +237,13 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   the vault is unlocked (the key stays in memory until it is locked, the user signs out or the page
   reloads), a device that asks for credentials offers its entries, and the chosen one is sent as if
   typed.
+- **Browser extension** (ADR 0017, `web/src/extension`, `api/extension.rs`): fills vault logins into web
+  pages when asked, only into the pages they belong to (`site.rs`, `site.ts`). It connects through
+  `/extension/connect` with a code and PKCE (`extension_codes`) and then holds a session of the client
+  `extension` in `sessions`, which opens only `/api/extension/` as a bearer token. Filling a shared login is
+  a reveal with the purpose `fill`; personal logins are opened in the extension with the vault's own
+  cryptography. remotehub serves it under `/downloads/` (`downloads.rs`), unpacked and as a signed CRX
+  with an update manifest; `web/scripts/pack-extension.mjs` packs both.
 - **Search** (`web/src/lib/search/rank.ts`) runs in the browser: parts of words in names, hosts,
   descriptions and paths, ranked by match and by what the user picked for the same or a similar query
   before. Picks from the device list are stored per user on the server (`search_picks`); picks in the

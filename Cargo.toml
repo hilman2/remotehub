@@ -78,6 +78,11 @@ tokio-util = "0.7.19"
 # Already in the tree through axum: forms with a name that repeats, such as
 # the connector's group checkboxes (#180).
 serde_urlencoded = "0.7.1"
+# Which pages a vault login belongs to (#201): URLs with their hosts in
+# punycode (already in the tree through ldap3, lettre and sqlx), and the
+# Public Suffix List compiled in.
+url = "2.5.8"
+psl = "2.1.238"
 # The site connector as a Windows service (#166), and its event log.
 windows-service = "0.8.1"
 windows-sys = "0.61.2"

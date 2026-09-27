@@ -252,22 +252,7 @@ pub async fn code(
     };
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Reveal, ObjectId::Credential(id))?;
-    let (version, has_totp): (i32, bool) =
-        sqlx::query_as("SELECT version, has_totp FROM credentials WHERE id = $1")
-            .bind(id)
-            .fetch_one(&state.db)
-            .await?;
-    if !has_totp {
-        return Err(Problem::new(ErrorCode::NotFound));
-    }
-    let secret = stored_text(&state, id, version, TOTP_FIELD)
-        .await?
-        .ok_or(Problem::new(ErrorCode::Internal))?;
-    let params = totp::Params::parse(secret.expose_secret()).ok_or_else(|| {
-        tracing::error!(credential = %id, "a sealed one-time password does not read");
-        Problem::new(ErrorCode::Internal)
-    })?;
-    let (code, remaining) = params.code_at(totp::unix_now());
+    let code = current_code(&state, id).await?;
     record_as(
         &state,
         &session,
@@ -277,14 +262,33 @@ pub async fn code(
         &address,
     )
     .await?;
-    Ok((
-        [(header::CACHE_CONTROL, "no-store")],
-        Json(Code {
-            code,
-            remaining,
-            period: params.period,
-        }),
-    ))
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(code)))
+}
+
+/// The current one-time code of credential `id`; `not_found` if it has no
+/// one-time password. The caller checks `reveal` and writes the audit entry.
+pub(super) async fn current_code(state: &AppState, id: Uuid) -> Result<Code, Problem> {
+    let (version, has_totp): (i32, bool) =
+        sqlx::query_as("SELECT version, has_totp FROM credentials WHERE id = $1")
+            .bind(id)
+            .fetch_one(&state.db)
+            .await?;
+    if !has_totp {
+        return Err(Problem::new(ErrorCode::NotFound));
+    }
+    let secret = stored_text(state, id, version, TOTP_FIELD)
+        .await?
+        .ok_or(Problem::new(ErrorCode::Internal))?;
+    let params = totp::Params::parse(secret.expose_secret()).ok_or_else(|| {
+        tracing::error!(credential = %id, "a sealed one-time password does not read");
+        Problem::new(ErrorCode::Internal)
+    })?;
+    let (code, remaining) = params.code_at(totp::unix_now());
+    Ok(Code {
+        code,
+        remaining,
+        period: params.period,
+    })
 }
 
 /// The versions of a credential's secrets, newest first; with `reveal`,

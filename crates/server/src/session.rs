@@ -5,6 +5,11 @@
 //! SHA-256 hash, the user and the group SIDs from sign-in. A session ends
 //! after the idle time without requests, after the maximum lifetime, or when
 //! the user signs out.
+//!
+//! The browser extension (#201) has sessions of its own in the same table,
+//! with the client `extension`. Their token travels as a bearer token, never
+//! as a cookie, and opens only the routes under `/api/extension/`
+//! (`api/extension.rs`); a browser session opens none of those.
 
 use std::time::Duration;
 
@@ -34,6 +39,14 @@ pub struct Session {
     /// Its key in the database, to read it again.
     #[serde(skip)]
     pub token_hash: Vec<u8>,
+    /// Names the session where its token hash must not show, as on
+    /// *My account* for the extension's sessions.
+    #[serde(skip)]
+    pub id: Uuid,
+    /// `web` for a browser signed in to remotehub's pages, `extension` for
+    /// the browser extension (#201).
+    #[serde(skip)]
+    pub client: String,
     #[serde(skip)]
     pub user_id: Uuid,
     pub username: String,
@@ -191,6 +204,35 @@ pub async fn create<'e>(
     Ok(token)
 }
 
+/// Starts a session of the browser extension for `user_id` (#201) and
+/// returns its token. `name` is the browser it runs in, for *My account*.
+pub async fn create_extension<'e>(
+    db: impl PgExecutor<'e>,
+    user_id: Uuid,
+    groups: &[String],
+    max: Duration,
+    name: &str,
+) -> Result<String, sqlx::Error> {
+    let token = new_token();
+    sqlx::query(
+        "INSERT INTO sessions (token_hash, user_id, groups, expires_at, client, name)
+         VALUES ($1, $2, $3, now() + make_interval(secs => $4), 'extension', $5)",
+    )
+    .bind(hash(&token).as_slice())
+    .bind(user_id)
+    .bind(groups)
+    .bind(max.as_secs_f64())
+    .bind(name)
+    .execute(db)
+    .await?;
+    Ok(token)
+}
+
+/// A random code of 256 bits, e.g. for the extension to trade for a token.
+pub fn new_code() -> String {
+    new_token()
+}
+
 /// The session for a token, if it is still valid; marks it as used.
 pub async fn lookup(
     db: &PgPool,
@@ -227,7 +269,8 @@ async fn by_hash(
     idle: Duration,
 ) -> Result<Option<Session>, sqlx::Error> {
     sqlx::query_as(
-        "SELECT s.token_hash, s.user_id, s.groups, u.username, u.display_name, u.kind, u.sid, u.upn,
+        "SELECT s.token_hash, s.id, s.client, s.user_id, s.groups,
+                u.username, u.display_name, u.kind, u.sid, u.upn,
                 u.identity_id, own.memberships,
                 ARRAY(SELECT DISTINCT r.role FROM role_assignments r
                       WHERE r.principal_sid = ANY (s.groups || own.memberships)
@@ -259,7 +302,8 @@ pub async fn delete<'e>(db: impl PgExecutor<'e>, token: &str) -> Result<(), sqlx
     Ok(())
 }
 
-/// Removes sessions that can no longer be used.
+/// Removes sessions that can no longer be used, and the extension's codes
+/// that ran out unused.
 pub async fn purge(db: &PgPool, idle: Duration) -> Result<u64, sqlx::Error> {
     let result = sqlx::query(
         "DELETE FROM sessions
@@ -268,6 +312,9 @@ pub async fn purge(db: &PgPool, idle: Duration) -> Result<u64, sqlx::Error> {
     .bind(idle.as_secs_f64())
     .execute(db)
     .await?;
+    sqlx::query("DELETE FROM extension_codes WHERE expires_at <= now()")
+        .execute(db)
+        .await?;
     Ok(result.rows_affected())
 }
 
@@ -364,8 +411,10 @@ fn clear(name: &str) -> (axum::http::HeaderName, HeaderValue) {
     )
 }
 
-/// Handlers that take a [`Session`] only run for signed-in users; everyone
-/// else gets the problem `unauthenticated`.
+/// Handlers that take a [`Session`] only run for users signed in to
+/// remotehub's pages; everyone else gets the problem `unauthenticated`. The
+/// extension's token opens nothing here, not even when it is sent as the
+/// cookie.
 impl FromRequestParts<AppState> for Session {
     type Rejection = Problem;
 
@@ -373,6 +422,7 @@ impl FromRequestParts<AppState> for Session {
         let token = token(&parts.headers).ok_or(Problem::new(ErrorCode::Unauthenticated))?;
         lookup(&state.db, &token, state.settings.session.idle)
             .await?
+            .filter(|session| session.client == "web")
             .ok_or(Problem::new(ErrorCode::Unauthenticated))
     }
 }

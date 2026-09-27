@@ -15,6 +15,11 @@
 # Needs git, docker, gh (signed in) and `docker login ghcr.io` with a token
 # that may write packages. The version is bumped in its own pull request
 # beforehand.
+#
+# The browser extension (#201) is signed with the maintainer's key, a PEM
+# file outside the repository: REMOTEHUB_EXTENSION_KEY_FILE, by default
+# ~/.config/remotehub/extension-key.pem. Its hash is the extension's ID on
+# every PC that installs it by policy; a new key is a new extension.
 
 CI_REPO_KURZ="remotehub"
 # shellcheck source=scripts/ci/gemeinsam.sh
@@ -63,6 +68,18 @@ ops_version="$(git show "${CI_SHA}:deploy/ops/.env.example" | sed -n 's/^REMOTEH
 if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null || gh release view "$tag" >/dev/null 2>&1; then
   ci_fehler "${tag} exists already"
 fi
+extension_key="${REMOTEHUB_EXTENSION_KEY_FILE:-${HOME}/.config/remotehub/extension-key.pem}"
+# The build runs in the tools container: the key is mounted there, read-only,
+# and handed to the build as a secret, which leaves no trace in the image.
+# Docker for Windows takes the path as C:/…, which cygpath gives in Git Bash.
+key_mount=()
+extension_build=()
+if [ -s "$extension_key" ]; then
+  key_mount=(-v "$(cygpath -m "$extension_key" 2>/dev/null || echo "$extension_key"):/run/extension-key.pem:ro")
+  extension_build=(--secret id=extension_key,src=/run/extension-key.pem)
+else
+  precondition "no signing key for the browser extension at ${extension_key}"
+fi
 status="$(gh api "repos/${CI_GITHUB}/commits/${CI_SHA}/status" \
   --jq ".statuses[] | select(.context == \"${CI_KONTEXT}\") | .state" | head -n 1)"
 [ "$status" = success ] ||
@@ -77,19 +94,27 @@ ci_umgebung
 echo "── Build and try the images"
 tools="$(ci_image scripts/ci/tools.Dockerfile)"
 # --pull: the base images as they are today, not as the build cache has them.
-ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" "$IMAGE" "$GUACD_IMAGE" "$BROWSER_IMAGE" "$CONNECTOR_IMAGE" \
-  "$version" --pull
+ci_docker_run "${key_mount[@]}" "$tools" bash scripts/ci/image-check.sh "$version" "$IMAGE" "$GUACD_IMAGE" \
+  "$BROWSER_IMAGE" "$CONNECTOR_IMAGE" "$version" --pull "${extension_build[@]}"
 
 echo "── Take the site connector for Windows from the image"
 # The very file remotehub serves under /downloads (#188), so the release's
-# SHA256SUMS and remotehub's agree.
+# SHA256SUMS and remotehub's agree. The browser extension stays in the image:
+# remotehub serves it, the release does not carry it.
 windows="${CI_ABLAGE}/windows-${version}"
 rm -rf "$windows"
 mkdir -p "$windows"
 built="$(docker create "${IMAGE}:${version}")"
-docker cp -q "${built}:/usr/share/remotehub/connector/remotehub-connector.exe" "${windows}/" || true
+docker cp -q "${built}:/usr/share/remotehub/downloads/remotehub-connector.exe" "${windows}/" || true
+docker cp -q "${built}:/usr/share/remotehub/downloads/remotehub-extension.json" "${windows}/" || true
 docker rm -f "$built" >/dev/null
 [ -s "${windows}/remotehub-connector.exe" ] || ci_fehler "no remotehub-connector.exe in ${IMAGE}:${version}"
+# The development key's ID would make every installation by policy trust a
+# key that is public.
+if grep -q '"id":"obnekonmlefgdhgodgbjapgoophnhlao"' "${windows}/remotehub-extension.json"; then
+  precondition "the browser extension in ${IMAGE}:${version} is signed with the development key"
+fi
+rm -f "${windows}/remotehub-extension.json"
 
 ops="${CI_ABLAGE}/remotehub-ops-${version}.tar.gz"
 # LF line endings whatever Git for Windows' core.autocrlf says, as the CI

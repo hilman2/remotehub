@@ -28,18 +28,30 @@ docker build --quiet "$@" --file deploy/connector/Dockerfile --build-arg VERSION
   --tag "${connector_image}:${tag}" .
 # The connector for Windows (#166) comes in remotehub's image (#188), which
 # serves it and from which release.sh takes it: clippy checks its code, only
-# the build shows that it links.
+# the build shows that it links. The browser extension (#201) comes along.
 windows="${PWD}/.windows-check"
 rm -rf "$windows"
 mkdir -p "$windows"
 built="$(docker create "${image}:${tag}")"
-docker cp -q "${built}:/usr/share/remotehub/connector/remotehub-connector.exe" "${windows}/" || true
+for file in remotehub-connector.exe remotehub-extension.zip remotehub-extension.json; do
+  docker cp -q "${built}:/usr/share/remotehub/downloads/${file}" "${windows}/" || true
+done
 docker rm -f "$built" >/dev/null
 [ "$(head -c 2 "${windows}/remotehub-connector.exe" 2>/dev/null)" = MZ ] || {
   echo "FAILED: no Windows program in ${image}:${tag}"
   exit 1
 }
+[ "$(head -c 2 "${windows}/remotehub-extension.zip" 2>/dev/null)" = PK ] || {
+  echo "FAILED: no browser extension in ${image}:${tag}"
+  exit 1
+}
 windows_sum="$(sha256sum "${windows}/remotehub-connector.exe" | cut -d ' ' -f 1)"
+extension_sum="$(sha256sum "${windows}/remotehub-extension.zip" | cut -d ' ' -f 1)"
+extension_id="$(sed -n 's/.*"id":"\([a-p]*\)".*/\1/p' "${windows}/remotehub-extension.json")"
+[ "${#extension_id}" = 32 ] || {
+  echo "FAILED: remotehub-extension.json names no extension ID"
+  exit 1
+}
 rm -rf "$windows"
 
 dir="${PWD}/.image-check"
@@ -110,6 +122,15 @@ curl -fsS "http://${remotehub}:8080/devices/any" | grep -q '<html' ||
   fail "remotehub does not serve the connector for Windows of its image"
 curl -fsS "http://${remotehub}:8080/downloads/SHA256SUMS" | grep -qx "${windows_sum}  remotehub-connector.exe" ||
   fail "remotehub does not serve the hash of the connector for Windows"
+# The browser extension, unpacked by hand or signed for policies (#201).
+[ "$(curl -fsS "http://${remotehub}:8080/downloads/remotehub-extension.zip" | sha256sum | cut -d ' ' -f 1)" = "$extension_sum" ] ||
+  fail "remotehub does not serve the browser extension of its image"
+curl -fsS "http://${remotehub}:8080/downloads/SHA256SUMS" | grep -q "  remotehub-extension.crx$" ||
+  fail "remotehub does not serve the signed browser extension"
+updates="$(curl -fsS "http://${remotehub}:8080/downloads/remotehub-extension.xml")" ||
+  fail "remotehub does not serve the extension's update manifest"
+grep -q "appid='${extension_id}'" <<<"$updates" && grep -q "remotehub-extension.crx' version='${version}'" <<<"$updates" ||
+  fail "the update manifest does not name extension ${extension_id} ${version}: ${updates}"
 
 echo "── Setup"
 # A fresh installation serves only the setup wizard (#143), whose link the

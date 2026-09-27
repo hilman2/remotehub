@@ -341,6 +341,39 @@ REMOTEHUB_BROWSER_MEMORY=6g
 
 All sessions of the service run as one Unix user. Why, and what that means: [ADR 0007](adr/0007-isolated-browser.md).
 
+## Fill vault logins into web pages
+
+The browser extension fills logins from the vault into web pages, in Microsoft Edge, Google Chrome and other
+Chromium browsers from version 127. remotehub serves it itself. People find it under *My account → Browser
+extension*, with the steps to load it by hand and a list of the extensions connected to their account. Why
+it works as it does: [ADR 0017](adr/0017-browser-extension.md).
+
+### Install it on managed PCs
+
+Loaded by hand, the extension needs developer mode and does not update itself. On PCs in an Active Directory
+domain, a policy installs it and each of its updates instead. Chrome also does so on PCs joined to Entra ID
+or enrolled in Chrome Enterprise Core; Edge only on PCs that are hybrid joined.
+
+*My account* shows administrators the policy's entry, with the extension's ID in front:
+
+```
+<ID>;https://remotehub.example.com/downloads/remotehub-extension.xml
+```
+
+Add it to `ExtensionInstallForcelist`, for Edge under `Software\Policies\Microsoft\Edge`, for Chrome under
+`Software\Policies\Google\Chrome`, by group policy or Intune. The next policy refresh installs the extension.
+
+The same way, you can give it remotehub's address, so people only click *Connect*. Set the string value
+`serverUrl` under `Software\Policies\Microsoft\Edge\3rdparty\extensions\<ID>\policy` (Chrome:
+`Software\Policies\Google\Chrome\3rdparty\extensions\<ID>\policy`).
+
+### What a connected extension may do
+
+Each connected extension signs in with a session of its own. It ends after the idle time and the maximum
+lifetime, as a sign-in does (`REMOTEHUB_SESSION_IDLE_MINUTES`, `REMOTEHUB_SESSION_MAX_HOURS`), and when an
+administrator ends the user's sessions. It lists the shared logins the user may reveal and fills them only
+into the pages they belong to. Every password or code it fills or copies goes into the audit log.
+
 ## Reach devices in other networks
 
 A site connector runs in a network that remotehub cannot reach and opens the way from there. It needs outbound

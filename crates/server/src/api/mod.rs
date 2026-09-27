@@ -13,6 +13,7 @@ mod connectors;
 pub mod courier;
 mod directory;
 mod display;
+mod extension;
 mod fields;
 mod generator;
 mod groups;
@@ -94,6 +95,16 @@ pub fn router(state: AppState) -> Router<AppState> {
             delete(second_factor::remove_key),
         )
         .route("/users/{id}/second-factor", delete(second_factor::reset))
+        .route("/account/extensions", get(extension::list))
+        .route("/account/extensions/{id}", delete(extension::end))
+        .route("/extension-codes", post(extension::create_code))
+        .route("/extension/token", post(extension::token))
+        .route("/extension/session", delete(extension::sign_out))
+        .route("/extension/entries", get(extension::entries))
+        .route("/extension/entries/{id}/fill", post(extension::fill))
+        .route("/extension/entries/{id}/copy", post(extension::copy))
+        .route("/extension/entries/{id}/code", post(extension::code))
+        .route("/extension/personal", get(extension::personal))
         .route("/second-factor-principals", get(second_factor::rules))
         .route(
             "/second-factor-principals/{sid}",

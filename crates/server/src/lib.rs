@@ -23,6 +23,7 @@ pub mod second_factor;
 pub mod secrets;
 pub mod session;
 pub mod setup;
+pub mod site;
 pub use remotehub_totp as totp;
 pub mod webauthn;
 
@@ -81,11 +82,25 @@ pub struct Settings {
     /// Caddy of the ops package (#146); none behind a reverse proxy of
     /// your own.
     pub caddy: Option<Arc<caddy::Caddy>>,
-    /// The site connector for Windows to serve (#188); none in development.
+    /// The site connector for Windows (#188) and the browser extension
+    /// (#201) to serve; none in development.
     pub downloads: Option<Arc<downloads::Downloads>>,
+    /// Browser extensions that may connect besides the one served (#201).
+    pub extension_ids: Vec<String>,
 }
 
 impl Settings {
+    /// Whether the browser extension with this ID may connect (#201): the
+    /// one remotehub serves, or one named in `REMOTEHUB_EXTENSION_IDS`.
+    pub fn allows_extension(&self, id: &str) -> bool {
+        self.extension_ids.iter().any(|allowed| allowed == id)
+            || self
+                .downloads
+                .as_deref()
+                .and_then(downloads::Downloads::extension)
+                .is_some_and(|served| served.id == id)
+    }
+
     /// The host people open: the public origin without scheme and port.
     pub fn host(&self) -> String {
         let origin = &self.public_origin;

@@ -325,10 +325,15 @@ export async function addPasskey(key: CryptoKey, username: string, label: string
 	);
 }
 
-/** Asks one of the credentials for its PRF output with its salt. */
-async function prf(salts: Map<string, Uint8Array<ArrayBuffer>>) {
+/**
+ * Asks one of the credentials for its PRF output with its salt. `rpId` is
+ * remotehub's host where the page is not remotehub's own: the browser
+ * extension (#201) asks for the passkeys registered there.
+ */
+async function prf(salts: Map<string, Uint8Array<ArrayBuffer>>, rpId?: string) {
 	const assertion = (await navigator.credentials.get({
 		publicKey: {
+			...(rpId ? { rpId } : {}),
 			challenge: randomBytes(32),
 			allowCredentials: [...salts.keys()].map((id) => ({
 				type: 'public-key' as const,
@@ -351,8 +356,11 @@ async function prf(salts: Map<string, Uint8Array<ArrayBuffer>>) {
 	return { credential: base64url(new Uint8Array(assertion.rawId)), bytes: new Uint8Array(first) };
 }
 
-/** The vault key through one of the registered passkeys, or null. */
-export async function unlockWithPasskey(vault: StoredVault) {
+/**
+ * The vault key through one of the registered passkeys, or null. `rpId`: as
+ * for `prf`, only outside remotehub's own pages.
+ */
+export async function unlockWithPasskey(vault: StoredVault, rpId?: string) {
 	const passkeys = vault.unlocks.filter((unlock) => unlock.kind === 'passkey');
 	if (passkeys.length === 0) return null;
 	const salts = new Map(
@@ -361,7 +369,7 @@ export async function unlockWithPasskey(vault: StoredVault) {
 			fromBase64(String(unlock.params.salt))
 		])
 	);
-	const secret = await prf(salts);
+	const secret = await prf(salts, rpId);
 	const unlock = passkeys.find((u) => u.params.credential_id === secret?.credential);
 	if (!secret || !unlock) return null;
 	try {
