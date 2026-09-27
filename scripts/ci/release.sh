@@ -76,7 +76,7 @@ key_mount=()
 extension_build=()
 if [ -s "$extension_key" ]; then
   key_mount=(-v "$(cygpath -m "$extension_key" 2>/dev/null || echo "$extension_key"):/run/extension-key.pem:ro")
-  extension_build=(--secret id=extension_key,src=/run/extension-key.pem)
+  extension_build=(--secret "id=extension_key,src=/run/extension-key.pem")
 else
   precondition "no signing key for the browser extension at ${extension_key}"
 fi
