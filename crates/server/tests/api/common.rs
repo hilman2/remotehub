@@ -264,6 +264,21 @@ pub fn sign_in_request(username: &str, password: &str) -> Request<Body> {
     )
 }
 
+/// A collection for shared credentials (#190), created by `token`'s user:
+/// at the top level without `parent` (administrators only), otherwise in
+/// that collection. Returns its id.
+pub async fn collection(app: &Router, token: &str, parent: Option<&str>, name: &str) -> String {
+    let body = serde_json::json!({ "parent_id": parent, "name": name });
+    let response = send(app, authed("POST", "/api/collections", Some(body), token)).await;
+    assert_eq!(
+        response.status,
+        StatusCode::CREATED,
+        "collection {name}: {}",
+        response.json()
+    );
+    response.json()["id"].as_str().unwrap().to_owned()
+}
+
 /// A request as a signed-in browser sends it: session cookie, own origin,
 /// JSON body if given.
 pub fn authed(method: &str, uri: &str, body: Option<Value>, token: &str) -> Request<Body> {

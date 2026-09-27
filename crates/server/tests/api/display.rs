@@ -14,7 +14,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::common::{ORIGIN, get, send};
+use crate::common::{ORIGIN, collection, get, send};
 use crate::terminal::{create, serve, setup};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -132,6 +132,19 @@ async fn device(app: &Router, token: &str, folder: &str, device: Value) -> Strin
     create(app, token, "/api/devices", body).await
 }
 
+/// The lab's `tester` account as a shared credential, in a collection of its
+/// own (#190). Returns the credential's id.
+async fn tester_credential(app: &Router, token: &str) -> String {
+    let keys = collection(app, token, None, "Lab").await;
+    create(
+        app,
+        token,
+        "/api/credentials",
+        json!({ "collection_id": keys, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
+    )
+    .await
+}
+
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn each_protocol_has_its_endpoint_and_only_the_own_origin_opens_it(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
@@ -179,11 +192,12 @@ async fn an_ssh_key_does_not_sign_in_to_rdp(pool: PgPool) {
             .join("../../deploy/testlab/ssh/tester_ed25519"),
     )
     .unwrap();
+    let keys = collection(&app, &token, None, "Lab").await;
     let credential = create(
         &app,
         &token,
         "/api/credentials",
-        json!({ "folder_id": folder, "name": "key", "kind": "ssh_key", "username": "tester", "private_key": key }),
+        json!({ "collection_id": keys, "name": "key", "kind": "ssh_key", "username": "tester", "private_key": key }),
     )
     .await;
     let rdp = device(
@@ -208,13 +222,7 @@ async fn an_ssh_key_does_not_sign_in_to_rdp(pool: PgPool) {
 #[ignore = "needs the test lab"]
 async fn a_stored_credential_opens_an_rdp_desktop(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
-    let credential = create(
-        &app,
-        &token,
-        "/api/credentials",
-        json!({ "folder_id": folder, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
-    )
-    .await;
+    let credential = tester_credential(&app, &token).await;
     let rdp = device(
         &app,
         &token,
@@ -300,13 +308,7 @@ async fn vnc_asks_for_the_password_and_reports_a_wrong_one(pool: PgPool) {
 #[ignore = "needs the test lab"]
 async fn a_changed_rdp_certificate_stops_the_connection_until_the_pin_is_forgotten(pool: PgPool) {
     let (state, app, token, folder) = setup(pool.clone()).await;
-    let credential = create(
-        &app,
-        &token,
-        "/api/credentials",
-        json!({ "folder_id": folder, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
-    )
-    .await;
+    let credential = tester_credential(&app, &token).await;
     let rdp = device(
         &app,
         &token,
@@ -374,13 +376,7 @@ async fn a_changed_rdp_certificate_stops_the_connection_until_the_pin_is_forgott
 async fn open_desktop(pool: PgPool, protocol: &str) -> Socket {
     let (state, app, token, folder) = setup(pool).await;
     let (id, start_with) = if protocol == "rdp" {
-        let credential = create(
-            &app,
-            &token,
-            "/api/credentials",
-            json!({ "folder_id": folder, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
-        )
-        .await;
+        let credential = tester_credential(&app, &token).await;
         let rdp = json!({ "protocol": "rdp", "port": 3389, "auth_mode": "stored", "credential_id": credential });
         (device(&app, &token, &folder, rdp).await, json!({}))
     } else {
@@ -564,13 +560,7 @@ async fn web_device(app: &Router, token: &str, folder: &str, device: Value) -> S
 #[ignore = "needs the test lab"]
 async fn an_https_device_opens_signed_in_with_its_stored_credential(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
-    let credential = create(
-        &app,
-        &token,
-        "/api/credentials",
-        json!({ "folder_id": folder, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
-    )
-    .await;
+    let credential = tester_credential(&app, &token).await;
     let web = web_device(
         &app,
         &token,
@@ -752,13 +742,7 @@ async fn the_browser_signs_in_only_where_the_pinned_key_is(_pool: PgPool) {
 async fn an_rdp_desktop_behind_a_connector_opens_through_it(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
     let (connector, secret) = crate::connectors::new_connector(&app, &token, "lab").await;
-    let credential = create(
-        &app,
-        &token,
-        "/api/credentials",
-        json!({ "folder_id": folder, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
-    )
-    .await;
+    let credential = tester_credential(&app, &token).await;
     let rdp = device(
         &app,
         &token,

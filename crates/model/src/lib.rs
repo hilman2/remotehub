@@ -1,12 +1,13 @@
 //! Domain types of remotehub and [`Catalog::authorize`] — the only place that
 //! decides permissions (ADR 0005).
 //!
-//! Objects live in a folder tree: folders contain folders, devices and
-//! credentials. A grant gives a principal (the SID of a user or a group) a
-//! role on one object. Roles are ordered, `list < connect < reveal < edit <
+//! Objects live in two trees: folders contain folders and devices;
+//! collections contain collections and shared credentials (#190). A grant
+//! gives a principal (the SID of a user or a group) a role on one object. Roles are ordered, `list < connect < reveal < edit <
 //! manage`; a grant on a folder holds for everything below it; grants only
-//! ever allow. A person's effective role on an object is the highest role any
-//! of their SIDs holds on the object or one of its folders. Administrators
+//! ever allow, and so does a grant on a collection for what is in it. A
+//! person's effective role on an object is the highest role any of their SIDs
+//! holds on the object or one of the folders or collections above it. Administrators
 //! hold `manage` everywhere.
 
 use std::collections::{HashMap, HashSet};
@@ -62,6 +63,7 @@ pub enum ObjectId {
     Folder(Uuid),
     Device(Uuid),
     Credential(Uuid),
+    Collection(Uuid),
 }
 
 /// Who asks: all SIDs that identify them (their own and their groups').
@@ -81,20 +83,22 @@ pub struct Grant {
     pub until: Option<i64>,
 }
 
-/// The folder tree and all grants, loaded once per request.
+/// Both trees and all grants, loaded once per request.
 #[derive(Debug, Clone, Default)]
 pub struct Catalog {
     folder_parent: HashMap<Uuid, Option<Uuid>>,
+    collection_parent: HashMap<Uuid, Option<Uuid>>,
     device_folder: HashMap<Uuid, Uuid>,
-    credential_folder: HashMap<Uuid, Uuid>,
+    credential_collection: HashMap<Uuid, Uuid>,
     grants: HashMap<ObjectId, Vec<(String, Role)>>,
 }
 
 impl Catalog {
     /// The catalog as of `now` (Unix time, seconds): grants that ran out
-    /// before it grant nothing.
+    /// before it grant nothing. Credentials name their collection.
     pub fn new(
         folders: impl IntoIterator<Item = (Uuid, Option<Uuid>)>,
+        collections: impl IntoIterator<Item = (Uuid, Option<Uuid>)>,
         devices: impl IntoIterator<Item = (Uuid, Uuid)>,
         credentials: impl IntoIterator<Item = (Uuid, Uuid)>,
         grants: impl IntoIterator<Item = Grant>,
@@ -112,8 +116,9 @@ impl Catalog {
         }
         Catalog {
             folder_parent: folders.into_iter().collect(),
+            collection_parent: collections.into_iter().collect(),
             device_folder: devices.into_iter().collect(),
-            credential_folder: credentials.into_iter().collect(),
+            credential_collection: credentials.into_iter().collect(),
             grants: by_object,
         }
     }
@@ -121,32 +126,60 @@ impl Catalog {
     pub fn contains(&self, object: ObjectId) -> bool {
         match object {
             ObjectId::Folder(id) => self.folder_parent.contains_key(&id),
+            ObjectId::Collection(id) => self.collection_parent.contains_key(&id),
             ObjectId::Device(id) => self.device_folder.contains_key(&id),
-            ObjectId::Credential(id) => self.credential_folder.contains_key(&id),
+            ObjectId::Credential(id) => self.credential_collection.contains_key(&id),
         }
     }
 
-    /// The folder that contains an object (for a folder: its parent).
-    pub fn parent(&self, object: ObjectId) -> Option<Uuid> {
+    /// The folder or collection that contains an object: a device's folder,
+    /// a credential's collection, a folder's or collection's parent.
+    pub fn container(&self, object: ObjectId) -> Option<ObjectId> {
         match object {
-            ObjectId::Folder(id) => self.folder_parent.get(&id).copied().flatten(),
-            ObjectId::Device(id) => self.device_folder.get(&id).copied(),
-            ObjectId::Credential(id) => self.credential_folder.get(&id).copied(),
+            ObjectId::Folder(id) => self
+                .folder_parent
+                .get(&id)
+                .copied()
+                .flatten()
+                .map(ObjectId::Folder),
+            ObjectId::Collection(id) => self
+                .collection_parent
+                .get(&id)
+                .copied()
+                .flatten()
+                .map(ObjectId::Collection),
+            ObjectId::Device(id) => self.device_folder.get(&id).copied().map(ObjectId::Folder),
+            ObjectId::Credential(id) => self
+                .credential_collection
+                .get(&id)
+                .copied()
+                .map(ObjectId::Collection),
         }
     }
 
-    /// The object and every folder above it, nearest first. Stops at a loop
-    /// (which the database prevents) instead of running forever.
+    /// The id of the folder or collection that contains an object.
+    pub fn parent(&self, object: ObjectId) -> Option<Uuid> {
+        self.container(object).map(|container| match container {
+            ObjectId::Folder(id)
+            | ObjectId::Collection(id)
+            | ObjectId::Device(id)
+            | ObjectId::Credential(id) => id,
+        })
+    }
+
+    /// The object and every folder or collection above it, nearest first.
+    /// Stops at a loop (which the database prevents) instead of running
+    /// forever.
     fn path(&self, object: ObjectId) -> Vec<ObjectId> {
         let mut path = vec![object];
         let mut seen = HashSet::new();
-        let mut next = self.parent(object);
-        while let Some(folder) = next {
-            if !seen.insert(folder) {
+        let mut next = self.container(object);
+        while let Some(container) = next {
+            if !seen.insert(container) {
                 break;
             }
-            path.push(ObjectId::Folder(folder));
-            next = self.folder_parent.get(&folder).copied().flatten();
+            path.push(container);
+            next = self.container(container);
         }
         path
     }
@@ -155,6 +188,12 @@ impl Catalog {
     pub fn is_within(&self, folder: Uuid, ancestor: Uuid) -> bool {
         self.path(ObjectId::Folder(folder))
             .contains(&ObjectId::Folder(ancestor))
+    }
+
+    /// Whether `collection` is `ancestor` or lies below it.
+    pub fn is_within_collection(&self, collection: Uuid, ancestor: Uuid) -> bool {
+        self.path(ObjectId::Collection(collection))
+            .contains(&ObjectId::Collection(ancestor))
     }
 
     /// The highest role the subject holds on the object; `None` for none or
@@ -228,16 +267,22 @@ impl Catalog {
         subject.admin
     }
 
-    /// Everything the subject may see, with their role; plus the folders
-    /// they only see because something visible lies inside (path only).
+    /// Everything the subject may see, with their role; plus the folders and
+    /// collections they only see because something visible lies inside
+    /// (path only).
     pub fn visible(&self, subject: &Subject) -> Visibility {
         let objects = self
             .folder_parent
             .keys()
             .map(|id| ObjectId::Folder(*id))
+            .chain(
+                self.collection_parent
+                    .keys()
+                    .map(|id| ObjectId::Collection(*id)),
+            )
             .chain(self.device_folder.keys().map(|id| ObjectId::Device(*id)))
             .chain(
-                self.credential_folder
+                self.credential_collection
                     .keys()
                     .map(|id| ObjectId::Credential(*id)),
             );
@@ -245,16 +290,28 @@ impl Catalog {
             .filter_map(|o| Some((o, self.effective_role(subject, o)?)))
             .collect();
         let mut path_only = HashSet::new();
+        let mut collections_path_only = HashSet::new();
         for object in roles.keys() {
             for ancestor in self.path(*object).into_iter().skip(1) {
-                if let ObjectId::Folder(id) = ancestor
-                    && !roles.contains_key(&ancestor)
-                {
-                    path_only.insert(id);
+                if roles.contains_key(&ancestor) {
+                    continue;
+                }
+                match ancestor {
+                    ObjectId::Folder(id) => {
+                        path_only.insert(id);
+                    }
+                    ObjectId::Collection(id) => {
+                        collections_path_only.insert(id);
+                    }
+                    ObjectId::Device(_) | ObjectId::Credential(_) => {}
                 }
             }
         }
-        Visibility { roles, path_only }
+        Visibility {
+            roles,
+            path_only,
+            collections_path_only,
+        }
     }
 }
 
@@ -263,6 +320,8 @@ pub struct Visibility {
     pub roles: HashMap<ObjectId, Role>,
     /// Folders shown only as the way to something visible inside them.
     pub path_only: HashSet<Uuid>,
+    /// Collections shown only as the way to something visible inside them.
+    pub collections_path_only: HashSet<Uuid>,
 }
 
 #[cfg(test)]

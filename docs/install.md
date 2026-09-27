@@ -288,7 +288,7 @@ the same administrator carries it out within a day, with the key file or the pri
 
 - **Forgotten passphrase:** remotehub shows a one-time recovery key for the owner. With it, the owner
   unlocks the vault and chooses a new passphrase.
-- **Hand-over:** the entries become credentials in a shared folder.
+- **Hand-over:** the entries become credentials in a shared collection.
 
 The private key never reaches the server. Every step is in the audit log. To replace the key, create a new
 one; vaults move to it at their next unlock, and the old one can be deleted once no vault needs it.

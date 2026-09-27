@@ -8,18 +8,23 @@
 	import SecretFields, { secretInput } from './SecretFields.svelte';
 
 	let {
-		folderId,
+		collectionId,
+		places,
 		credential = null,
 		onsubmit,
 		oncancel
 	}: {
-		folderId: string;
+		/** Where a new credential goes (#190). */
+		collectionId: string;
+		/** The collections it may go into, with their path. */
+		places: { id: string; path: string }[];
 		credential?: Credential | null;
 		onsubmit: (input: CredentialInput) => void;
 		oncancel: () => void;
 	} = $props();
 
 	const start = untrack(() => $state.snapshot(credential));
+	let collection = $state(untrack(() => start?.collection_id ?? collectionId));
 	let name = $state(start?.name ?? '');
 	let kind = $state<CredentialKind>(start?.kind ?? 'password');
 	let username = $state(start?.username ?? '');
@@ -43,7 +48,7 @@
 	function submit(event: SubmitEvent) {
 		event.preventDefault();
 		const input: CredentialInput = {
-			folder_id: start?.folder_id ?? folderId,
+			collection_id: collection,
 			name,
 			username,
 			domain,
@@ -75,6 +80,13 @@
 <form onsubmit={submit} autocomplete="off">
 	<label class="block text-sm font-medium" for="credential-name">{m.field_name()}</label>
 	<input id="credential-name" class={field} required maxlength="200" bind:value={name} />
+
+	<label class={label} for="credential-collection">{m.vault_collection()}</label>
+	<select id="credential-collection" class={field} required bind:value={collection}>
+		{#each places as place (place.id)}
+			<option value={place.id}>{place.path}</option>
+		{/each}
+	</select>
 
 	<label class={label} for="credential-kind">{m.credential_kind()}</label>
 	<select id="credential-kind" class={field} disabled={!!start} bind:value={kind}>

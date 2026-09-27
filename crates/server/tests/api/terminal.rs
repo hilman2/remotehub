@@ -17,7 +17,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::common::{ORIGIN, authed, send, sign_in_request, state};
+use crate::common::{ORIGIN, authed, collection, send, sign_in_request, state};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -145,11 +145,12 @@ async fn stored_device(
     label: &str,
     password: &str,
 ) -> String {
+    let keys = collection(app, token, None, &format!("Lab ({label})")).await;
     let credential = create(
         app,
         token,
         "/api/credentials",
-        json!({ "folder_id": folder, "name": format!("tester ({label})"), "username": "tester", "password": password }),
+        json!({ "collection_id": keys, "name": format!("tester ({label})"), "username": "tester", "password": password }),
     )
     .await;
     create(
@@ -259,11 +260,12 @@ async fn a_stored_credential_opens_a_shell_and_pins_the_host_key(pool: PgPool) {
 async fn a_device_behind_a_connector_opens_only_while_it_is_connected(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
     let (connector, secret) = crate::connectors::new_connector(&app, &token, "lab").await;
+    let keys = collection(&app, &token, None, "Lab").await;
     let credential = create(
         &app,
         &token,
         "/api/credentials",
-        json!({ "folder_id": folder, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
+        json!({ "collection_id": keys, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
     )
     .await;
     let device = create(
@@ -304,11 +306,12 @@ async fn a_device_behind_a_connector_opens_only_while_it_is_connected(pool: PgPo
 async fn a_closed_connector_says_the_customer_closed_it(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
     let (connector, secret) = crate::connectors::new_connector(&app, &token, "lab").await;
+    let keys = collection(&app, &token, None, "Lab").await;
     let credential = create(
         &app,
         &token,
         "/api/credentials",
-        json!({ "folder_id": folder, "name": "tester", "username": "tester", "password": "x" }),
+        json!({ "collection_id": keys, "name": "tester", "username": "tester", "password": "x" }),
     )
     .await;
     let device = create(
@@ -499,12 +502,13 @@ async fn a_stored_key_with_certificate_opens_a_shell(pool: PgPool) {
     let dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
         .join("../../deploy/testlab/ssh");
     let read = |f: &str| std::fs::read_to_string(dir.join(f)).unwrap();
+    let keys = collection(&app, &token, None, "Lab").await;
     let credential = create(
         &app,
         &token,
         "/api/credentials",
         json!({
-            "folder_id": folder, "name": "certified", "kind": "ssh_key", "username": "tester",
+            "collection_id": keys, "name": "certified", "kind": "ssh_key", "username": "tester",
             "private_key": read("tester_ed25519_cert"), "certificate": read("tester_ed25519_cert-cert.pub"),
         }),
     )

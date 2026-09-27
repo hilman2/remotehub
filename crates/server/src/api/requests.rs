@@ -167,6 +167,11 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<serde_json::Value>), Problem> {
     let input = body(input)?;
     let target = object(&input.object.kind, input.object.id)?;
+    // Just in time for folders, devices and credentials; a collection's
+    // entries are asked for one by one.
+    if matches!(target, ObjectId::Collection(_)) {
+        return Err(invalid("kind"));
+    }
     // The grant goes to the requester's own principal; break-glass accounts
     // have none, and administer everything anyway.
     let sid = session
@@ -243,6 +248,8 @@ fn columns(object: ObjectId) -> (Option<Uuid>, Option<Uuid>, Option<Uuid>) {
         ObjectId::Folder(id) => (Some(id), None, None),
         ObjectId::Device(id) => (None, Some(id), None),
         ObjectId::Credential(id) => (None, None, Some(id)),
+        // Refused before: requests name no collection.
+        ObjectId::Collection(_) => (None, None, None),
     }
 }
 

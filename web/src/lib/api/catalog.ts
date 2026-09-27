@@ -41,7 +41,7 @@ export function authModesFor(protocol: Protocol): readonly AuthMode[] {
 	);
 }
 
-export type ObjectKind = 'folder' | 'device' | 'credential';
+export type ObjectKind = 'folder' | 'device' | 'credential' | 'collection';
 
 export interface Folder {
 	id: string;
@@ -92,9 +92,19 @@ export interface Device {
 
 export type CredentialKind = 'password' | 'ssh_key';
 
+/** Where shared credentials live, apart from the device folders (#190). */
+export interface Collection {
+	id: string;
+	parent_id: string | null;
+	name: string;
+	/** null: only shown as the way to something visible inside */
+	role: Role | null;
+}
+
 export interface Credential {
 	id: string;
-	folder_id: string;
+	/** The collection it lives in (#190). */
+	collection_id: string;
 	name: string;
 	kind: CredentialKind;
 	username: string;
@@ -117,6 +127,7 @@ export interface Credential {
 export interface Tree {
 	folders: Folder[];
 	devices: Device[];
+	collections: Collection[];
 	credentials: Credential[];
 	may_create_top_level: boolean;
 	/** Folders this user has open in the tree; all others are closed. */
@@ -150,7 +161,7 @@ export interface DeviceInput {
 }
 
 export interface CredentialInput {
-	folder_id: string;
+	collection_id: string;
 	name: string;
 	username: string;
 	domain: string;
@@ -208,6 +219,15 @@ export const createFolder = (parent_id: string | null, name: string, connector_i
 export const updateFolder = (id: string, name: string, connector_id: string | null) =>
 	api('PATCH', `/api/folders/${id}`, { name, connector_id });
 export const deleteFolder = (id: string) => api('DELETE', `/api/folders/${id}`);
+
+/** Collections of shared credentials (#190); `parent_id` null: at the top. */
+export const createCollection = (parent_id: string | null, name: string) =>
+	api<{ id: string }>('POST', '/api/collections', { parent_id, name });
+export const updateCollection = (
+	id: string,
+	change: { name?: string; parent_id?: string | null }
+) => api('PATCH', `/api/collections/${id}`, change);
+export const deleteCollection = (id: string) => api('DELETE', `/api/collections/${id}`);
 
 export const createDevice = (input: DeviceInput) =>
 	api<{ id: string }>('POST', '/api/devices', input);
