@@ -141,8 +141,9 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   only via `remotehub break-glass …`, which prints password and TOTP secret once. The TOTP secret is sealed
   in the vault. They sign in at `/sign-in/break-glass`, work when AD is down, are administrators, and every
   attempt is audited with `break_glass: true`; the UI shows a red banner during such a session.
-- **Permissions:** a folder tree holds devices and credentials. A grant gives a group or a user a role
-  on a folder or an entry: `list < connect < reveal < edit < manage`. Grants are inherited downwards and
+- **Permissions:** a folder tree holds devices, a tree of collections holds the shared credentials
+  (ADR 0014). A grant gives a group or a user a role on a folder, a collection or an entry:
+  `list < connect < reveal < edit < manage`. Grants are inherited downwards within their own tree and
   only allow. `authorize()` is the single decision point and is tested table-driven.
 - **KeePass fields (`api/fields.rs`):** credentials carry URL, notes, one of KeePass' 69 standard icons
   (by number; the UI draws a Lucide icon for each) and custom fields. Plain fields are stored with the
@@ -151,8 +152,8 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   entries carry the same inside their browser-sealed content, and personal folders are entries of kind
   `folder`.
 - **KeePass files** are read and written in the browser (`web/src/lib/vault/kdbx.ts`, kdbxweb with
-  hash-wasm for Argon2), so the server never sees a file's master password. An import creates folders,
-  entries and files through the normal API. An export of a shared folder needs `reveal` on every
+  hash-wasm for Argon2), so the server never sees a file's master password. An import creates collections,
+  entries and files through the normal API. An export of a collection needs `reveal` on every
   credential in it and reveals each with the purpose `export`, which the audit log records; the personal
   vault exports what the browser has already opened.
 - **Files and history (`api/attachments.rs`, `api/reveal.rs`):** a credential's files are sealed under
@@ -177,7 +178,8 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   connector included, with whoever may `reveal` them, which `edit` includes; the audit entry of the change
   marks it (`secret_kept`, #174). Anyone else enters the password again.
 - Objects a user cannot see answer `not_found`, so their existence does not leak; visible objects the user
-  may not change answer `forbidden`. Folders on the way to something visible are shown without a role.
+  may not change answer `forbidden`. Folders and collections on the way to something visible are shown
+  without a role.
 
 ## 4. Vault
 
@@ -199,12 +201,15 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   key through HKDF, the passphrase through PBKDF2-SHA-256 (600 000 iterations). The server keeps
   ciphertext and wrapped keys for their owner only (`api/personal.rs`); nobody, the operator included, can
   reset the passphrase.
+- **Collections** (ADR 0014, `api/collections.rs`): shared credentials lie in a tree of their own, apart
+  from the device folders. `/vault` lists them together with the personal entries, which need the personal
+  vault unlocked; the shared ones do not (`web/src/lib/vault/items.ts`).
 - **Organisation recovery key** (ADR 0009, `api/recovery.rs`, `/recovery`): the browser also wraps each
   vault key for the organisation's public key (ECDH P-256, HKDF, AES-KW), as an unlock of kind
   `organisation` the owner cannot remove. An administrator asks for a recovery, a security officer who
   is someone else approves it, and for a day the requester's browser may fetch the wrap and open the
   vault with the private key: it gives the owner a one-time recovery key, or moves the entries into a
-  shared folder. The private key exists only as a passphrase-sealed file and as printed text. The server
+  shared collection. The private key exists only as a passphrase-sealed file and as printed text. The server
   also seals its master keys for the newest recovery key (`escrow.rs`, table `master_key_escrow`), so
   `remotehub recover-master-key` restores a lost key file from a database backup.
 - The server cannot inject personal entries into connections; the browser can: while

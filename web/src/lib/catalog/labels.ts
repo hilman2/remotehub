@@ -45,7 +45,8 @@ export const AUTH_MODE_LABELS: Record<AuthMode, () => string> = {
 export const KIND_LABELS: Record<ObjectKind, () => string> = {
 	folder: m.catalog_kind_folder,
 	device: m.catalog_kind_device,
-	credential: m.catalog_kind_credential
+	credential: m.catalog_kind_credential,
+	collection: m.catalog_kind_collection
 };
 
 export const CREDENTIAL_KIND_LABELS: Record<CredentialKind, () => string> = {

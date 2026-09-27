@@ -1,15 +1,14 @@
 //! Table-driven tests for `authorize()`.
 //!
-//! Tree and grants:
+//! Trees and grants, folders with devices and collections with credentials
+//! (#190):
 //!
 //! ```text
-//! Servers            ops: connect
-//! ├── Linux          linux: edit
-//! │   ├── web01      (device)
-//! │   └── root-pw    (credential)   alice: reveal
-//! └── Windows
-//!     ├── dc01       (device)       helpdesk: list
-//!     └── da-pw      (credential)
+//! Servers            ops: connect         Shared           ops: connect
+//! ├── Linux          linux: edit          ├── Linux keys   linux: edit
+//! │   └── web01      (device)             │   └── root-pw  alice: reveal
+//! └── Windows                             └── Windows keys
+//!     └── dc01       helpdesk: list           └── da-pw
 //! Network            net: manage
 //! └── switch01       (device)
 //! ```
@@ -20,6 +19,9 @@ const SERVERS: Uuid = Uuid::from_u128(1);
 const LINUX: Uuid = Uuid::from_u128(2);
 const WINDOWS: Uuid = Uuid::from_u128(3);
 const NETWORK: Uuid = Uuid::from_u128(4);
+const SHARED: Uuid = Uuid::from_u128(5);
+const LINUX_KEYS: Uuid = Uuid::from_u128(6);
+const WINDOWS_KEYS: Uuid = Uuid::from_u128(7);
 const WEB01: Uuid = Uuid::from_u128(11);
 const DC01: Uuid = Uuid::from_u128(12);
 const SWITCH01: Uuid = Uuid::from_u128(13);
@@ -46,11 +48,18 @@ fn catalog() -> Catalog {
             (WINDOWS, Some(SERVERS)),
             (NETWORK, None),
         ],
+        [
+            (SHARED, None),
+            (LINUX_KEYS, Some(SHARED)),
+            (WINDOWS_KEYS, Some(SHARED)),
+        ],
         [(WEB01, LINUX), (DC01, WINDOWS), (SWITCH01, NETWORK)],
-        [(ROOT_PW, LINUX), (DA_PW, WINDOWS)],
+        [(ROOT_PW, LINUX_KEYS), (DA_PW, WINDOWS_KEYS)],
         [
             grant(ObjectId::Folder(SERVERS), "S-ops", Role::Connect),
             grant(ObjectId::Folder(LINUX), "S-linux", Role::Edit),
+            grant(ObjectId::Collection(SHARED), "S-ops", Role::Connect),
+            grant(ObjectId::Collection(LINUX_KEYS), "S-linux", Role::Edit),
             grant(ObjectId::Device(DC01), "S-helpdesk", Role::List),
             grant(ObjectId::Credential(ROOT_PW), "S-alice", Role::Reveal),
             grant(ObjectId::Folder(NETWORK), "S-net", Role::Manage),
@@ -73,7 +82,7 @@ fn admin() -> Subject {
     }
 }
 
-use ObjectId::{Credential, Device, Folder};
+use ObjectId::{Collection, Credential, Device, Folder};
 
 #[test]
 fn effective_roles() {
@@ -109,6 +118,12 @@ fn effective_roles() {
         ("net on switch01",       &net, Device(SWITCH01),        Some(Role::Manage)),
         ("net on Servers",        &net, Folder(SERVERS),         None),
         ("nobody on anything",    &nobody, Folder(SERVERS),      None),
+        // A grant on a collection holds for what is in it, and a folder's
+        // grants reach no collection (#190).
+        ("ops on Shared",         &ops, Collection(SHARED),      Some(Role::Connect)),
+        ("ops on Linux keys",     &ops, Collection(LINUX_KEYS),  Some(Role::Connect)),
+        ("net on da-pw",          &net, Credential(DA_PW),       None),
+        ("helpdesk on Shared",    &helpdesk, Collection(SHARED), None),
         // Administrators manage everything that exists — and nothing else.
         ("admin on da-pw",        &admin, Credential(DA_PW),     Some(Role::Manage)),
         ("admin on unknown",      &admin, Device(Uuid::from_u128(99)), None),
@@ -158,27 +173,32 @@ fn visibility_includes_the_way_to_what_is_granted() {
     let helpdesk = catalog.visible(&subject(&["S-helpdesk"]));
     assert_eq!(helpdesk.roles, HashMap::from([(Device(DC01), Role::List)]));
     assert_eq!(helpdesk.path_only, HashSet::from([SERVERS, WINDOWS]));
+    assert!(helpdesk.collections_path_only.is_empty());
 
     let alice = catalog.visible(&subject(&["S-alice"]));
     assert_eq!(
         alice.roles.keys().collect::<Vec<_>>(),
         [&Credential(ROOT_PW)]
     );
-    assert_eq!(alice.path_only, HashSet::from([SERVERS, LINUX]));
+    assert!(alice.path_only.is_empty());
+    assert_eq!(
+        alice.collections_path_only,
+        HashSet::from([SHARED, LINUX_KEYS])
+    );
 
     let ops = catalog.visible(&subject(&["S-ops"]));
     assert_eq!(
         ops.roles.len(),
-        7,
-        "Servers, Linux, Windows and their four entries"
+        10,
+        "Servers, Linux, Windows, web01, dc01; Shared, its two collections and two entries"
     );
-    assert!(ops.path_only.is_empty());
+    assert!(ops.path_only.is_empty() && ops.collections_path_only.is_empty());
 
     assert_eq!(
         catalog.visible(&subject(&["S-nobody"])),
         Visibility::default()
     );
-    assert_eq!(catalog.visible(&admin()).roles.len(), 9);
+    assert_eq!(catalog.visible(&admin()).roles.len(), 12);
 }
 
 #[test]
@@ -188,8 +208,18 @@ fn containment() {
     assert!(catalog.is_within(SERVERS, SERVERS));
     assert!(!catalog.is_within(SERVERS, LINUX));
     assert!(!catalog.is_within(NETWORK, SERVERS));
+    assert!(catalog.is_within_collection(LINUX_KEYS, SHARED));
+    assert!(!catalog.is_within_collection(SHARED, LINUX_KEYS));
     assert_eq!(catalog.parent(Device(WEB01)), Some(LINUX));
     assert_eq!(catalog.parent(Folder(SERVERS)), None);
+    assert_eq!(
+        catalog.container(Credential(ROOT_PW)),
+        Some(Collection(LINUX_KEYS))
+    );
+    assert_eq!(
+        catalog.container(Collection(LINUX_KEYS)),
+        Some(Collection(SHARED))
+    );
 }
 
 #[test]
@@ -198,6 +228,7 @@ fn a_folder_loop_does_not_hang() {
     let b = Uuid::from_u128(2);
     let catalog = Catalog::new(
         [(a, Some(b)), (b, Some(a))],
+        [],
         [],
         [],
         [grant(Folder(a), "S-x", Role::Edit)],
@@ -219,6 +250,7 @@ fn a_just_in_time_grant_counts_until_it_runs_out() {
         let permanent = grant(Device(DC01), "S-helpdesk", Role::List);
         Catalog::new(
             [(WINDOWS, None)],
+            [],
             [(DC01, WINDOWS)],
             [],
             [permanent, jit],
@@ -274,8 +306,8 @@ fn the_grants_behind_a_role_are_named_nearest_first() {
         catalog.grants_along(Credential(ROOT_PW)),
         [
             (Credential(ROOT_PW), "S-alice", Role::Reveal),
-            (Folder(LINUX), "S-linux", Role::Edit),
-            (Folder(SERVERS), "S-ops", Role::Connect),
+            (Collection(LINUX_KEYS), "S-linux", Role::Edit),
+            (Collection(SHARED), "S-ops", Role::Connect),
         ]
     );
     // alice in ops: her own grant and the inherited one, not linux's.
@@ -284,7 +316,7 @@ fn the_grants_behind_a_role_are_named_nearest_first() {
         catalog.reasons(&alice, Credential(ROOT_PW)),
         [
             (Credential(ROOT_PW), "S-alice", Role::Reveal),
-            (Folder(SERVERS), "S-ops", Role::Connect),
+            (Collection(SHARED), "S-ops", Role::Connect),
         ]
     );
     // The highest reason is the effective role.

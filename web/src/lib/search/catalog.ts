@@ -1,4 +1,4 @@
-/** The device catalog as search items: devices, credentials and folders. */
+/** The device catalog as search items: devices and folders. */
 import type { ObjectKind, Protocol, Tree } from '$lib/api/catalog';
 import { pathTo } from '$lib/catalog/tree';
 import type { Searchable } from './rank';
@@ -59,12 +59,7 @@ export function catalogItems(tree: Tree): Searchable<Hit>[] {
 				d.protocol
 			)
 		),
-		...tree.credentials.map((c) =>
-			item('credential', c.id, c.name, c.folder_id, c.username, [
-				{ text: c.username, weight: 0.8 },
-				{ text: c.domain, weight: 0.6 }
-			])
-		),
+		// Shared credentials are searched in the vault (#190).
 		...tree.folders.map((f) => item('folder', f.id, f.name, f.parent_id, '', []))
 	];
 }

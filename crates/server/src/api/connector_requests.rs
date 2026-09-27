@@ -224,7 +224,7 @@ pub async fn create(
                 .collect();
             (connector, name, devices)
         }
-        ObjectId::Credential(_) => return Err(invalid("kind")),
+        ObjectId::Credential(_) | ObjectId::Collection(_) => return Err(invalid("kind")),
     };
     let connector = connector.ok_or_else(|| invalid("object"))?;
     let targets: Vec<RequestTarget> = devices.iter().filter_map(target).collect();
@@ -234,7 +234,7 @@ pub async fn create(
     let (folder, device) = match asked {
         ObjectId::Folder(id) => (Some(id), None),
         ObjectId::Device(id) => (None, Some(id)),
-        ObjectId::Credential(_) => (None, None),
+        ObjectId::Credential(_) | ObjectId::Collection(_) => (None, None),
     };
 
     let mut tx = state.db.begin().await?;

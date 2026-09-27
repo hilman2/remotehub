@@ -6,6 +6,7 @@ mod attachments;
 mod audit;
 mod catalog;
 pub mod certificate;
+mod collections;
 mod connect;
 mod connector_requests;
 mod connectors;
@@ -128,6 +129,11 @@ pub fn router(state: AppState) -> Router<AppState> {
             patch(catalog::update_folder).delete(catalog::delete_folder),
         )
         .route("/folders/{id}/open", put(catalog::set_folder_open))
+        .route("/collections", post(collections::create))
+        .route(
+            "/collections/{id}",
+            patch(collections::update).delete(collections::delete),
+        )
         .route("/devices", post(catalog::create_device))
         .route(
             "/devices/{id}",

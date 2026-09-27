@@ -1,7 +1,7 @@
 //! Folders, devices, credentials and grants over HTTP — with the permission
 //! rules of authorize() applied end to end.
 
-use crate::common::{BOB_SID, OPS_SID, authed, send, sign_in_request, state};
+use crate::common::{BOB_SID, OPS_SID, authed, collection, send, sign_in_request, state};
 use axum::Router;
 use axum::http::StatusCode;
 use remotehub_server::app;
@@ -77,7 +77,9 @@ async fn grant(
     );
 }
 
-/// Servers/Linux with web01 (stored root credential) and Servers/Windows with dc01.
+/// Servers/Linux with web01 and Servers/Windows with dc01; web01 signs in with
+/// the root credential, which lives apart in the collection Vault/Linux keys
+/// (#190).
 struct Fixture {
     app: Router,
     alice: String,
@@ -85,6 +87,8 @@ struct Fixture {
     linux: String,
     windows: String,
     web01: String,
+    vault: String,
+    linux_keys: String,
     root_pw: String,
 }
 
@@ -112,11 +116,13 @@ async fn fixture(pool: PgPool) -> Fixture {
         json!({ "parent_id": servers, "name": "Windows" }),
     )
     .await;
+    let vault = collection(&app, &alice, None, "Vault").await;
+    let linux_keys = collection(&app, &alice, Some(&vault), "Linux keys").await;
     let root_pw = create(
         &app,
         &alice,
         "/api/credentials",
-        json!({ "folder_id": linux, "name": "root", "username": "root", "password": "T0p-Secret!" }),
+        json!({ "collection_id": linux_keys, "name": "root", "username": "root", "password": "T0p-Secret!" }),
     )
     .await;
     let web01 = create(
@@ -146,6 +152,8 @@ async fn fixture(pool: PgPool) -> Fixture {
         linux,
         windows,
         web01,
+        vault,
+        linux_keys,
         root_pw,
     }
 }
@@ -156,7 +164,12 @@ async fn administrators_see_everything_others_only_what_is_granted(pool: PgPool)
     let all = tree(&f.app, &f.alice).await;
     assert_eq!(names(&all, "folders"), ["Linux", "Servers", "Windows"]);
     assert_eq!(names(&all, "devices"), ["dc01", "web01"]);
+    assert_eq!(names(&all, "collections"), ["Linux keys", "Vault"]);
     assert_eq!(names(&all, "credentials"), ["root"]);
+    assert_eq!(
+        all["credentials"][0]["collection_id"],
+        f.linux_keys.as_str()
+    );
     assert_eq!(all["may_create_top_level"], true);
 
     let bob = sign_in(&f.app, "bob").await;
@@ -180,6 +193,7 @@ async fn administrators_see_everything_others_only_what_is_granted(pool: PgPool)
             .iter()
             .all(|f| f["role"].is_null())
     );
+    assert_eq!(names(&some, "collections"), Vec::<String>::new());
     assert_eq!(names(&some, "credentials"), Vec::<String>::new());
 }
 
@@ -263,17 +277,33 @@ async fn group_grants_hold_for_everything_below(pool: PgPool) {
         &f.app, &f.alice, "folder", &f.servers, OPS_SID, "group", "connect",
     )
     .await;
+    // Shared credentials hang in a tree of their own (#190): the same holds
+    // for a grant on a collection.
+    grant(
+        &f.app,
+        &f.alice,
+        "collection",
+        &f.vault,
+        OPS_SID,
+        "group",
+        "connect",
+    )
+    .await;
     let olaf = sign_in(&f.app, "olaf").await;
     let seen = tree(&f.app, &olaf).await;
     assert_eq!(names(&seen, "devices"), ["dc01", "web01"]);
+    assert_eq!(names(&seen, "collections"), ["Linux keys", "Vault"]);
     assert_eq!(names(&seen, "credentials"), ["root"]);
-    assert!(
-        seen["devices"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|d| d["role"] == "connect")
-    );
+    for list in ["devices", "collections", "credentials"] {
+        assert!(
+            seen[list]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|o| o["role"] == "connect"),
+            "{list}"
+        );
+    }
 
     // connect does not allow editing or creating.
     let edit = call(
@@ -294,6 +324,15 @@ async fn group_grants_hold_for_everything_below(pool: PgPool) {
     )
     .await;
     assert_eq!(new.code(), "forbidden");
+    let new = call(
+        &f.app,
+        &olaf,
+        "POST",
+        "/api/credentials",
+        Some(json!({ "collection_id": f.linux_keys, "name": "x", "password": "x" })),
+    )
+    .await;
+    assert_eq!(new.code(), "forbidden");
 }
 
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
@@ -304,7 +343,9 @@ async fn invisible_objects_do_not_exist_for_the_caller(pool: PgPool) {
         ("DELETE", format!("/api/devices/{}", f.web01)),
         ("DELETE", format!("/api/credentials/{}", f.root_pw)),
         ("DELETE", format!("/api/folders/{}", f.linux)),
+        ("DELETE", format!("/api/collections/{}", f.linux_keys)),
         ("GET", format!("/api/grants?kind=folder&id={}", f.linux)),
+        ("GET", format!("/api/grants?kind=collection&id={}", f.vault)),
     ] {
         let response = call(&f.app, &bob, method, &uri, None).await;
         assert_eq!(
@@ -336,6 +377,16 @@ async fn a_credential_only_goes_where_its_users_may_send_it(pool: PgPool) {
         &f.app, &f.alice, "folder", &f.windows, BOB_SID, "user", "edit",
     )
     .await;
+    grant(
+        &f.app,
+        &f.alice,
+        "collection",
+        &f.linux_keys,
+        BOB_SID,
+        "user",
+        "edit",
+    )
+    .await;
     let device = |host: &str, folder: &str, credential: &str| {
         json!({
             "folder_id": folder, "name": "web01", "protocol": "ssh", "host": host, "port": 22,
@@ -343,7 +394,8 @@ async fn a_credential_only_goes_where_its_users_may_send_it(pool: PgPool) {
         })
     };
 
-    // With edit on Linux, bob may use the root credential there …
+    // With edit on Linux and on the root credential's collection, bob may
+    // use that credential there …
     let ok = call(
         &f.app,
         &bob,
@@ -359,7 +411,7 @@ async fn a_credential_only_goes_where_its_users_may_send_it(pool: PgPool) {
         &f.app,
         &f.alice,
         "/api/credentials",
-        json!({ "folder_id": f.servers, "name": "domain admin", "password": "Adm1n!" }),
+        json!({ "collection_id": f.vault, "name": "domain admin", "password": "Adm1n!" }),
     )
     .await;
     grant(
@@ -430,8 +482,9 @@ async fn passwords_are_sealed_versioned_and_never_returned(pool: PgPool) {
     assert!(!everything.contains("T0p-Secret!"));
 
     let change = |password: Option<&str>| {
-        let mut body =
-            json!({ "folder_id": f.linux, "name": "root", "username": "root", "domain": "" });
+        let mut body = json!({
+            "collection_id": f.linux_keys, "name": "root", "username": "root", "domain": "",
+        });
         if let Some(p) = password {
             body["password"] = json!(p);
         }
@@ -747,8 +800,9 @@ async fn ssh_keys_are_checked_sealed_and_shown_only_by_fingerprint(pool: PgPool)
     let key = lab_key("tester_ed25519_cert");
     let certificate = lab_key("tester_ed25519_cert-cert.pub");
     let body = |extra: Value| {
-        let mut body =
-            json!({ "folder_id": f.linux, "name": "key", "kind": "ssh_key", "username": "tester" });
+        let mut body = json!({
+            "collection_id": f.linux_keys, "name": "key", "kind": "ssh_key", "username": "tester",
+        });
         body.as_object_mut()
             .unwrap()
             .extend(extra.as_object().unwrap().clone());
@@ -896,19 +950,23 @@ async fn stored_secrets_are_shown_only_with_reveal_and_audited(pool: PgPool) {
         assert_eq!(hidden.status, StatusCode::NOT_FOUND, "{uri}");
     }
     let bob = sign_in(&f.app, "bob").await;
-    grant(
-        &f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "connect",
-    )
-    .await;
+    // The device's own password goes with its folder, the shared
+    // credential with its collection (#190).
+    let grant_bob = |role: &'static str| {
+        let (app, alice) = (&f.app, &f.alice);
+        let (linux, linux_keys) = (&f.linux, &f.linux_keys);
+        async move {
+            grant(app, alice, "folder", linux, BOB_SID, "user", role).await;
+            grant(app, alice, "collection", linux_keys, BOB_SID, "user", role).await;
+        }
+    };
+    grant_bob("connect").await;
     for uri in [&credential, &device] {
         let refused = call(&f.app, &bob, "POST", uri, show()).await;
         assert_eq!(refused.status, StatusCode::FORBIDDEN, "{uri}");
     }
 
-    grant(
-        &f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "reveal",
-    )
-    .await;
+    grant_bob("reveal").await;
     let shown = call(&f.app, &bob, "POST", &credential, show()).await;
     assert_eq!(shown.status, StatusCode::OK);
     assert_eq!(shown.headers["cache-control"], "no-store");
@@ -1000,7 +1058,7 @@ async fn credentials_keep_keepass_fields_and_seal_the_protected_ones(pool: PgPoo
     let f = fixture(pool).await;
     let body = |fields: Value, icon: i64| {
         json!({
-            "folder_id": f.linux, "name": "router", "username": "admin",
+            "collection_id": f.linux_keys, "name": "router", "username": "admin",
             "url": "https://router.lan", "notes": "Rack 2\nPort 4", "icon": icon, "fields": fields,
         })
     };
@@ -1152,7 +1210,13 @@ async fn files_are_sealed_with_a_credential_and_downloaded_with_reveal(pool: PgP
     let uri = format!("/api/credentials/{id}/attachments/{file}");
     let bob = sign_in(&f.app, "bob").await;
     grant(
-        &f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "connect",
+        &f.app,
+        &f.alice,
+        "collection",
+        &f.linux_keys,
+        BOB_SID,
+        "user",
+        "connect",
     )
     .await;
     assert_eq!(
@@ -1162,7 +1226,13 @@ async fn files_are_sealed_with_a_credential_and_downloaded_with_reveal(pool: PgP
     let refused = send(&f.app, upload(&id, "x.txt", b"x".to_vec(), &bob)).await;
     assert_eq!(refused.status, StatusCode::FORBIDDEN);
     grant(
-        &f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "reveal",
+        &f.app,
+        &f.alice,
+        "collection",
+        &f.linux_keys,
+        BOB_SID,
+        "user",
+        "reveal",
     )
     .await;
     let got = call(&f.app, &bob, "GET", &uri, None).await;
@@ -1237,7 +1307,8 @@ async fn older_versions_are_revealed_on_request(pool: PgPool) {
     let f = fixture(pool).await;
     let id = f.root_pw.clone();
     let change = json!({
-        "folder_id": f.linux, "name": "root", "username": "root", "password": "Second-Pass!",
+        "collection_id": f.linux_keys, "name": "root", "username": "root",
+        "password": "Second-Pass!",
     });
     call(
         &f.app,
@@ -1295,7 +1366,13 @@ async fn older_versions_are_revealed_on_request(pool: PgPool) {
     }
     let bob = sign_in(&f.app, "bob").await;
     grant(
-        &f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "connect",
+        &f.app,
+        &f.alice,
+        "collection",
+        &f.linux_keys,
+        BOB_SID,
+        "user",
+        "connect",
     )
     .await;
     let hidden = call(
@@ -1644,18 +1721,12 @@ async fn folders_pass_their_connector_down(pool: PgPool) {
 async fn a_folder_connector_needs_the_credentials_below(pool: PgPool) {
     let f = fixture(pool).await;
     let site = create(&f.app, &f.alice, "/api/connectors", json!({ "name": "A" })).await;
-    let vault = create(
-        &f.app,
-        &f.alice,
-        "/api/folders",
-        json!({ "parent_id": null, "name": "Vault" }),
-    )
-    .await;
+    let apart = collection(&f.app, &f.alice, None, "Apart").await;
     let elsewhere = create(
         &f.app,
         &f.alice,
         "/api/credentials",
-        json!({ "folder_id": vault, "name": "db", "username": "db", "password": "Els3where!" }),
+        json!({ "collection_id": apart, "name": "db", "username": "db", "password": "Els3where!" }),
     )
     .await;
     create(
@@ -1670,6 +1741,17 @@ async fn a_folder_connector_needs_the_credentials_below(pool: PgPool) {
     .await;
     grant(
         &f.app, &f.alice, "folder", &f.servers, BOB_SID, "user", "manage",
+    )
+    .await;
+    // bob may use web01's root credential, so db01 is the only one refused.
+    grant(
+        &f.app,
+        &f.alice,
+        "collection",
+        &f.vault,
+        BOB_SID,
+        "user",
+        "manage",
     )
     .await;
     let bob = sign_in(&f.app, "bob").await;
@@ -1720,7 +1802,13 @@ async fn a_folder_connector_needs_the_credentials_below(pool: PgPool) {
 
     // With the right to use the credential, both go through.
     grant(
-        &f.app, &f.alice, "folder", &vault, BOB_SID, "user", "connect",
+        &f.app,
+        &f.alice,
+        "collection",
+        &apart,
+        BOB_SID,
+        "user",
+        "connect",
     )
     .await;
     assert_eq!(

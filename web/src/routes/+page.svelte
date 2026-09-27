@@ -7,6 +7,7 @@
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import Lock from '@lucide/svelte/icons/lock';
+	import { vaultHref } from '$lib/vault/links';
 	import PanelLeftOpen from '@lucide/svelte/icons/panel-left-open';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -15,22 +16,18 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import {
 		allows,
-		createCredential,
 		createDevice,
 		createFolder,
-		deleteCredential,
 		deleteDevice,
 		deleteFolder,
 		loadTree,
 		resetHostKey,
 		setFolderOpen,
-		updateCredential,
 		updateDevice,
 		updateFolder,
-		type Credential,
-		type CredentialInput,
 		type Device,
 		type DeviceInput,
 		type Folder,
@@ -48,24 +45,15 @@
 	import { frequent, queryKey, rank, remember, type Pick } from '$lib/search/rank';
 	import RequestForm from '$lib/catalog/RequestForm.svelte';
 	import { errorMessage, problemMessage } from '$lib/api/errors';
-	import CredentialForm from '$lib/catalog/CredentialForm.svelte';
 	import DeviceForm from '$lib/catalog/DeviceForm.svelte';
 	import FolderNodeView from '$lib/catalog/FolderNodeView.svelte';
 	import Grants from '$lib/catalog/Grants.svelte';
 	import Journal from '$lib/catalog/Journal.svelte';
 	import RevealSecret from '$lib/catalog/RevealSecret.svelte';
-	import CredentialExtras from '$lib/catalog/CredentialExtras.svelte';
 	import AskCustomer from '$lib/connectors/AskCustomer.svelte';
 	import DeviceAccess from '$lib/connectors/DeviceAccess.svelte';
-	import EntryDetails from '$lib/vault/EntryDetails.svelte';
-	import FileDown from '@lucide/svelte/icons/file-down';
-	import FileUp from '@lucide/svelte/icons/file-up';
-	import KdbxForm from '$lib/vault/KdbxForm.svelte';
-	import { writeKdbx, type KdbxEntry } from '$lib/vault/kdbx';
-	import { exportFolder, importInto } from '$lib/vault/shared-kdbx';
 	import {
 		AUTH_MODE_LABELS,
-		CREDENTIAL_KIND_LABELS,
 		PROTOCOL_LABELS,
 		ROLE_LABELS,
 		keyboardLayoutLabel
@@ -81,11 +69,9 @@
 	type Open =
 		| { type: 'folder'; parent: string | null; folder: Folder | null }
 		| { type: 'device'; folderId: string; device: Device | null }
-		| { type: 'credential'; folderId: string; credential: Credential | null }
 		| { type: 'grants'; kind: ObjectKind; id: string; name: string }
 		| { type: 'delete'; kind: ObjectKind; id: string; name: string }
-		| { type: 'request'; kind: ObjectKind; id: string; name: string; role: Role }
-		| { type: 'kdbx'; mode: 'import' | 'export'; folder: Folder };
+		| { type: 'request'; kind: ObjectKind; id: string; name: string; role: Role };
 
 	let tree = $state<Tree | null>(null);
 	let connectors = $state<Connector[]>([]);
@@ -154,11 +140,6 @@
 	const device = $derived(
 		selected?.kind === 'device' ? tree?.devices.find((d) => d.id === selected?.id) : undefined
 	);
-	const credential = $derived(
-		selected?.kind === 'credential'
-			? tree?.credentials.find((c) => c.id === selected?.id)
-			: undefined
-	);
 
 	async function load() {
 		await saving;
@@ -171,6 +152,13 @@
 		} else error = errorMessage(result.code);
 		if (sites.ok) connectors = sites.data;
 		if (picked.ok) picks = picked.data;
+		// A link from the vault names the device to show (#190).
+		const linked = page.url.searchParams.get('device');
+		const target = linked && !selected ? tree?.devices.find((d) => d.id === linked) : undefined;
+		if (target && tree) {
+			selected = { kind: 'device', id: target.id };
+			for (const above of pathTo(tree, target.folder_id)) setOpen(above.id, true);
+		}
 	}
 
 	const connectorOf = (device: Device) => connectors.find((c) => c.id === device.reached_through);
@@ -192,53 +180,12 @@
 
 	function show(next: Open) {
 		error = null;
-		kdbxResult = null;
 		open = next;
 		if (next.type === 'folder') {
 			folderName = next.folder?.name ?? '';
 			folderConnectorId = next.folder?.connector_id ?? '';
 		}
 		dialogOpen = true;
-	}
-
-	let kdbxBusy = $state(false);
-	let kdbxResult = $state<string | null>(null);
-
-	/** Creates what a KeePass file holds below `into` (#99). */
-	async function importKdbx(into: Folder, entries: KdbxEntry[]) {
-		if (!tree) return;
-		kdbxBusy = true;
-		const result = await importInto(tree, into.id, entries);
-		kdbxBusy = false;
-		kdbxResult = m.kdbx_imported({ count: result.created });
-		error =
-			result.failed.length > 0 ? m.kdbx_not_imported({ names: result.failed.join(', ') }) : null;
-		await load();
-	}
-
-	/** Writes the folder into a new KeePass file and hands it over (#99). */
-	async function exportKdbx(from: Folder, password: string) {
-		if (!tree) return;
-		kdbxBusy = true;
-		error = null;
-		const result = await exportFolder(tree, from.id);
-		if (!result.ok) {
-			kdbxBusy = false;
-			error =
-				'missing' in result
-					? m.kdbx_missing_reveal({ name: result.missing })
-					: m.kdbx_export_failed({ name: result.failed });
-			return;
-		}
-		const file = await writeKdbx(result.entries, password, from.name);
-		kdbxBusy = false;
-		const url = URL.createObjectURL(new Blob([file], { type: 'application/octet-stream' }));
-		const link = document.createElement('a');
-		link.href = url;
-		link.download = `${from.name}.kdbx`;
-		link.click();
-		setTimeout(() => URL.revokeObjectURL(url), 10_000);
-		kdbxResult = m.kdbx_exported({ count: result.entries.length });
 	}
 
 	/** Runs a change; on success reloads the tree and closes the dialog. */
@@ -282,25 +229,10 @@
 		);
 	}
 
-	function saveCredential(input: CredentialInput) {
-		if (open?.type !== 'credential') return;
-		const target = open;
-		run(
-			target.credential ? updateCredential(target.credential.id, input) : createCredential(input),
-			target.credential ? undefined : created('credential', input.folder_id)
-		);
-	}
-
 	function remove() {
 		if (open?.type !== 'delete') return;
 		const { kind, id } = open;
-		const removal =
-			kind === 'folder'
-				? deleteFolder(id)
-				: kind === 'device'
-					? deleteDevice(id)
-					: deleteCredential(id);
-		run(removal, () => (selected = null));
+		run(kind === 'folder' ? deleteFolder(id) : deleteDevice(id), () => (selected = null));
 	}
 
 	function sendRequest(role: Role, minutes: number, reason: string) {
@@ -364,16 +296,12 @@
 						: m.catalog_new_folder();
 			case 'device':
 				return open.device ? m.catalog_edit() : m.catalog_new_device();
-			case 'credential':
-				return open.credential ? m.catalog_edit() : m.catalog_new_credential();
 			case 'grants':
 				return m.grants_title({ name: open.name });
 			case 'delete':
 				return m.catalog_delete();
 			case 'request':
 				return m.request_title({ name: open.name });
-			case 'kdbx':
-				return open.mode === 'import' ? m.kdbx_import() : m.kdbx_export();
 			default:
 				return '';
 		}
@@ -421,8 +349,6 @@
 			<span class="flex w-full min-w-0 items-center gap-2.5">
 				{#if hit.protocol}
 					<ProtocolChip protocol={hit.protocol} />
-				{:else if hit.kind === 'credential'}
-					<KeyRound size={15} class="shrink-0 text-warning" aria-hidden="true" />
 				{:else}
 					<FolderClosed size={15} class="shrink-0 text-ink-3" aria-hidden="true" />
 				{/if}
@@ -572,31 +498,11 @@
 					{@render requestAccess('folder', folder.id, folder.name, folder.role)}
 					<SettingsMenu
 						label={m.catalog_settings()}
-						items={[
-							...settings('folder', folder.id, folder.name, folder.role, {
-								label: m.catalog_rename(),
-								icon: Pencil,
-								onselect: () => show({ type: 'folder', parent: folder.parent_id, folder })
-							}),
-							...(allows(folder.role, 'edit')
-								? [
-										{
-											label: m.kdbx_import(),
-											icon: FileUp,
-											onselect: () => show({ type: 'kdbx', mode: 'import', folder })
-										}
-									]
-								: []),
-							...(allows(folder.role, 'reveal')
-								? [
-										{
-											label: m.kdbx_export(),
-											icon: FileDown,
-											onselect: () => show({ type: 'kdbx', mode: 'export', folder })
-										}
-									]
-								: [])
-						]}
+						items={settings('folder', folder.id, folder.name, folder.role, {
+							label: m.catalog_rename(),
+							icon: Pencil,
+							onselect: () => show({ type: 'folder', parent: folder.parent_id, folder })
+						})}
 					/>
 				</div>
 			</div>
@@ -617,14 +523,6 @@
 					>
 						<Plus size={16} aria-hidden="true" />
 						{m.catalog_new_device()}
-					</button>
-					<button
-						type="button"
-						class={button}
-						onclick={() => show({ type: 'credential', folderId: folder.id, credential: null })}
-					>
-						<KeyRound size={16} aria-hidden="true" />
-						{m.catalog_new_credential()}
 					</button>
 					{#if allows(folder.role, 'manage')}
 						<button
@@ -709,7 +607,15 @@
 					<h3 class="eyebrow">{m.field_auth_mode()}</h3>
 					<p class="text-lg font-semibold break-words">
 						{#if device.credential_id}
-							{tree?.credentials.find((c) => c.id === device.credential_id)?.name ?? ''}
+							<!-- The entry lives in the vault's collections (#190). -->
+							<a
+								class="inline-flex items-center gap-2 text-accent hover:underline"
+								href={vaultHref(device.credential_id)}
+							>
+								<KeyRound size={16} aria-hidden="true" />
+								{tree?.credentials.find((c) => c.id === device.credential_id)?.name ??
+									m.credential_not_visible()}
+							</a>
 						{:else if device.auth_mode === 'device'}
 							<span class="font-mono">
 								{device.domain ? `${device.domain}\\${device.username}` : device.username}
@@ -771,79 +677,6 @@
 			</div>
 
 			{@render requestedNotice(device.id)}
-		{:else if credential}
-			<div class="flex flex-wrap items-end gap-6">
-				<div class="min-w-0 flex-1">
-					{@render heading(path(credential.folder_id), credential.name)}
-				</div>
-				<div class="flex items-center gap-2">
-					{@render requestAccess('credential', credential.id, credential.name, credential.role)}
-					<SettingsMenu
-						label={m.catalog_settings()}
-						items={settings('credential', credential.id, credential.name, credential.role, {
-							label: m.catalog_edit(),
-							icon: Pencil,
-							onselect: () =>
-								show({ type: 'credential', folderId: credential.folder_id, credential })
-						})}
-					/>
-				</div>
-			</div>
-			<div class="flex flex-wrap gap-2">
-				<span class="chip font-mono">
-					{credential.domain ? `${credential.domain}\\${credential.username}` : credential.username}
-				</span>
-				<span class="chip">{CREDENTIAL_KIND_LABELS[credential.kind]()}</span>
-				<span class="chip">{m.catalog_access({ role: ROLE_LABELS[credential.role]() })}</span>
-				<span class="chip">{m.credential_version({ version: credential.version })}</span>
-			</div>
-			<div class="grid gap-4 md:grid-cols-3">
-				<section class={card}>
-					<h3 class="eyebrow">
-						{credential.kind === 'ssh_key' ? m.credential_key() : m.field_password()}
-					</h3>
-					<p class="flex items-center gap-2 font-medium">
-						<Lock size={16} class="text-ok" aria-hidden="true" />
-						{m.credential_hidden()}
-					</p>
-					{#if credential.kind === 'ssh_key'}
-						<p class="font-mono text-xs text-ink-2">{credential.key_algorithm}</p>
-						<p class="font-mono text-xs leading-relaxed break-all text-ink-2">
-							{credential.key_fingerprint}
-						</p>
-					{/if}
-					{#if allows(credential.role, 'reveal')}
-						{#key credential.id}
-							<RevealSecret owner="credentials" id={credential.id} />
-						{/key}
-					{/if}
-				</section>
-				{#if credential.kind === 'ssh_key'}
-					<section class={card}>
-						<h3 class="eyebrow">{m.credential_certificate()}</h3>
-						<p class="text-lg font-semibold">
-							{credential.has_certificate
-								? m.credential_certificate_yes()
-								: m.credential_certificate_no()}
-						</p>
-					</section>
-				{/if}
-				{#if credential.url || credential.notes || credential.fields.length > 0}
-					<section class="{card} md:col-span-3">
-						<EntryDetails
-							url={credential.url}
-							notes={credential.notes}
-							fields={credential.fields}
-						/>
-					</section>
-				{/if}
-				<section class="{card} md:col-span-3">
-					{#key credential.id}
-						<CredentialExtras {credential} onchange={load} />
-					{/key}
-				</section>
-			</div>
-			{@render requestedNotice(credential.id)}
 		{:else if tree}
 			<p class="font-display text-2xl text-ink-3">{m.catalog_select_hint()}</p>
 		{/if}
@@ -909,24 +742,6 @@
 					onsubmit={saveDevice}
 					oncancel={() => (dialogOpen = false)}
 				/>
-			{:else if open?.type === 'credential'}
-				<CredentialForm
-					folderId={open.folderId}
-					credential={open.credential}
-					onsubmit={saveCredential}
-					oncancel={() => (dialogOpen = false)}
-				/>
-			{:else if open?.type === 'kdbx'}
-				{@const target = open}
-				<KdbxForm
-					mode={target.mode}
-					busy={kdbxBusy}
-					onimport={(entries) => importKdbx(target.folder, entries)}
-					onexport={(password) => exportKdbx(target.folder, password)}
-				/>
-				{#if kdbxResult}
-					<p class="mt-3 text-sm" role="status">{kdbxResult}</p>
-				{/if}
 			{:else if open?.type === 'grants'}
 				<Grants kind={open.kind} id={open.id} />
 			{:else if open?.type === 'request'}

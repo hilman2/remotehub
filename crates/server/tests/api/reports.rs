@@ -1,6 +1,7 @@
-//! Permission reports (#110): Servers/Linux/web01, the operators (olaf's
-//! group) may connect to Servers, bob may reveal web01's credential of its
-//! own folder. alice administers.
+//! Permission reports (#110): the folders Servers/Linux and the collection
+//! Passwords with the root credential; the operators (olaf's group) may
+//! connect to Servers and Passwords, bob may reveal the root credential on
+//! its own. alice administers.
 
 use axum::Router;
 use axum::http::StatusCode;
@@ -8,7 +9,7 @@ use remotehub_server::app;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
-use crate::common::{BOB_SID, OPS_SID, Response, authed, send, sign_in_request, state};
+use crate::common::{BOB_SID, OPS_SID, Response, authed, collection, send, sign_in_request, state};
 
 async fn token(app: &Router, user: &str) -> String {
     send(app, sign_in_request(user, "right"))
@@ -116,24 +117,29 @@ async fn a_report_names_what_someone_reaches_and_why(pool: PgPool) {
         json!({ "parent_id": servers, "name": "Linux" }),
     )
     .await;
+    let passwords = collection(&app, &alice, None, "Passwords").await;
     let root = create(
         &app,
         &alice,
         "/api/credentials",
-        json!({ "folder_id": linux, "name": "root", "username": "root", "password": "T0p-Secret!" }),
+        json!({ "collection_id": passwords, "name": "root", "username": "root", "password": "T0p-Secret!" }),
     )
     .await;
-    let folder = |id: &str| json!({ "kind": "folder", "id": id });
-    grant(
-        &app,
-        &alice,
-        folder(&servers),
-        OPS_SID,
-        "group",
-        "RH Operators",
-        "connect",
-    )
-    .await;
+    for object in [
+        json!({ "kind": "folder", "id": servers }),
+        json!({ "kind": "collection", "id": passwords }),
+    ] {
+        grant(
+            &app,
+            &alice,
+            object,
+            OPS_SID,
+            "group",
+            "RH Operators",
+            "connect",
+        )
+        .await;
+    }
     // Granted under a name he no longer has: the report says today's.
     let credential = json!({ "kind": "credential", "id": root });
     grant(
@@ -156,7 +162,8 @@ async fn a_report_names_what_someone_reaches_and_why(pool: PgPool) {
         );
     }
 
-    // olaf, through his directory group: Servers and everything below it.
+    // olaf, through his directory group: Servers and Passwords and
+    // everything below them, sorted by path.
     let olaf = person(&app, &alice, "olaf").await;
     let report = call(
         &app,
@@ -169,25 +176,19 @@ async fn a_report_names_what_someone_reaches_and_why(pool: PgPool) {
     .json();
     assert_eq!(report["groups_from"], "directory");
     assert_eq!(report["administrator"], false);
-    let ops = ("RH Operators".to_owned(), "Servers".to_owned());
+    let ops =
+        |on: &str, inherited: bool| vec![("RH Operators".to_owned(), on.to_owned(), inherited)];
     assert_eq!(
         reached(&report),
         [
             (
-                "Servers".into(),
+                "Passwords".into(),
                 "connect".into(),
-                vec![(ops.0.clone(), ops.1.clone(), false)]
+                ops("Passwords", false)
             ),
-            (
-                "Linux".into(),
-                "connect".into(),
-                vec![(ops.0.clone(), ops.1.clone(), true)]
-            ),
-            (
-                "root".into(),
-                "connect".into(),
-                vec![(ops.0.clone(), ops.1.clone(), true)]
-            ),
+            ("Servers".into(), "connect".into(), ops("Servers", false)),
+            ("root".into(), "connect".into(), ops("Passwords", true)),
+            ("Linux".into(), "connect".into(), ops("Servers", true)),
         ]
     );
 
@@ -210,7 +211,7 @@ async fn a_report_names_what_someone_reaches_and_why(pool: PgPool) {
             vec![("Bob Helpdesk".into(), "root".into(), false)]
         )]
     );
-    assert_eq!(report["reach"][0]["path"], json!(["Servers", "Linux"]));
+    assert_eq!(report["reach"][0]["path"], json!(["Passwords"]));
 
     // alice reaches everything as an administrator, without grants.
     let alice_id = person(&app, &alice, "alice").await;
@@ -224,7 +225,7 @@ async fn a_report_names_what_someone_reaches_and_why(pool: PgPool) {
     .await
     .json();
     assert_eq!(report["administrator"], true);
-    assert_eq!(report["reach"].as_array().unwrap().len(), 3);
+    assert_eq!(report["reach"].as_array().unwrap().len(), 4);
     assert!(
         report["reach"]
             .as_array()
@@ -233,7 +234,8 @@ async fn a_report_names_what_someone_reaches_and_why(pool: PgPool) {
             .all(|r| r["role"] == "manage")
     );
 
-    // Who reaches Linux: the operators, from Servers; bob's grant lies lower.
+    // Who reaches Linux: the operators, from Servers; the grant on Passwords
+    // and bob's grant lie in the other tree.
     let report = call(
         &app,
         &alice,

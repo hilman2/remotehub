@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { allows, type Device, type Tree } from '$lib/api/catalog';
 import { catalogItems } from '$lib/search/catalog';
 import { rank } from '$lib/search/rank';
-import { folderConnector, nest, pathTo } from './tree';
+import { collectionPath, collectionsBelow, folderConnector, nest, pathTo } from './tree';
 
 function device(id: string, name: string, host: string): Device {
 	return {
@@ -42,10 +42,15 @@ const tree: Tree = {
 		{ id: 'w', parent_id: 's', name: 'windows', role: 'connect', connector_id: 'office' }
 	],
 	devices: [device('d2', 'web02', 'web02.example.com'), device('d1', 'Web01', 'db.example.com')],
+	collections: [
+		{ id: 'k', parent_id: null, name: 'Keys', role: 'connect' },
+		{ id: 'kw', parent_id: 'k', name: 'Windows', role: 'connect' },
+		{ id: 'x', parent_id: null, name: 'Other', role: null }
+	],
 	credentials: [
 		{
 			id: 'c',
-			folder_id: 'w',
+			collection_id: 'kw',
 			name: 'domain admin',
 			kind: 'password',
 			username: 'administrator',
@@ -71,7 +76,14 @@ describe('nest', () => {
 		const servers = roots[1];
 		expect(servers.folders.map((n) => n.folder.name)).toEqual(['Linux', 'windows']);
 		expect(servers.folders[0].devices.map((d) => d.name)).toEqual(['Web01', 'web02']);
-		expect(servers.folders[1].credentials.map((c) => c.name)).toEqual(['domain admin']);
+	});
+});
+
+describe('collections', () => {
+	it('have paths and subtrees of their own, apart from the folders', () => {
+		expect(collectionPath(tree, 'kw').map((c) => c.name)).toEqual(['Keys', 'Windows']);
+		expect([...collectionsBelow(tree, 'k')].sort()).toEqual(['k', 'kw']);
+		expect([...collectionsBelow(tree, 'x')]).toEqual(['x']);
 	});
 });
 
@@ -86,8 +98,8 @@ describe('searching the catalog', () => {
 		expect(hit.detail).toBe('db.example.com');
 	});
 
-	it('finds credentials by user name and what is in a folder by its name', () => {
-		expect(find('ADMINISTRATOR')).toEqual(['credential:domain admin']);
+	it('leaves credentials to the vault and finds what is in a folder by its name', () => {
+		expect(find('ADMINISTRATOR')).toEqual([]);
 		// The folder itself first, then its content.
 		expect(find('linux')).toEqual(['folder:Linux', 'device:Web01', 'device:web02']);
 		expect(find('nothing matches')).toEqual([]);

@@ -2,11 +2,11 @@
 	/**
 	 * Carries out an approved recovery (#95) in this browser: reads the
 	 * organisation's private key, opens the vault, and then either gives the
-	 * owner a one-time recovery key or moves the entries into a shared folder.
+	 * owner a one-time recovery key or moves the entries into a shared collection.
 	 */
-	import { allows, loadTree, type Tree } from '$lib/api/catalog';
+	import { loadTree, type Tree } from '$lib/api/catalog';
 	import { errorMessage, problemMessage } from '$lib/api/errors';
-	import { pathTo } from '$lib/catalog/tree';
+	import { collectionPlaces } from '$lib/catalog/tree';
 	import { getLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
 	import { importInto } from './shared-kdbx';
@@ -26,7 +26,7 @@
 	let file = $state<File | null>(null);
 	let passphrase = $state('');
 	let text = $state('');
-	let folderId = $state('');
+	let collectionId = $state('');
 	let tree = $state<Tree | null>(null);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
@@ -34,20 +34,8 @@
 	let oneTime = $state<string | null>(null);
 	let imported = $state<string | null>(null);
 
-	/** The folders the entries may go into, by their path. */
-	const folders = $derived.by(() => {
-		const all = tree;
-		if (!all) return [];
-		return all.folders
-			.filter((folder) => allows(folder.role, 'edit'))
-			.map((folder) => ({
-				id: folder.id,
-				path: pathTo(all, folder.id)
-					.map((f) => f.name)
-					.join(' / ')
-			}))
-			.sort((a, b) => a.path.localeCompare(b.path, getLocale()));
-	});
+	/** The collections the entries may go into, by their path. */
+	const places = $derived(tree ? collectionPlaces(tree, getLocale()) : []);
 
 	$effect(() => {
 		if (recovery.kind !== 'handover') return;
@@ -86,7 +74,7 @@
 			if (!tree) return;
 			const from = attachmentsOf(recovery.id);
 			const moved = await asKdbx(entries, (ref) => readFile(key, ref, from));
-			const result = await importInto(tree, folderId, moved);
+			const result = await importInto(tree, collectionId, moved);
 			imported = m.kdbx_imported({ count: result.created });
 			if (result.failed.length > 0) {
 				error = m.kdbx_not_imported({ names: result.failed.join(', ') });
@@ -152,11 +140,11 @@
 			{useText ? m.recovery_use_file() : m.recovery_use_text()}
 		</button>
 		{#if recovery.kind === 'handover'}
-			<label class={label} for="recovery-folder">{m.recovery_target_folder()}</label>
-			<select id="recovery-folder" class={field} required bind:value={folderId}>
+			<label class={label} for="recovery-collection">{m.recovery_target_collection()}</label>
+			<select id="recovery-collection" class={field} required bind:value={collectionId}>
 				<option value="" disabled></option>
-				{#each folders as folder (folder.id)}
-					<option value={folder.id}>{folder.path}</option>
+				{#each places as place (place.id)}
+					<option value={place.id}>{place.path}</option>
 				{/each}
 			</select>
 		{/if}

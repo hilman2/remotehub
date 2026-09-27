@@ -2,7 +2,6 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import FolderClosed from '@lucide/svelte/icons/folder-closed';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
-	import { icon } from '$lib/vault/icons';
 	import type { ObjectKind } from '$lib/api/catalog';
 	import { m } from '$lib/paraglide/messages';
 	import FolderNodeView from './FolderNodeView.svelte';
@@ -93,22 +92,6 @@
 						<ProtocolChip protocol={device.protocol} />
 						<span class="truncate">{device.name}</span>
 						<span class="ml-auto truncate font-mono text-xs text-ink-3">{device.host}</span>
-					</button>
-				</li>
-			{/each}
-			{#each node.credentials as credential (credential.id)}
-				{@const Icon = icon(credential.icon)}
-				<li role="treeitem" aria-selected={isSelected('credential', credential.id)}>
-					<button
-						type="button"
-						class={row}
-						style={indent(depth + 1.4)}
-						data-selected={isSelected('credential', credential.id)}
-						onclick={() => onselect('credential', credential.id)}
-					>
-						<Icon size={16} class="shrink-0 text-warning" aria-hidden="true" />
-						<span class="truncate">{credential.name}</span>
-						<span class="ml-auto truncate text-xs text-ink-3">{credential.username}</span>
 					</button>
 				</li>
 			{/each}

@@ -1,4 +1,4 @@
-import { expect, test, type Download, type Page } from '@playwright/test';
+import { expect, test, type Download, type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readKdbx } from '../../src/lib/vault/kdbx';
@@ -33,12 +33,47 @@ async function newFolder(page: Page, name: string) {
 	await expect(page.getByRole('heading', { name })).toBeVisible();
 }
 
+async function openVault(page: Page) {
+	await page.getByRole('link', { name: 'Vault', exact: true }).click();
+	await expect(page.getByRole('heading', { name: 'Vault', level: 1 })).toBeVisible();
+}
+
+async function openDevices(page: Page) {
+	await page.getByRole('link', { name: 'Devices', exact: true }).click();
+	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
+}
+
+/** A collection at the top of the vault, shown once made. */
+async function newCollection(page: Page, name: string) {
+	await openVault(page);
+	const dialog = page.getByRole('dialog');
+	await page.getByRole('button', { name: 'New collection' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(name);
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
+}
+
+/**
+ * A shared credential in a collection of its own (#190); `fill` completes
+ * the form after the name.
+ */
+async function newCredential(page: Page, name: string, fill: (dialog: Locator) => Promise<void>) {
+	await newCollection(page, `${name} collection`);
+	const dialog = page.getByRole('dialog');
+	await page.getByRole('button', { name: 'New', exact: true }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(name);
+	await fill(dialog);
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
+}
+
 /**
  * Sets up the signed-in user's personal vault anew with `passphrase`: an
  * earlier run may have left one behind. Returns the recovery key.
  */
 async function freshVault(page: Page, passphrase: string) {
-	await page.getByRole('link', { name: 'My vault' }).click();
+	await openVault(page);
+	await page.getByRole('button', { name: /^All personal entries/ }).click();
 	const unlockHeading = page.getByRole('heading', { name: 'Unlock your vault' });
 	const setupHeading = page.getByRole('heading', { name: 'Set up your vault' });
 	await expect(unlockHeading.or(setupHeading)).toBeVisible();
@@ -79,23 +114,19 @@ async function newDevice(
 
 test('an AD user adds an SSH device and works in its terminal', async ({ page }) => {
 	await signIn(page);
-	const dialog = page.getByRole('dialog');
 
-	// A folder at the top.
-	const folder = `E2E ${run}`;
-	await newFolder(page, folder);
-
-	// A credential in it; the password is never shown again.
+	// A credential in the vault; the password is never shown again.
 	const credential = `tester ${run}`;
-	await page.getByRole('button', { name: 'New credential' }).click();
-	await dialog.getByLabel('Name', { exact: true }).fill(credential);
-	await dialog.getByLabel('User name', { exact: true }).fill('tester');
-	await dialog.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
-	await dialog.getByRole('button', { name: 'Create' }).click();
-	await expect(page.getByRole('heading', { name: credential })).toBeVisible();
+	await newCredential(page, credential, async (dialog) => {
+		await dialog.getByLabel('User name', { exact: true }).fill('tester');
+		await dialog.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
+	});
 	await expect(page.locator('body')).not.toContainText('Tester-Passw0rd!');
 
-	// An SSH device that signs in with it.
+	// A folder at the top, and an SSH device in it that signs in with it.
+	await openDevices(page);
+	const folder = `E2E ${run}`;
+	await newFolder(page, folder);
 	const name = `lab ssh ${run}`;
 	await newDevice(page, folder, name, credential);
 
@@ -135,15 +166,11 @@ test('a stored password is shown and copied, and the audit log knows', async ({
 }) => {
 	await context.grantPermissions(['clipboard-read', 'clipboard-write']);
 	await signIn(page);
-	const dialog = page.getByRole('dialog');
-	await newFolder(page, `E2E reveal ${run}`);
 	const credential = `reveal ${run}`;
-	await page.getByRole('button', { name: 'New credential' }).click();
-	await dialog.getByLabel('Name', { exact: true }).fill(credential);
-	await dialog.getByLabel('User name', { exact: true }).fill('tester');
-	await dialog.getByLabel('Password', { exact: true }).fill('Shown-Passw0rd!');
-	await dialog.getByRole('button', { name: 'Create' }).click();
-	await expect(page.getByRole('heading', { name: credential })).toBeVisible();
+	await newCredential(page, credential, async (dialog) => {
+		await dialog.getByLabel('User name', { exact: true }).fill('tester');
+		await dialog.getByLabel('Password', { exact: true }).fill('Shown-Passw0rd!');
+	});
 	await expect(page.locator('body')).not.toContainText('Shown-Passw0rd!');
 
 	await page.getByRole('button', { name: 'Show', exact: true }).click();
@@ -175,7 +202,7 @@ test('a stored password is shown and copied, and the audit log knows', async ({
 
 test('the vault keeps folders, fields and icons, and shows what is shared', async ({ page }) => {
 	await signIn(page);
-	// A shared credential with a protected field, as the devices page makes it.
+	// A shared credential with a protected field, in a collection of its own.
 	const shared = `Shared router ${run}`;
 	await page.evaluate(
 		async ({ shared }) => {
@@ -189,9 +216,12 @@ test('the vault keeps folders, fields and icons, and shows what is shared', asyn
 				if (!response.ok) throw new Error(`${uri}: ${response.status} ${await response.text()}`);
 				return response.json();
 			};
-			const folder = await post('/api/folders', { parent_id: null, name: `${shared} folder` });
+			const collection = await post('/api/collections', {
+				parent_id: null,
+				name: `${shared} collection`
+			});
 			await post('/api/credentials', {
-				folder_id: folder.id,
+				collection_id: collection.id,
 				name: shared,
 				username: 'admin',
 				password: 'Shared-Pass!',
@@ -205,12 +235,13 @@ test('the vault keeps folders, fields and icons, and shows what is shared', asyn
 
 	await freshVault(page, 'long enough passphrase');
 	const dialog = page.getByRole('dialog');
-	await page.getByRole('button', { name: 'New folder' }).click();
+	await page.getByRole('button', { name: 'Personal vault settings' }).click();
+	await page.getByRole('menuitem', { name: 'New folder' }).click();
 	await dialog.getByLabel('Name').fill('Bank');
 	await dialog.getByRole('button', { name: 'Create' }).click();
-	await page.getByRole('button', { name: 'Bank', exact: true }).click();
+	await expect(page.getByRole('heading', { name: 'Bank', exact: true })).toBeVisible();
 
-	await page.getByRole('button', { name: 'New entry' }).click();
+	await page.getByRole('button', { name: 'New', exact: true }).click();
 	await dialog.getByLabel('Title').fill('Online banking');
 	await dialog.getByLabel('Password').fill('Bank-Pass!');
 	await dialog.getByRole('button', { name: 'Add field' }).click();
@@ -219,36 +250,32 @@ test('the vault keeps folders, fields and icons, and shows what is shared', asyn
 	await dialog.getByLabel('Protected').check();
 	await dialog.getByRole('radio', { name: 'Icon 37' }).click();
 	await dialog.getByRole('button', { name: 'Save' }).click();
-	await expect(page.getByText('Online banking')).toBeVisible();
-	await expect(page.getByText('PIN: ••••••')).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Online banking' })).toBeVisible();
+	await expect(page.getByText('Personal · Bank')).toBeVisible();
+	await expect(page.getByText('1234')).toHaveCount(0);
 	await page.getByRole('button', { name: 'Show', exact: true }).click();
 	await expect(page.getByText('1234')).toBeVisible();
 
-	// It lies in its folder: the top does not show it.
-	await page
-		.getByRole('navigation', { name: 'Folders' })
-		.getByRole('button', { name: 'My vault' })
-		.click();
-	await expect(page.getByText('Online banking')).toHaveCount(0);
+	// A collection lists only what is in it.
+	await page.getByRole('button', { name: new RegExp(`^${shared} collection`) }).click();
+	const entries = page.getByRole('region', { name: `${shared} collection` });
+	await expect(entries.getByTestId('personal-entry')).toHaveCount(0);
 
 	// The shared credential, with its protected field on request.
-	const entry = page.getByTestId('shared-entry').filter({ hasText: shared });
-	await entry.getByRole('button', { name: new RegExp(shared) }).click();
-	await expect(entry).toContainText('https://router.lan');
-	await entry.getByRole('button', { name: 'Show', exact: true }).click();
-	await expect(entry.getByTestId('revealed-field')).toHaveText('8765');
+	await entries.getByTestId('shared-entry').filter({ hasText: shared }).click();
+	const detail = page.getByRole('region', { name: 'Entry' });
+	await expect(detail).toContainText('https://router.lan');
+	await detail.getByRole('button', { name: 'Show', exact: true }).click();
+	await expect(detail.getByTestId('revealed-field')).toHaveText('8765');
 });
 
 test('a shared credential keeps files and its earlier passwords', async ({ page }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');
-	await newFolder(page, `E2E files ${run}`);
 	const credential = `files ${run}`;
-	await page.getByRole('button', { name: 'New credential' }).click();
-	await dialog.getByLabel('Name', { exact: true }).fill(credential);
-	await dialog.getByLabel('Password', { exact: true }).fill('Old-Passw0rd!');
-	await dialog.getByRole('button', { name: 'Create' }).click();
-	await expect(page.getByRole('heading', { name: credential })).toBeVisible();
+	await newCredential(page, credential, (form) =>
+		form.getByLabel('Password', { exact: true }).fill('Old-Passw0rd!')
+	);
 
 	await page.locator('input[type=file]').setInputFiles({
 		name: 'vpn.ovpn',
@@ -260,8 +287,7 @@ test('a shared credential keeps files and its earlier passwords', async ({ page 
 	const download = await downloading;
 	expect(download.suggestedFilename()).toBe('vpn.ovpn');
 
-	await page.getByRole('button', { name: 'Settings' }).click();
-	await page.getByRole('menuitem', { name: 'Edit' }).click();
+	await page.getByRole('button', { name: 'Edit', exact: true }).click();
 	await dialog.getByLabel('Password', { exact: true }).fill('New-Passw0rd!');
 	await dialog.getByRole('button', { name: 'Save' }).click();
 	await page.getByRole('button', { name: 'Earlier versions' }).click();
@@ -277,7 +303,7 @@ test('vault entries keep files, earlier passwords and show TOTP codes', async ({
 	await signIn(page);
 	await freshVault(page, 'long enough passphrase');
 	const dialog = page.getByRole('dialog');
-	await page.getByRole('button', { name: 'New entry' }).click();
+	await page.getByRole('button', { name: 'New', exact: true }).click();
 	await dialog.getByLabel('Title').fill('Mail');
 	await dialog.getByLabel('Password').fill('First-Pass!');
 	await dialog.getByRole('button', { name: 'Add field' }).click();
@@ -291,10 +317,10 @@ test('vault entries keep files, earlier passwords and show TOTP codes', async ({
 		buffer: Buffer.from('11111 22222')
 	});
 	await dialog.getByRole('button', { name: 'Save' }).click();
-	await expect(page.getByText('Mail', { exact: true })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Mail', exact: true })).toBeVisible();
 
 	// A new password from the generator; the first one goes into the history.
-	await page.getByRole('button', { name: 'Edit' }).click();
+	await page.getByRole('button', { name: 'Edit', exact: true }).click();
 	await dialog.getByRole('button', { name: 'Generate a password' }).click();
 	const generated = await dialog.getByLabel('Password').inputValue();
 	expect(generated).toHaveLength(20);
@@ -317,13 +343,12 @@ test('vault entries keep files, earlier passwords and show TOTP codes', async ({
 test('an SSH key protected by a passphrase signs in', async ({ page }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');
-	const folder = `E2E keys ${run}`;
-	await newFolder(page, folder);
 
 	// The key comes from a file. Without its passphrase it is refused, and the
 	// form keeps the key for the second try.
 	const credential = `tester key ${run}`;
-	await page.getByRole('button', { name: 'New credential' }).click();
+	await newCollection(page, `${credential} collection`);
+	await page.getByRole('button', { name: 'New', exact: true }).click();
 	await dialog.getByLabel('Name', { exact: true }).fill(credential);
 	await dialog.getByLabel('Type').selectOption({ label: 'SSH key' });
 	await dialog.getByLabel('User name', { exact: true }).fill('tester');
@@ -341,6 +366,9 @@ test('an SSH key protected by a passphrase signs in', async ({ page }) => {
 	await expect(page.getByText(/^SHA256:/)).toBeVisible();
 	await expect(page.locator('body')).not.toContainText('PRIVATE KEY');
 
+	await openDevices(page);
+	const folder = `E2E keys ${run}`;
+	await newFolder(page, folder);
 	await newDevice(page, folder, `lab ssh key ${run}`, credential);
 	await page.getByRole('button', { name: 'Connect', exact: true }).click();
 	// Typing waits for the session, as a person would.
@@ -581,15 +609,14 @@ test('access asked for just in time is approved by someone else', async ({ page,
 test('chosen users state a purpose, and the device journal keeps it', async ({ page, browser }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');
+	const credential = `journal tester ${run}`;
+	await newCredential(page, credential, async (form) => {
+		await form.getByLabel('User name', { exact: true }).fill('tester');
+		await form.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
+	});
+	await openDevices(page);
 	const folder = `E2E journal ${run}`;
 	await newFolder(page, folder);
-	const credential = `journal tester ${run}`;
-	await page.getByRole('button', { name: 'New credential' }).click();
-	await dialog.getByLabel('Name', { exact: true }).fill(credential);
-	await dialog.getByLabel('User name', { exact: true }).fill('tester');
-	await dialog.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
-	await dialog.getByRole('button', { name: 'Create' }).click();
-	await expect(page.getByRole('heading', { name: credential })).toBeVisible();
 	const name = `lab ssh journal ${run}`;
 	await newDevice(page, folder, name, credential);
 
@@ -708,15 +735,16 @@ test('the personal vault opens only in the browser, with passphrase, passkey or 
 	const unlockHeading = page.getByRole('heading', { name: 'Unlock your vault' });
 
 	const secret = `Router-Pw-${run}`;
-	await page.getByRole('button', { name: 'New entry' }).click();
+	await page.getByRole('button', { name: 'New', exact: true }).click();
 	const dialog = page.getByRole('dialog');
 	await dialog.getByLabel('Title').fill('Office router');
 	await dialog.getByLabel('User name').fill('admin');
 	await dialog.getByLabel('Password').fill(secret);
 	await dialog.getByRole('button', { name: 'Save' }).click();
-	await expect(page.getByText('Office router')).toBeVisible();
+	const router = page.getByTestId('personal-entry').filter({ hasText: 'Office router' });
+	await expect(router).toBeVisible();
 	await expect(page.getByText(secret)).toHaveCount(0);
-	await page.getByRole('button', { name: 'Show' }).click();
+	await page.getByRole('button', { name: 'Show', exact: true }).click();
 	await expect(page.getByText(secret)).toBeVisible();
 
 	// The server holds nothing readable of it.
@@ -730,14 +758,21 @@ test('the personal vault opens only in the browser, with passphrase, passkey or 
 	expect(stored).not.toContain(secret);
 	expect(stored).not.toContain('Office router');
 
-	await page.getByLabel('Name of the passkey').fill('virtual key');
-	await page.getByRole('button', { name: 'Add a passkey' }).click();
-	await expect(page.getByText('Passkey · virtual key')).toBeVisible();
+	/** Picks `item` from the personal vault's gear menu. */
+	const personal = async (item: string) => {
+		await page.getByRole('button', { name: 'Personal vault settings' }).click();
+		await page.getByRole('menuitem', { name: item, exact: true }).click();
+	};
+	await personal('Ways to unlock');
+	await dialog.getByLabel('Name of the passkey').fill('virtual key');
+	await dialog.getByRole('button', { name: 'Add a passkey' }).click();
+	await expect(dialog.getByText('Passkey · virtual key')).toBeVisible();
+	await page.keyboard.press('Escape');
 
-	const lock = () => page.getByRole('button', { name: 'Lock' }).click();
+	const lock = () => personal('Lock');
 	await lock();
 	await page.getByRole('button', { name: 'Unlock with a passkey' }).click();
-	await expect(page.getByText('Office router')).toBeVisible();
+	await expect(router).toBeVisible();
 
 	await lock();
 	await page.getByLabel('Passphrase', { exact: true }).fill('not the passphrase');
@@ -746,26 +781,27 @@ test('the personal vault opens only in the browser, with passphrase, passkey or 
 	await page.getByRole('button', { name: 'Use the recovery key' }).click();
 	await page.getByLabel('Recovery key').fill(recovery.toLowerCase());
 	await page.getByRole('button', { name: 'Unlock', exact: true }).click();
-	await expect(page.getByText('Office router')).toBeVisible();
+	await expect(router).toBeVisible();
 
 	// A reload forgets the key; the passphrase opens it again.
 	await page.reload();
+	await page.getByRole('button', { name: /^All personal entries/ }).click();
 	await expect(unlockHeading).toBeVisible();
 	await page.getByLabel('Passphrase', { exact: true }).fill(passphrase);
 	await page.getByRole('button', { name: 'Unlock', exact: true }).click();
-	await expect(page.getByText('Office router')).toBeVisible();
+	await expect(router).toBeVisible();
 });
 
 test('a device that asks for credentials takes them from the unlocked vault', async ({ page }) => {
 	await signIn(page);
 	await freshVault(page, 'long enough passphrase');
 	const dialog = page.getByRole('dialog');
-	await page.getByRole('button', { name: 'New entry' }).click();
+	await page.getByRole('button', { name: 'New', exact: true }).click();
 	await dialog.getByLabel('Title').fill(`Lab tester ${run}`);
 	await dialog.getByLabel('User name').fill('tester');
 	await dialog.getByLabel('Password').fill('Tester-Passw0rd!');
 	await dialog.getByRole('button', { name: 'Save' }).click();
-	await expect(page.getByText(`Lab tester ${run}`)).toBeVisible();
+	await expect(page.getByRole('heading', { name: `Lab tester ${run}` })).toBeVisible();
 
 	// The vault stays open on the way to the devices.
 	await page.getByRole('link', { name: 'Devices' }).click();
@@ -795,17 +831,14 @@ test('an RDP desktop opens in the browser', async ({ page, context }) => {
 	// Chromium asks before a page reads the clipboard; the test says yes.
 	await context.grantPermissions(['clipboard-read', 'clipboard-write']);
 	await signIn(page);
-	const dialog = page.getByRole('dialog');
+	const credential = `desktop tester ${run}`;
+	await newCredential(page, credential, async (form) => {
+		await form.getByLabel('User name', { exact: true }).fill('tester');
+		await form.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
+	});
+	await openDevices(page);
 	const folder = `E2E desktops ${run}`;
 	await newFolder(page, folder);
-
-	const credential = `desktop tester ${run}`;
-	await page.getByRole('button', { name: 'New credential' }).click();
-	await dialog.getByLabel('Name', { exact: true }).fill(credential);
-	await dialog.getByLabel('User name', { exact: true }).fill('tester');
-	await dialog.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
-	await dialog.getByRole('button', { name: 'Create' }).click();
-	await expect(page.getByRole('heading', { name: credential })).toBeVisible();
 
 	await newDevice(page, folder, `lab rdp ${run}`, credential, {
 		label: 'Remote Desktop (RDP)',
@@ -952,17 +985,14 @@ test('an administrator sets up a site connector and a device names it', async ({
 
 test('a web interface opens signed in, in a browser on the server', async ({ page }) => {
 	await signIn(page);
-	const dialog = page.getByRole('dialog');
+	const credential = `appliance tester ${run}`;
+	await newCredential(page, credential, async (form) => {
+		await form.getByLabel('User name', { exact: true }).fill('tester');
+		await form.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
+	});
+	await openDevices(page);
 	const folder = `E2E appliances ${run}`;
 	await newFolder(page, folder);
-
-	const credential = `appliance tester ${run}`;
-	await page.getByRole('button', { name: 'New credential' }).click();
-	await dialog.getByLabel('Name', { exact: true }).fill(credential);
-	await dialog.getByLabel('User name', { exact: true }).fill('tester');
-	await dialog.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
-	await dialog.getByRole('button', { name: 'Create' }).click();
-	await expect(page.getByRole('heading', { name: credential })).toBeVisible();
 
 	await newDevice(page, folder, `lab appliance ${run}`, credential, {
 		label: 'Web interface (HTTPS)',
@@ -999,16 +1029,23 @@ test('the vault takes in a KeePass file and gives one back', async ({ page }) =>
 	await signIn(page);
 	await freshVault(page, 'long enough passphrase');
 	const dialog = page.getByRole('dialog');
-	await page.getByRole('button', { name: 'Import a KeePass file' }).click();
+	const settings = page.getByRole('button', { name: 'Personal vault settings' });
+	await settings.click();
+	await page.getByRole('menuitem', { name: 'Import a KeePass file' }).click();
 	await dialog.getByLabel('KeePass file').setInputFiles(keepassFixture);
 	await dialog.getByLabel('Its master password').fill('Fixture-Passw0rd');
 	await dialog.getByRole('button', { name: 'Import a KeePass file' }).click();
 	await expect(dialog.getByRole('status')).toHaveText('Entries imported: 1.');
 	await page.keyboard.press('Escape');
-	await page.getByRole('button', { name: 'Servers', exact: true }).click();
-	await expect(page.getByText('admin · https://router.lan')).toBeVisible();
+	// The group became a personal folder.
+	await page
+		.getByRole('region', { name: 'Personal', exact: true })
+		.getByRole('button', { name: /^Servers/ })
+		.click();
+	await expect(page.getByTestId('personal-entry')).toContainText('admin · https://router.lan');
 
-	await page.getByRole('button', { name: 'Export as a KeePass file' }).click();
+	await settings.click();
+	await page.getByRole('menuitem', { name: 'Export as a KeePass file' }).click();
 	await dialog.getByLabel('Master password of the new file').fill('Export-Passw0rd');
 	await dialog.getByLabel('Passphrase again').fill('Export-Passw0rd');
 	const downloading = page.waitForEvent('download');
@@ -1019,12 +1056,13 @@ test('the vault takes in a KeePass file and gives one back', async ({ page }) =>
 	expect(router.files.map((f) => new TextDecoder().decode(f.data))).toEqual(['remote vpn']);
 });
 
-test('a shared folder takes in a KeePass file and exports it, audited', async ({ page }) => {
+test('a collection takes in a KeePass file and exports it, audited', async ({ page }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');
-	const folder = `E2E keepass ${run}`;
-	await newFolder(page, folder);
-	await page.getByRole('button', { name: 'Settings' }).click();
+	const collection = `E2E keepass ${run}`;
+	await newCollection(page, collection);
+	const settings = page.getByRole('button', { name: `Settings of ${collection}` });
+	await settings.click();
 	await page.getByRole('menuitem', { name: 'Import a KeePass file' }).click();
 	await dialog.getByLabel('KeePass file').setInputFiles(keepassFixture);
 	await dialog.getByLabel('Its master password').fill('Fixture-Passw0rd');
@@ -1032,9 +1070,8 @@ test('a shared folder takes in a KeePass file and exports it, audited', async ({
 	await expect(dialog.getByRole('status')).toHaveText('Entries imported: 1.');
 	await page.keyboard.press('Escape');
 
-	// The export reads back the group as a folder below the one exported.
-	await page.getByRole('tree').getByRole('button', { name: folder, exact: true }).click();
-	await page.getByRole('button', { name: 'Settings' }).click();
+	// The export reads back the group as a collection below the one exported.
+	await settings.click();
 	await page.getByRole('menuitem', { name: 'Export as a KeePass file' }).click();
 	await dialog.getByLabel('Master password of the new file').fill('Export-Passw0rd');
 	await dialog.getByLabel('Passphrase again').fill('Export-Passw0rd');
@@ -1071,7 +1108,7 @@ test('a vault is recovered with the organisation key once someone else approved'
 		}
 	});
 	const target = `E2E handover ${run}`;
-	await newFolder(page, target);
+	await newCollection(page, target);
 
 	// bob approves recoveries. The lab has no third user without a second
 	// factor, so he approves those of his own vault: only the one who asked
@@ -1109,12 +1146,16 @@ test('a vault is recovered with the organisation key once someone else approved'
 	const bob = await bobs.newPage();
 	await signIn(bob, 'bob', 'Bob-Passw0rd!');
 	await freshVault(bob, 'bobs long passphrase');
-	await bob.getByRole('button', { name: 'New entry' }).click();
+	await bob.getByRole('button', { name: 'New', exact: true }).click();
 	await bob.getByRole('dialog').getByLabel('Title').fill('Bob mail');
 	await bob.getByRole('dialog').getByLabel('Password').fill('Bob-Mail-Pass!');
 	await bob.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
-	await expect(bob.getByText('Bob mail')).toBeVisible();
-	await expect(bob.getByText('Organisation recovery key')).toBeVisible();
+	const bobMail = bob.getByTestId('personal-entry').filter({ hasText: 'Bob mail' });
+	await expect(bobMail).toBeVisible();
+	await bob.getByRole('button', { name: 'Personal vault settings' }).click();
+	await bob.getByRole('menuitem', { name: 'Ways to unlock' }).click();
+	await expect(bob.getByRole('dialog')).toContainText('Organisation recovery key');
+	await bob.keyboard.press('Escape');
 
 	await page.reload();
 	const vault = page.getByTestId('vault-row').filter({ hasText: 'Bob Helpdesk' });
@@ -1141,7 +1182,7 @@ test('a vault is recovered with the organisation key once someone else approved'
 			.first();
 		await asked.getByRole('button', { name: 'Approve' }).click();
 		await expect(asked).toContainText('Approved for a day');
-		await bob.getByRole('link', { name: 'My vault' }).click();
+		await openVault(bob);
 
 		await page.reload();
 		await recovery.getByRole('button', { name: 'Carry out' }).click();
@@ -1156,6 +1197,7 @@ test('a vault is recovered with the organisation key once someone else approved'
 	await page.keyboard.press('Escape');
 
 	await bob.reload();
+	await bob.getByRole('button', { name: /^All personal entries/ }).click();
 	await bob.getByRole('button', { name: 'Use the recovery key' }).click();
 	await bob.getByLabel('Recovery key').fill(oneTime);
 	await bob.getByRole('button', { name: 'Unlock' }).click();
@@ -1167,13 +1209,13 @@ test('a vault is recovered with the organisation key once someone else approved'
 		.fill('bobs new passphrase');
 	await bob.getByRole('dialog').getByLabel('Passphrase again').fill('bobs new passphrase');
 	await bob.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
-	await expect(bob.getByText('Bob mail')).toBeVisible();
+	await expect(bobMail).toBeVisible();
 
 	// A hand-over, with the key file: the entries become shared credentials.
 	await approved(/Hand-over/);
 	await dialog.getByLabel('Key file', { exact: true }).setInputFiles(keyFile);
 	await dialog.getByLabel('Passphrase of the key file').fill('key file passphrase');
-	await dialog.getByLabel('Shared folder for the entries').selectOption({ label: target });
+	await dialog.getByLabel('Shared collection for the entries').selectOption({ label: target });
 	await dialog.getByRole('button', { name: 'Carry out' }).click();
 	await expect(dialog.getByRole('status')).toHaveText('Entries imported: 1.');
 	await page.keyboard.press('Escape');
@@ -1184,9 +1226,9 @@ test('a vault is recovered with the organisation key once someone else approved'
 			.first()
 	).toContainText('Carried out');
 
-	await page.getByRole('link', { name: 'Devices' }).click();
+	await openVault(page);
 	await page.getByRole('searchbox').fill('Bob mail');
-	await expect(page.getByRole('list', { name: 'Search results' })).toContainText(target);
+	await expect(page.getByTestId('shared-entry').filter({ hasText: target })).toBeVisible();
 	await bobs.close();
 });
 

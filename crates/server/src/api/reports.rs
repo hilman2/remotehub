@@ -52,9 +52,11 @@ pub async fn people(
     Ok(Json(people))
 }
 
-/// Names of everything in the catalog, for the reports' paths.
+/// Names of everything in the catalog, for the reports' paths. Folders and
+/// collections apart: a collection made from a folder (#190) has its id.
 pub(super) struct Names {
     folders: HashMap<Uuid, (Option<Uuid>, String)>,
+    collections: HashMap<Uuid, (Option<Uuid>, String)>,
     objects: HashMap<ObjectId, String>,
 }
 
@@ -62,6 +64,10 @@ impl Names {
     pub(super) async fn load(state: &AppState) -> Result<Self, Problem> {
         let folders: Vec<(Uuid, Option<Uuid>, String)> =
             sqlx::query_as("SELECT id, parent_id, name FROM folders")
+                .fetch_all(&state.db)
+                .await?;
+        let collections: Vec<(Uuid, Option<Uuid>, String)> =
+            sqlx::query_as("SELECT id, parent_id, name FROM collections")
                 .fetch_all(&state.db)
                 .await?;
         let devices: Vec<(Uuid, String)> = sqlx::query_as("SELECT id, name FROM devices")
@@ -73,6 +79,11 @@ impl Names {
         let objects = folders
             .iter()
             .map(|(id, _, name)| (ObjectId::Folder(*id), name.clone()))
+            .chain(
+                collections
+                    .iter()
+                    .map(|(id, _, name)| (ObjectId::Collection(*id), name.clone())),
+            )
             .chain(devices.into_iter().map(|(id, n)| (ObjectId::Device(id), n)))
             .chain(
                 credentials
@@ -80,11 +91,14 @@ impl Names {
                     .map(|(id, n)| (ObjectId::Credential(id), n)),
             )
             .collect();
-        Ok(Names {
-            folders: folders
-                .into_iter()
+        let tree = |rows: Vec<(Uuid, Option<Uuid>, String)>| {
+            rows.into_iter()
                 .map(|(id, parent, name)| (id, (parent, name)))
-                .collect(),
+                .collect()
+        };
+        Ok(Names {
+            folders: tree(folders),
+            collections: tree(collections),
             objects,
         })
     }
@@ -95,21 +109,36 @@ impl Names {
 
     /// The names of the folders from the top down to `folder`.
     pub(super) fn path(&self, folder: Option<Uuid>) -> Vec<String> {
-        let mut names = Vec::new();
-        let mut next = folder;
-        // A bound instead of loop detection: the database prevents loops.
-        while let Some(id) = next
-            && names.len() < 100
-        {
-            let Some((parent, name)) = self.folders.get(&id) else {
-                break;
-            };
-            names.push(name.clone());
-            next = *parent;
-        }
-        names.reverse();
-        names
+        walk(&self.folders, folder)
     }
+
+    /// The names of the folders or collections from the top down to
+    /// `container`: what `Catalog::container` names for an object.
+    pub(super) fn path_to(&self, container: Option<ObjectId>) -> Vec<String> {
+        match container {
+            Some(ObjectId::Collection(id)) => walk(&self.collections, Some(id)),
+            Some(ObjectId::Folder(id)) => walk(&self.folders, Some(id)),
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// The names from the top down to `from` in one tree.
+fn walk(tree: &HashMap<Uuid, (Option<Uuid>, String)>, from: Option<Uuid>) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut next = from;
+    // A bound instead of loop detection: the database prevents loops.
+    while let Some(id) = next
+        && names.len() < 100
+    {
+        let Some((parent, name)) = tree.get(&id) else {
+            break;
+        };
+        names.push(name.clone());
+        next = *parent;
+    }
+    names.reverse();
+    names
 }
 
 #[derive(Serialize)]
@@ -312,7 +341,7 @@ pub async fn user(
             Reach {
                 object,
                 name: names.name(object),
-                path: names.path(catalog.parent(object)),
+                path: names.path_to(catalog.container(object)),
                 role,
                 reasons,
             }

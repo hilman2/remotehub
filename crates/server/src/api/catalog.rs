@@ -70,7 +70,7 @@ pub(super) fn name(value: &str, field: &str) -> Result<String, Problem> {
 }
 
 /// Unique names and non-empty folders become their own problems.
-fn database(error: sqlx::Error) -> Problem {
+pub(super) fn database(error: sqlx::Error) -> Problem {
     if let Some(db) = error.as_database_error() {
         if db.is_unique_violation() {
             return Problem::new(ErrorCode::NameTaken);
@@ -104,7 +104,7 @@ pub(super) fn entry<'a>(
 }
 
 /// `Option<Option<T>>` for JSON: absent → `None`, `null` → `Some(None)`.
-fn nullable<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+pub(super) fn nullable<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
 ) -> Result<Option<Option<T>>, D::Error> {
     Option::<T>::deserialize(d).map(Some)
@@ -116,6 +116,8 @@ fn nullable<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
 pub struct Tree {
     folders: Vec<TreeFolder>,
     devices: Vec<TreeDevice>,
+    /// Where shared credentials live, apart from the folders (#190).
+    collections: Vec<TreeCollection>,
     credentials: Vec<TreeCredential>,
     may_create_top_level: bool,
     /// The visible folders this user has open in the tree; the rest are
@@ -135,6 +137,15 @@ struct TreeFolder {
     /// The site connector the folder names for the devices below it (#176);
     /// none: its parent's.
     connector_id: Option<Uuid>,
+}
+
+#[derive(Serialize)]
+struct TreeCollection {
+    id: Uuid,
+    parent_id: Option<Uuid>,
+    name: String,
+    /// `None`: only shown as the way to something visible inside.
+    role: Option<Role>,
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -184,7 +195,7 @@ struct TreeDevice {
 #[derive(Serialize, sqlx::FromRow)]
 struct CredentialRow {
     id: Uuid,
-    folder_id: Uuid,
+    collection_id: Uuid,
     name: String,
     kind: String,
     username: String,
@@ -238,7 +249,7 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
     .fetch_all(&state.db)
     .await?;
     let credentials: Vec<CredentialRow> = sqlx::query_as(
-        "SELECT c.id, c.folder_id, c.name, c.kind, c.username, c.domain, c.version,
+        "SELECT c.id, c.collection_id, c.name, c.kind, c.username, c.domain, c.version,
                 c.key_algorithm, c.key_fingerprint, c.has_certificate, c.url, c.notes, c.icon,
                 c.fields,
                 coalesce((SELECT json_agg(json_build_object('id', a.id, 'name', a.name,
@@ -249,6 +260,10 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
     )
     .fetch_all(&state.db)
     .await?;
+    let collections: Vec<(Uuid, Option<Uuid>, String)> =
+        sqlx::query_as("SELECT id, parent_id, name FROM collections ORDER BY lower(name)")
+            .fetch_all(&state.db)
+            .await?;
     let open: Vec<Uuid> =
         sqlx::query_scalar("SELECT folder_id FROM open_folders WHERE user_id = $1")
             .bind(session.user_id)
@@ -289,6 +304,20 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
                     host_key_fingerprint,
                     role,
                 })
+            })
+            .collect(),
+        collections: collections
+            .into_iter()
+            .filter_map(|(id, parent_id, name)| {
+                let role = visible.roles.get(&ObjectId::Collection(id)).copied();
+                (role.is_some() || visible.collections_path_only.contains(&id)).then_some(
+                    TreeCollection {
+                        id,
+                        parent_id,
+                        name,
+                        role,
+                    },
+                )
             })
             .collect(),
         credentials: credentials
@@ -348,6 +377,12 @@ pub struct NewFolder {
 #[derive(Serialize)]
 pub struct Created {
     id: Uuid,
+}
+
+impl Created {
+    pub(super) fn new(id: Uuid) -> Self {
+        Created { id }
+    }
 }
 
 pub async fn create_folder(
@@ -1104,7 +1139,8 @@ pub async fn reset_host_key(
 
 #[derive(Deserialize)]
 pub struct CredentialInput {
-    folder_id: Uuid,
+    /// The collection it lives in (#190).
+    collection_id: Uuid,
     name: String,
     /// `password` (default) or `ssh_key`; fixed after creation.
     #[serde(default)]
@@ -1369,18 +1405,18 @@ pub async fn create_credential(
         &catalog,
         &subject,
         Role::Edit,
-        ObjectId::Folder(input.folder_id),
+        ObjectId::Collection(input.collection_id),
     )?;
 
     let (algorithm, fingerprint, has_certificate) = secrets.key_info();
     let mut tx = state.db.begin().await?;
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO credentials
-             (folder_id, name, username, domain, kind, key_algorithm, key_fingerprint, has_certificate,
-              url, notes, icon, fields)
+             (collection_id, name, username, domain, kind, key_algorithm, key_fingerprint,
+              has_certificate, url, notes, icon, fields)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id",
     )
-    .bind(input.folder_id)
+    .bind(input.collection_id)
     .bind(&name)
     .bind(&username)
     .bind(&domain)
@@ -1429,12 +1465,12 @@ pub async fn update_credential(
     let domain = plain(&input.domain, "domain")?;
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Edit, ObjectId::Credential(id))?;
-    if catalog.parent(ObjectId::Credential(id)) != Some(input.folder_id) {
+    if catalog.parent(ObjectId::Credential(id)) != Some(input.collection_id) {
         require(
             &catalog,
             &subject,
             Role::Edit,
-            ObjectId::Folder(input.folder_id),
+            ObjectId::Collection(input.collection_id),
         )?;
     }
     let (kind, before, stored): (String, i32, sqlx::types::Json<Vec<Field>>) =
@@ -1457,13 +1493,13 @@ pub async fn update_credential(
 
     let mut tx = state.db.begin().await?;
     let version: i32 = sqlx::query_scalar(
-        "UPDATE credentials SET folder_id = $2, name = $3, username = $4, domain = $5,
+        "UPDATE credentials SET collection_id = $2, name = $3, username = $4, domain = $5,
              url = $7, notes = $8, icon = $9, fields = $10,
              version = version + CASE WHEN $6 THEN 1 ELSE 0 END, updated_at = now()
          WHERE id = $1 RETURNING version",
     )
     .bind(id)
-    .bind(input.folder_id)
+    .bind(input.collection_id)
     .bind(&name)
     .bind(&username)
     .bind(&domain)
@@ -1504,7 +1540,7 @@ pub async fn update_credential(
     }
     let details = json!({
         "name": name, "username": username, "domain": domain,
-        "folder_id": input.folder_id, "secret_changed": secrets.is_some(),
+        "collection_id": input.collection_id, "secret_changed": secrets.is_some(),
         "fields_changed": fields_changed,
     });
     audit::record(
@@ -1587,6 +1623,7 @@ pub(super) fn object(kind: &str, id: Uuid) -> Result<ObjectId, Problem> {
         "folder" => Ok(ObjectId::Folder(id)),
         "device" => Ok(ObjectId::Device(id)),
         "credential" => Ok(ObjectId::Credential(id)),
+        "collection" => Ok(ObjectId::Collection(id)),
         _ => Err(invalid("kind")),
     }
 }
@@ -1597,6 +1634,7 @@ struct GrantRow {
     folder_id: Option<Uuid>,
     device_id: Option<Uuid>,
     credential_id: Option<Uuid>,
+    collection_id: Option<Uuid>,
     principal_kind: String,
     principal_sid: String,
     principal_name: String,
@@ -1623,30 +1661,49 @@ pub async fn list_grants(
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Manage, target)?;
 
-    let mut ancestors = Vec::new();
-    let mut next = catalog.parent(target);
-    while let Some(folder) = next {
-        if ancestors.contains(&folder) {
+    // The folders above a folder or device, the collections above a
+    // collection or credential (#190). Apart: a collection made from a
+    // folder has the folder's id.
+    let mut above = Vec::new();
+    let mut next = catalog.container(target);
+    while let Some(container) = next {
+        if above.contains(&container) {
             break;
         }
-        ancestors.push(folder);
-        next = catalog.parent(ObjectId::Folder(folder));
+        above.push(container);
+        next = catalog.container(container);
     }
     let rows: Vec<GrantRow> = sqlx::query_as(
-        "SELECT id, folder_id, device_id, credential_id, principal_kind, principal_sid, principal_name, role,
+        "SELECT id, folder_id, device_id, credential_id, collection_id, principal_kind,
+                principal_sid, principal_name, role,
                 to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS expires_at
          FROM grants
-         WHERE (folder_id = ANY($1) OR folder_id = $2 OR device_id = $2 OR credential_id = $2)
+         WHERE (folder_id = ANY($1) OR collection_id = ANY($1) OR folder_id = $2 OR device_id = $2
+                OR credential_id = $2 OR collection_id = $2)
            AND (expires_at IS NULL OR expires_at > now())
          ORDER BY lower(principal_name)",
     )
-    .bind(&ancestors)
+    .bind(above.iter().map(|o| catalog::id(*o)).collect::<Vec<_>>())
     .bind(query.id)
     .fetch_all(&state.db)
     .await?;
-    let (direct, inherited) = rows.into_iter().partition(|row| {
-        catalog::object_id(row.folder_id, row.device_id, row.credential_id) == Some(target)
-    });
+    // The query casts a wide net; each row counts only for the object it
+    // names, which must be the target or one of the containers above it.
+    type Sorted = Vec<(bool, GrantRow)>;
+    let (direct, inherited): (Sorted, Sorted) = rows
+        .into_iter()
+        .filter_map(|row| {
+            let on = catalog::grant_object(
+                row.folder_id,
+                row.device_id,
+                row.credential_id,
+                row.collection_id,
+            )?;
+            (on == target || above.contains(&on)).then_some((on == target, row))
+        })
+        .partition(|(own, _)| *own);
+    let direct = direct.into_iter().map(|(_, row)| row).collect();
+    let inherited = inherited.into_iter().map(|(_, row)| row).collect();
     Ok(Json(Grants { direct, inherited }))
 }
 
@@ -1700,19 +1757,16 @@ pub async fn add_grant(
         return Err(invalid("principal_sid"));
     }
 
-    let (folder, device, credential) = match target {
-        ObjectId::Folder(id) => (Some(id), None, None),
-        ObjectId::Device(id) => (None, Some(id), None),
-        ObjectId::Credential(id) => (None, None, Some(id)),
-    };
+    let [folder, device, credential, collection] = catalog::grant_columns(target);
     let mut tx = state.db.begin().await?;
     // The conflict only ever arises without an end: the unique index covers
     // grants without one.
     sqlx::query(
-        "INSERT INTO grants (folder_id, device_id, credential_id, principal_kind, principal_sid,
-                             principal_name, role, created_by, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz)
-         ON CONFLICT (folder_id, device_id, credential_id, principal_sid) WHERE expires_at IS NULL
+        "INSERT INTO grants (folder_id, device_id, credential_id, collection_id, principal_kind,
+                             principal_sid, principal_name, role, created_by, expires_at)
+         VALUES ($1, $2, $3, $10, $4, $5, $6, $7, $8, $9::timestamptz)
+         ON CONFLICT (folder_id, device_id, credential_id, collection_id, principal_sid)
+             WHERE expires_at IS NULL
          DO UPDATE SET role = EXCLUDED.role, principal_name = EXCLUDED.principal_name",
     )
     .bind(folder)
@@ -1724,6 +1778,7 @@ pub async fn add_grant(
     .bind(role.as_str())
     .bind(session.user_id)
     .bind(expires_at)
+    .bind(collection)
     .execute(&mut *tx)
     .await?;
     let details = json!({
@@ -1746,7 +1801,8 @@ pub async fn remove_grant(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, Problem> {
     let row: Option<GrantRow> = sqlx::query_as(
-        "SELECT id, folder_id, device_id, credential_id, principal_kind, principal_sid, principal_name, role,
+        "SELECT id, folder_id, device_id, credential_id, collection_id, principal_kind,
+                principal_sid, principal_name, role,
                 to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS expires_at
          FROM grants WHERE id = $1",
     )
@@ -1754,8 +1810,13 @@ pub async fn remove_grant(
     .fetch_optional(&state.db)
     .await?;
     let row = row.ok_or(Problem::new(ErrorCode::NotFound))?;
-    let target = catalog::object_id(row.folder_id, row.device_id, row.credential_id)
-        .ok_or(Problem::new(ErrorCode::Internal))?;
+    let target = catalog::grant_object(
+        row.folder_id,
+        row.device_id,
+        row.credential_id,
+        row.collection_id,
+    )
+    .ok_or(Problem::new(ErrorCode::Internal))?;
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Manage, target)?;
 

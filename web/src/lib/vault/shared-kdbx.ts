@@ -1,44 +1,29 @@
 /**
- * KeePass files for shared folders (#99): an export reveals every secret
- * in the folder, each audited with the purpose `export`; an import creates
- * folders, credentials and their files as a person would.
+ * KeePass files for collections of shared credentials (#99, #190): an
+ * export reveals every secret in the collection, each audited with the
+ * purpose `export`; an import creates collections, credentials and their
+ * files as a person would.
  */
 import {
 	allows,
+	createCollection,
 	createCredential,
-	createFolder,
 	type CredentialInput,
 	type Tree
 } from '$lib/api/catalog';
 import { attachmentUrl, reveal, uploadAttachment } from '$lib/api/reveal';
-import { pathTo } from '$lib/catalog/tree';
+import { collectionPath, collectionsBelow } from '$lib/catalog/tree';
 import type { KdbxEntry } from './kdbx';
-
-/** A folder and everything below it. */
-function subtree(tree: Tree, folderId: string): Set<string> {
-	const inside = new Set([folderId]);
-	let grew = true;
-	while (grew) {
-		grew = false;
-		for (const folder of tree.folders) {
-			if (folder.parent_id && inside.has(folder.parent_id) && !inside.has(folder.id)) {
-				inside.add(folder.id);
-				grew = true;
-			}
-		}
-	}
-	return inside;
-}
 
 export type ExportResult =
 	| { ok: true; entries: KdbxEntry[] }
 	| { ok: false; missing: string }
 	| { ok: false; failed: string };
 
-/** The folder's credentials as KeePass entries, their paths below it. */
-export async function exportFolder(tree: Tree, folderId: string): Promise<ExportResult> {
-	const inside = subtree(tree, folderId);
-	const credentials = tree.credentials.filter((c) => inside.has(c.folder_id));
+/** The collection's credentials as KeePass entries, their paths below it. */
+export async function exportCollection(tree: Tree, collectionId: string): Promise<ExportResult> {
+	const inside = collectionsBelow(tree, collectionId);
+	const credentials = tree.credentials.filter((c) => inside.has(c.collection_id));
 	// All or nothing: a file with gaps would pass for complete.
 	const hidden = credentials.find((c) => !allows(c.role, 'reveal'));
 	if (hidden) return { ok: false, missing: hidden.name };
@@ -47,8 +32,8 @@ export async function exportFolder(tree: Tree, folderId: string): Promise<Export
 		const revealed = await reveal('credentials', credential.id, 'export');
 		if (!revealed.ok) return { ok: false, failed: credential.name };
 		const secret = revealed.data;
-		const names = pathTo(tree, credential.folder_id).map((f) => f.name);
-		const start = pathTo(tree, folderId).length;
+		const names = collectionPath(tree, credential.collection_id).map((c) => c.name);
+		const start = collectionPath(tree, collectionId).length;
 		const fields: KdbxEntry['fields'] = credential.fields
 			.filter((field) => !field.protected)
 			.map((field) => ({ name: field.name, value: field.value ?? '', protected: false }));
@@ -109,40 +94,40 @@ function usableFields(fields: KdbxEntry['fields']): NonNullable<CredentialInput[
 		.map((field) => ({ name: field.name, protected: field.protected, value: field.value }));
 }
 
-/** Creates the entries below `folderId`, with a folder for each group. */
+/** Creates the entries below `collectionId`, with a collection for each group. */
 export async function importInto(
 	tree: Tree,
-	folderId: string,
+	collectionId: string,
 	entries: KdbxEntry[]
 ): Promise<ImportResult> {
-	const folders = new Map<string, string>([['', folderId]]);
+	const collections = new Map<string, string>([['', collectionId]]);
 	const result: ImportResult = { created: 0, failed: [] };
-	const folderOf = async (path: string[]): Promise<string | null> => {
+	const collectionOf = async (path: string[]): Promise<string | null> => {
 		const key = path.join('\n');
-		const known = folders.get(key);
+		const known = collections.get(key);
 		if (known) return known;
-		const parent = await folderOf(path.slice(0, -1));
+		const parent = await collectionOf(path.slice(0, -1));
 		if (!parent) return null;
 		const name = path[path.length - 1].trim() || '—';
-		const existing = tree.folders.find((f) => f.parent_id === parent && f.name === name);
+		const existing = tree.collections.find((c) => c.parent_id === parent && c.name === name);
 		let id = existing?.id;
 		if (!id) {
-			const made = await createFolder(parent, name, null);
+			const made = await createCollection(parent, name);
 			if (!made.ok) return null;
 			id = made.data.id;
 		}
-		folders.set(key, id);
+		collections.set(key, id);
 		return id;
 	};
 	for (const entry of entries) {
-		const folder = await folderOf(entry.path);
+		const collection = await collectionOf(entry.path);
 		const title = entry.title.trim() || entry.username.trim() || entry.url.trim() || '—';
-		if (!folder) {
+		if (!collection) {
 			result.failed.push(title);
 			continue;
 		}
 		const input: CredentialInput = {
-			folder_id: folder,
+			collection_id: collection,
 			name: title.slice(0, 200),
 			username: entry.username.slice(0, 256),
 			domain: '',
@@ -153,7 +138,7 @@ export async function importInto(
 			icon: entry.icon >= 0 && entry.icon <= 68 ? entry.icon : 0,
 			fields: usableFields(entry.fields)
 		};
-		// A name taken in the folder gets a number, as a person would do.
+		// A name taken in the collection gets a number, as a person would do.
 		let made = await createCredential(input);
 		for (let n = 2; !made.ok && made.code === 'name_taken' && n < 100; n++) {
 			made = await createCredential({ ...input, name: `${input.name} (${n})` });

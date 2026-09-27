@@ -363,6 +363,7 @@ struct GrantRow {
     folder_id: Option<Uuid>,
     device_id: Option<Uuid>,
     credential_id: Option<Uuid>,
+    collection_id: Option<Uuid>,
     role: String,
     expires_at: Option<String>,
 }
@@ -372,7 +373,7 @@ pub struct PrincipalGrant {
     id: Uuid,
     object: remotehub_model::ObjectId,
     name: String,
-    /// The folders above it, from the top.
+    /// The folders or collections above it, from the top.
     path: Vec<String>,
     role: String,
     /// When it ends by itself.
@@ -387,7 +388,7 @@ pub async fn grants(
 ) -> Result<Json<Vec<PrincipalGrant>>, Problem> {
     require_auditor(&session)?;
     let rows: Vec<GrantRow> = sqlx::query_as(
-        "SELECT id, folder_id, device_id, credential_id, role,
+        "SELECT id, folder_id, device_id, credential_id, collection_id, role,
                 to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS expires_at
          FROM grants WHERE principal_sid = $1 AND (expires_at IS NULL OR expires_at > now())",
     )
@@ -399,13 +400,17 @@ pub async fn grants(
     let mut grants: Vec<PrincipalGrant> = rows
         .into_iter()
         .filter_map(|row| {
-            let object =
-                crate::catalog::object_id(row.folder_id, row.device_id, row.credential_id)?;
+            let object = crate::catalog::grant_object(
+                row.folder_id,
+                row.device_id,
+                row.credential_id,
+                row.collection_id,
+            )?;
             Some(PrincipalGrant {
                 id: row.id,
                 object,
                 name: names.name(object),
-                path: names.path(catalog.parent(object)),
+                path: names.path_to(catalog.container(object)),
                 role: row.role,
                 expires_at: row.expires_at,
             })

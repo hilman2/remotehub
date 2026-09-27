@@ -44,10 +44,12 @@
 			? tabs.list.find((tab) => tab.key === tabs.active)
 			: undefined
 	);
-	// The devices page and sessions fill the window and scroll inside; the
-	// other pages sit in a column and scroll as a whole.
+	// The devices page, the vault and sessions fill the window and scroll
+	// inside; the other pages sit in a column and scroll as a whole.
 	const fullBleed = $derived(
-		page.url.pathname === resolve('/') || page.url.pathname.startsWith(`${resolve('/connect')}/`)
+		page.url.pathname === resolve('/') ||
+			page.url.pathname === resolve('/vault') ||
+			page.url.pathname.startsWith(`${resolve('/connect')}/`)
 	);
 
 	const links = $derived([
