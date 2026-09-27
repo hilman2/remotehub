@@ -369,6 +369,81 @@ test('a shared entry shows one-time codes and waits in the recycle bin', async (
 	await expect(folder.getByTestId('shared-entry').filter({ hasText: credential })).toBeVisible();
 });
 
+test.describe('the password generator', () => {
+	// The other tests expect the built-in default, also after a failure
+	// here; the page is still open in this hook when the test timed out.
+	test.afterEach(async ({ page }) => {
+		await page.evaluate(async () => {
+			await fetch('/api/generator/own', { method: 'DELETE' });
+			await fetch('/api/settings/generator', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					kind: 'password',
+					length: 20,
+					lower: true,
+					upper: true,
+					digits: true,
+					symbols: true,
+					look_alikes: false,
+					words: 6,
+					separator: '-'
+				})
+			});
+		});
+	});
+
+	test('makes what the organisation and the user ask for', async ({ page }) => {
+		await signIn(page);
+		// The organisation's default: five words with dots between them.
+		await page.getByRole('link', { name: 'Settings' }).click();
+		const organisation = page.getByRole('region', { name: 'Password generator' });
+		await organisation.getByRole('radio', { name: 'Passphrase of words' }).check();
+		await organisation.getByRole('spinbutton', { name: 'Words' }).fill('5');
+		await organisation.getByRole('spinbutton', { name: 'Words' }).press('Tab');
+		await organisation.getByLabel('Between the words').selectOption({ label: 'Dot (.)' });
+		await organisation.getByRole('button', { name: 'Save' }).click();
+		await expect(organisation.getByRole('status')).toHaveText('Saved.');
+
+		// The dice at a password follow it.
+		await newCollection(page, `generator ${run}`);
+		await page.getByRole('button', { name: 'New entry' }).click();
+		const dialog = page.getByRole('dialog');
+		const password = dialog.getByLabel('Password', { exact: true });
+		const fiveWords = /^[a-z]+(\.[a-z]+){4}$/;
+		const ownKind = /^[a-zA-Z2-9]{32}$/;
+		await dialog.getByRole('button', { name: 'Generate a password' }).click();
+		await expect(password).toHaveValue(fiveWords);
+
+		// Alice keeps a default of her own: 32 characters, no symbols.
+		await dialog.getByRole('button', { name: 'Generator settings' }).click();
+		const generator = dialog.getByRole('group', { name: 'Generator settings' });
+		await expect(generator.getByRole('radio', { name: 'Passphrase of words' })).toBeChecked();
+		await generator.getByRole('radio', { name: 'Password' }).check();
+		await generator.getByRole('spinbutton', { name: 'Length' }).fill('32');
+		await generator.getByRole('spinbutton', { name: 'Length' }).press('Tab');
+		await generator.getByRole('checkbox', { name: /^Symbols/ }).uncheck();
+		await expect(generator.getByTestId('generator-suggestion')).toHaveText(ownKind);
+		await generator.getByRole('button', { name: 'Keep as my default' }).click();
+		await expect(generator.getByRole('status')).toHaveText('Kept as your default.');
+		await generator.getByRole('button', { name: 'Use it' }).click();
+		await expect(generator).toBeHidden();
+		await expect(password).toHaveValue(ownKind);
+		const used = await password.inputValue();
+		await dialog.getByRole('button', { name: 'Generate a password' }).click();
+		await expect(password).not.toHaveValue(used);
+		await expect(password).toHaveValue(ownKind);
+
+		// Back to the organisation's.
+		await dialog.getByRole('button', { name: 'Generator settings' }).click();
+		await generator.getByRole('button', { name: "Use the organisation's default" }).click();
+		await expect(generator.getByRole('radio', { name: 'Passphrase of words' })).toBeChecked();
+		await dialog.getByRole('button', { name: 'Generator settings' }).click();
+		await dialog.getByRole('button', { name: 'Generate a password' }).click();
+		await expect(password).toHaveValue(fiveWords);
+	});
+});
+
 test('vault entries keep files, earlier passwords and show TOTP codes', async ({ page }) => {
 	await signIn(page);
 	await freshVault(page, 'long enough passphrase');
@@ -392,8 +467,8 @@ test('vault entries keep files, earlier passwords and show TOTP codes', async ({
 	const pane = details(page);
 	await pane.getByRole('button', { name: 'Edit', exact: true }).click();
 	await dialog.getByRole('button', { name: 'Generate a password' }).click();
+	await expect(dialog.getByLabel('Password')).toHaveValue(/^.{20}$/);
 	const generated = await dialog.getByLabel('Password').inputValue();
-	expect(generated).toHaveLength(20);
 	await dialog.getByRole('button', { name: 'Save' }).click();
 	await expect(dialog).toBeHidden();
 	await pane.getByRole('button', { name: 'Show password' }).click();

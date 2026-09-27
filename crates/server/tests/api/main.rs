@@ -20,6 +20,7 @@ mod directory;
 mod display;
 mod downloads;
 mod generated;
+mod generator;
 mod groups;
 mod http;
 mod journal;

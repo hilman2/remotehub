@@ -14,6 +14,7 @@ export const AUDIT_ACTIONS = [
 	'directory.removed',
 	'mail.changed',
 	'mail.removed',
+	'generator.changed',
 	'tls_certificate.uploaded',
 	'tls_certificate.reset',
 	'folder.created',
