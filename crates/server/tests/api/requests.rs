@@ -48,7 +48,7 @@ async fn lab(pool: PgPool) -> Lab {
         "/api/devices",
         json!({
             "folder_id": folder, "name": "db01", "protocol": "ssh", "host": "db01.example.com",
-            "port": 22, "auth_mode": "ask", "credential_id": null,
+            "port": 22, "auth_mode": "ask",
         }),
     )
     .await;

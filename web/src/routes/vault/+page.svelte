@@ -11,10 +11,8 @@
 	import Fingerprint from '@lucide/svelte/icons/fingerprint';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
-	import KeyRound from '@lucide/svelte/icons/key-round';
 	import Library from '@lucide/svelte/icons/library';
 	import Lock from '@lucide/svelte/icons/lock';
-	import Monitor from '@lucide/svelte/icons/monitor';
 	import Paperclip from '@lucide/svelte/icons/paperclip';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -115,8 +113,6 @@
 		organisation: m.vault_kind_organisation
 	};
 	const FILTERS: { kind: Kind; label: () => string }[] = [
-		{ kind: 'logins', label: m.vault_kind_logins },
-		{ kind: 'keys', label: m.vault_kind_keys },
 		{ kind: 'totp', label: m.vault_kind_totp },
 		{ kind: 'files', label: m.vault_kind_files }
 	];
@@ -1057,17 +1053,11 @@
 					{/if}
 				</span>
 				<span class="flex gap-1 text-ink-3">
-					{#if item.kinds.includes('keys')}
-						<KeyRound size={13} aria-label={m.vault_kind_keys()} />
-					{/if}
 					{#if item.kinds.includes('totp')}
 						<Timer size={13} aria-label={m.vault_kind_totp()} />
 					{/if}
 					{#if item.kinds.includes('files')}
 						<Paperclip size={13} aria-label={m.vault_kind_files()} />
-					{/if}
-					{#if item.source === 'shared' && tree?.devices.some((d) => d.credential_id === item.id)}
-						<Monitor size={13} aria-label={m.vault_used_by_devices()} />
 					{/if}
 				</span>
 			</span>

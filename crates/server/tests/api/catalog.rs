@@ -1,7 +1,9 @@
 //! Folders, devices, credentials and grants over HTTP — with the permission
 //! rules of authorize() applied end to end.
 
-use crate::common::{BOB_SID, OPS_SID, authed, collection, send, sign_in_request, state};
+use crate::common::{
+    BOB_SID, OPS_SID, authed, collection, lab_key, profile, send, sign_in_request, state,
+};
 use axum::Router;
 use axum::http::StatusCode;
 use remotehub_server::app;
@@ -78,8 +80,9 @@ async fn grant(
 }
 
 /// Servers/Linux with web01 and Servers/Windows with dc01; web01 signs in with
-/// the root credential, which lives apart in the collection Vault/Linux keys
-/// (#190).
+/// the login profile `root` in Linux (#192). The shared credential `root`
+/// lives apart in the collection Vault/Linux keys (#190) and has nothing to
+/// do with web01.
 struct Fixture {
     app: Router,
     alice: String,
@@ -90,6 +93,8 @@ struct Fixture {
     vault: String,
     linux_keys: String,
     root_pw: String,
+    /// The login profile web01 signs in with.
+    root: String,
 }
 
 async fn fixture(pool: PgPool) -> Fixture {
@@ -125,13 +130,21 @@ async fn fixture(pool: PgPool) -> Fixture {
         json!({ "collection_id": linux_keys, "name": "root", "username": "root", "password": "T0p-Secret!" }),
     )
     .await;
+    let root = profile(
+        &app,
+        &alice,
+        Some(&linux),
+        "root",
+        json!({ "username": "root", "password": "R00t-Login!" }),
+    )
+    .await;
     let web01 = create(
         &app,
         &alice,
         "/api/devices",
         json!({
             "folder_id": linux, "name": "web01", "protocol": "ssh", "host": "web01.example.com",
-            "port": 22, "auth_mode": "stored", "credential_id": root_pw,
+            "port": 22, "auth_mode": "profile", "profile_id": root,
         }),
     )
     .await;
@@ -141,7 +154,7 @@ async fn fixture(pool: PgPool) -> Fixture {
         "/api/devices",
         json!({
             "folder_id": windows, "name": "dc01", "protocol": "rdp", "host": "dc01.example.com",
-            "port": 3389, "auth_mode": "own", "credential_id": null,
+            "port": 3389, "auth_mode": "own",
         }),
     )
     .await;
@@ -155,6 +168,7 @@ async fn fixture(pool: PgPool) -> Fixture {
         vault,
         linux_keys,
         root_pw,
+        root,
     }
 }
 
@@ -366,7 +380,7 @@ async fn invisible_objects_do_not_exist_for_the_caller(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
-async fn a_credential_only_goes_where_its_users_may_send_it(pool: PgPool) {
+async fn a_login_profile_only_goes_where_its_users_may_send_it(pool: PgPool) {
     let f = fixture(pool).await;
     let bob = sign_in(&f.app, "bob").await;
     grant(
@@ -377,51 +391,36 @@ async fn a_credential_only_goes_where_its_users_may_send_it(pool: PgPool) {
         &f.app, &f.alice, "folder", &f.windows, BOB_SID, "user", "edit",
     )
     .await;
-    grant(
-        &f.app,
-        &f.alice,
-        "collection",
-        &f.linux_keys,
-        BOB_SID,
-        "user",
-        "edit",
-    )
-    .await;
-    let device = |host: &str, folder: &str, credential: &str| {
+    let device = |host: &str, folder: &str, profile: &str| {
         json!({
             "folder_id": folder, "name": "web01", "protocol": "ssh", "host": host, "port": 22,
-            "auth_mode": "stored", "credential_id": credential,
+            "auth_mode": "profile", "profile_id": profile,
         })
     };
 
-    // With edit on Linux and on the root credential's collection, bob may
-    // use that credential there …
+    // With edit on Linux, bob may use the root profile that lies there …
     let ok = call(
         &f.app,
         &bob,
         "PUT",
         &format!("/api/devices/{}", f.web01),
-        Some(device("web01.example.com", &f.linux, &f.root_pw)),
+        Some(device("web01.example.com", &f.linux, &f.root)),
     )
     .await;
     assert_eq!(ok.status, StatusCode::NO_CONTENT);
 
-    // … but a credential he may only list must not be pointed at a new host.
-    let other = create(
-        &f.app,
-        &f.alice,
-        "/api/credentials",
-        json!({ "collection_id": f.vault, "name": "domain admin", "password": "Adm1n!" }),
+    // … but a profile he may only list must not be pointed at a new host.
+    // Profiles take their folder's grants (#192): list on Servers.
+    grant(
+        &f.app, &f.alice, "folder", &f.servers, BOB_SID, "user", "list",
     )
     .await;
-    grant(
+    let other = profile(
         &f.app,
         &f.alice,
-        "credential",
-        &other,
-        BOB_SID,
-        "user",
-        "list",
+        Some(&f.servers),
+        "domain admin",
+        json!({ "username": "admin", "password": "Adm1n!" }),
     )
     .await;
     let linked = call(
@@ -431,20 +430,20 @@ async fn a_credential_only_goes_where_its_users_may_send_it(pool: PgPool) {
         "/api/devices",
         Some(json!({
             "folder_id": f.windows, "name": "evil", "protocol": "ssh", "host": "attacker.example",
-            "port": 22, "auth_mode": "stored", "credential_id": other,
+            "port": 22, "auth_mode": "profile", "profile_id": other,
         })),
     )
     .await;
     assert_eq!(linked.code(), "forbidden");
 
-    // Moving a device with a stored credential to another host needs connect on it.
+    // Moving a device with a login profile to another host needs connect on it.
     let admin_device = create(
         &f.app,
         &f.alice,
         "/api/devices",
         json!({
             "folder_id": f.windows, "name": "dc02", "protocol": "ssh", "host": "dc02.example.com",
-            "port": 22, "auth_mode": "stored", "credential_id": other,
+            "port": 22, "auth_mode": "profile", "profile_id": other,
         }),
     )
     .await;
@@ -455,7 +454,7 @@ async fn a_credential_only_goes_where_its_users_may_send_it(pool: PgPool) {
         &format!("/api/devices/{admin_device}"),
         Some(json!({
             "folder_id": f.windows, "name": "dc02", "protocol": "ssh", "host": "attacker.example",
-            "port": 22, "auth_mode": "stored", "credential_id": other,
+            "port": 22, "auth_mode": "profile", "profile_id": other,
         })),
     )
     .await;
@@ -468,7 +467,7 @@ async fn a_credential_only_goes_where_its_users_may_send_it(pool: PgPool) {
         &format!("/api/devices/{admin_device}"),
         Some(json!({
             "folder_id": f.windows, "name": "dc02 (old)", "protocol": "ssh", "host": "dc02.example.com",
-            "port": 22, "auth_mode": "stored", "credential_id": other,
+            "port": 22, "auth_mode": "profile", "profile_id": other,
         })),
     )
     .await;
@@ -507,8 +506,10 @@ async fn passwords_are_sealed_versioned_and_never_returned(pool: PgPool) {
     assert_eq!(tree(&f.app, &f.alice).await["credentials"][0]["version"], 2);
 
     let sealed: Vec<(i32, Vec<u8>)> = sqlx::query_as(
-        "SELECT version, ciphertext FROM secret_fields WHERE field = 'password' ORDER BY version",
+        "SELECT version, ciphertext FROM secret_fields
+         WHERE owner_id = $1::uuid AND field = 'password' ORDER BY version",
     )
+    .bind(&f.root_pw)
     .fetch_all(&pool)
     .await
     .unwrap();
@@ -526,29 +527,17 @@ async fn passwords_are_sealed_versioned_and_never_returned(pool: PgPool) {
     assert!(log.contains("credential.updated") && log.contains("\"secret_changed\":true"));
     assert!(!log.contains("T0p-Secret!") && !log.contains("N3w!"));
 
-    // Deleting the credential leaves its devices asking for credentials.
+    // Deleting the credential deletes every sealed version of it.
     assert_eq!(
         call(&f.app, &f.alice, "DELETE", &uri, None).await.status,
         StatusCode::NO_CONTENT
     );
-    let web01 = tree(&f.app, &f.alice).await["devices"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|d| d["name"] == "web01")
-        .cloned()
-        .unwrap();
-    assert_eq!(
-        (
-            web01["auth_mode"].as_str(),
-            web01["credential_id"].is_null()
-        ),
-        (Some("ask"), true)
-    );
-    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM secret_fields")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let left: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM secret_fields WHERE owner_id = $1::uuid")
+            .bind(&f.root_pw)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(left, 0);
 }
 
@@ -717,14 +706,17 @@ async fn devices_are_validated(pool: PgPool) {
     let f = fixture(pool).await;
     let base = json!({
         "folder_id": f.linux, "name": "x", "protocol": "ssh", "host": "x.example.com",
-        "port": 22, "auth_mode": "ask", "credential_id": null,
+        "port": 22, "auth_mode": "ask",
     });
+    // A login profile is exactly what sign-in mode "profile" means: neither
+    // comes without the other.
     for (field, value) in [
         ("protocol", json!("telnet")),
         ("host", json!("bad host")),
         ("host", json!("")),
         ("port", json!(0)),
-        ("auth_mode", json!("stored")),
+        ("auth_mode", json!("profile")),
+        ("profile_id", json!(f.root)),
         ("name", json!("  ")),
     ] {
         let mut body = base.clone();
@@ -740,7 +732,7 @@ async fn rdp_devices_keep_a_keyboard_layout_of_guacd(pool: PgPool) {
     let device = |protocol: &str, layout: Value| {
         json!({
             "folder_id": f.linux, "name": format!("{protocol} {layout}"), "protocol": protocol,
-            "host": "x.example.com", "port": 3389, "auth_mode": "ask", "credential_id": null,
+            "host": "x.example.com", "port": 3389, "auth_mode": "ask",
             "keyboard_layout": layout,
         })
     };
@@ -786,133 +778,6 @@ async fn rdp_devices_keep_a_keyboard_layout_of_guacd(pool: PgPool) {
     assert_eq!(layout(&vnc), Value::Null);
 }
 
-/// A file of the lab's SSH target (deploy/testlab/ssh).
-fn lab_key(file: &str) -> String {
-    let dir = std::path::PathBuf::from(
-        std::env::var("CARGO_MANIFEST_DIR").expect("set by cargo and nextest"),
-    );
-    std::fs::read_to_string(dir.join("../../deploy/testlab/ssh").join(file)).unwrap()
-}
-
-#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
-async fn ssh_keys_are_checked_sealed_and_shown_only_by_fingerprint(pool: PgPool) {
-    let f = fixture(pool.clone()).await;
-    let key = lab_key("tester_ed25519_cert");
-    let certificate = lab_key("tester_ed25519_cert-cert.pub");
-    let body = |extra: Value| {
-        let mut body = json!({
-            "collection_id": f.linux_keys, "name": "key", "kind": "ssh_key", "username": "tester",
-        });
-        body.as_object_mut()
-            .unwrap()
-            .extend(extra.as_object().unwrap().clone());
-        body
-    };
-
-    for (extra, field) in [
-        (json!({}), "private_key"),
-        (json!({ "private_key": "not a key" }), "private_key"),
-        (
-            json!({ "private_key": lab_key("tester_ed25519_passphrase") }),
-            "passphrase",
-        ),
-        (
-            json!({ "private_key": lab_key("tester_ed25519_passphrase"), "passphrase": "wrong" }),
-            "passphrase",
-        ),
-        (
-            json!({ "private_key": lab_key("tester_ed25519"), "certificate": certificate }),
-            "certificate",
-        ),
-    ] {
-        let response = call(
-            &f.app,
-            &f.alice,
-            "POST",
-            "/api/credentials",
-            Some(body(extra)),
-        )
-        .await;
-        assert_eq!(response.code(), "invalid_request");
-        assert_eq!(response.json()["params"]["field"], field);
-    }
-
-    let id = create(
-        &f.app,
-        &f.alice,
-        "/api/credentials",
-        body(json!({ "private_key": key, "certificate": certificate })),
-    )
-    .await;
-    let everything = tree(&f.app, &f.alice).await;
-    let shown = everything["credentials"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|c| c["id"] == id.as_str())
-        .unwrap()
-        .clone();
-    assert_eq!(shown["kind"], "ssh_key");
-    assert_eq!(shown["key_algorithm"], "ssh-ed25519");
-    assert!(
-        shown["key_fingerprint"]
-            .as_str()
-            .unwrap()
-            .starts_with("SHA256:")
-    );
-    assert_eq!(shown["has_certificate"], true);
-    let secret_line = key.lines().nth(1).unwrap();
-    assert!(!everything.to_string().contains(secret_line));
-    let log = call(&f.app, &f.alice, "GET", "/api/audit", None)
-        .await
-        .json()
-        .to_string();
-    assert!(!log.contains(secret_line));
-
-    let fields: Vec<String> = sqlx::query_scalar(
-        "SELECT field FROM secret_fields WHERE owner_id = $1::uuid ORDER BY field",
-    )
-    .bind(&id)
-    .fetch_all(&pool)
-    .await
-    .unwrap();
-    assert_eq!(fields, ["certificate", "private_key"]);
-
-    // The kind stays; a new key makes a new version.
-    let change = call(
-        &f.app,
-        &f.alice,
-        "PUT",
-        &format!("/api/credentials/{id}"),
-        Some(body(json!({ "kind": "password" }))),
-    )
-    .await;
-    assert_eq!(change.json()["params"]["field"], "kind");
-    let renew = call(
-        &f.app,
-        &f.alice,
-        "PUT",
-        &format!("/api/credentials/{id}"),
-        Some(body(json!({ "private_key": lab_key("tester_ed25519") }))),
-    )
-    .await;
-    assert_eq!(renew.status, StatusCode::NO_CONTENT);
-    let renewed = tree(&f.app, &f.alice).await["credentials"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|c| c["id"] == id.as_str())
-        .unwrap()
-        .clone();
-    assert_eq!(
-        (
-            renewed["version"].as_i64(),
-            renewed["has_certificate"].as_bool()
-        ),
-        (Some(2), Some(false))
-    );
-}
-
 /// The sealed versions of a device's own password, oldest first.
 async fn device_secrets(pool: &PgPool, device: &str) -> Vec<i32> {
     sqlx::query_scalar(
@@ -934,7 +799,7 @@ async fn stored_secrets_are_shown_only_with_reveal_and_audited(pool: PgPool) {
         "/api/devices",
         json!({
             "folder_id": f.linux, "name": "db01", "protocol": "ssh", "host": "db01", "port": 22,
-            "auth_mode": "device", "credential_id": null, "username": "admin", "domain": "LAB",
+            "auth_mode": "device", "username": "admin", "domain": "LAB",
             "password": "Own-S3cret!",
         }),
     )
@@ -986,14 +851,14 @@ async fn stored_secrets_are_shown_only_with_reveal_and_audited(pool: PgPool) {
         copied.json(),
         json!({ "username": "admin", "domain": "LAB", "password": "Own-S3cret!" })
     );
-    // web01 uses the shared credential and keeps nothing of its own.
+    // web01 signs in with a login profile and keeps nothing of its own.
     let none = call(&f.app, &bob, "POST", &web01, show()).await;
     assert_eq!(none.status, StatusCode::NOT_FOUND);
     // A device that asks now shows nothing either, even with a password
     // sent along.
     let asking = json!({
         "folder_id": f.linux, "name": "db01", "protocol": "ssh", "host": "db01", "port": 22,
-        "auth_mode": "ask", "credential_id": null, "password": "Left-Over!",
+        "auth_mode": "ask", "password": "Left-Over!",
     });
     let changed = call(
         &f.app,
@@ -1262,7 +1127,8 @@ async fn files_are_sealed_with_a_credential_and_downloaded_with_reveal(pool: PgP
         call(&f.app, &f.alice, "GET", &uri, None).await.status,
         StatusCode::NOT_FOUND
     );
-    // Deleting the credential takes the sealed files along.
+    // Deleting the credential takes the sealed files along. Only the login
+    // profile web01 signs in with keeps its password.
     send(
         &f.app,
         upload(&id, "again.pem", b"again".to_vec(), &f.alice),
@@ -1276,10 +1142,12 @@ async fn files_are_sealed_with_a_credential_and_downloaded_with_reveal(pool: PgP
         None,
     )
     .await;
-    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM secret_fields")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let left: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM secret_fields WHERE owner_id <> $1::uuid")
+            .bind(&f.root)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(left, 0);
 
     let log = call(&f.app, &f.alice, "GET", "/api/audit", None)
@@ -1401,7 +1269,7 @@ async fn a_device_keeps_credentials_of_its_own(pool: PgPool) {
     let device = |host: &str, password: Option<&str>| {
         let mut body = json!({
             "folder_id": f.linux, "name": "db01", "protocol": "ssh", "host": host, "port": 22,
-            "auth_mode": "device", "credential_id": null, "username": " admin ", "domain": "LAB",
+            "auth_mode": "device", "username": " admin ", "domain": "LAB",
         });
         if let Some(p) = password {
             body["password"] = json!(p);
@@ -1512,7 +1380,7 @@ async fn a_device_keeps_an_ssh_key_of_its_own(pool: PgPool) {
     let device = |protocol: &str, secret: Value| {
         let mut body = json!({
             "folder_id": f.linux, "name": "git01", "protocol": protocol, "host": "git01",
-            "port": 22, "auth_mode": "device", "credential_id": null, "username": "tester",
+            "port": 22, "auth_mode": "device", "username": "tester",
         });
         body.as_object_mut()
             .unwrap()
@@ -1641,7 +1509,7 @@ async fn folders_pass_their_connector_down(pool: PgPool) {
             "/api/devices",
             json!({
                 "folder_id": f.linux, "name": name, "protocol": "ssh", "host": name, "port": 22,
-                "auth_mode": "ask", "credential_id": null,
+                "auth_mode": "ask",
                 "connector_mode": mode, "connector_id": connector,
             }),
         )
@@ -1715,18 +1583,20 @@ async fn folders_pass_their_connector_down(pool: PgPool) {
     assert_eq!(retargeted, [1, 1, 2]);
 }
 
-/// Changing a folder's connector sends the credentials of the devices below
-/// to another target: whoever does it must be allowed to use them.
+/// Changing a folder's connector sends the login profiles of the devices
+/// below to another target: whoever does it must be allowed to use them.
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
-async fn a_folder_connector_needs_the_credentials_below(pool: PgPool) {
+async fn a_folder_connector_needs_the_profiles_below(pool: PgPool) {
     let f = fixture(pool).await;
     let site = create(&f.app, &f.alice, "/api/connectors", json!({ "name": "A" })).await;
-    let apart = collection(&f.app, &f.alice, None, "Apart").await;
-    let elsewhere = create(
+    // A profile at the top level is for administrators only (#192), so bob
+    // may not use it even though he manages every folder below.
+    let elsewhere = profile(
         &f.app,
         &f.alice,
-        "/api/credentials",
-        json!({ "collection_id": apart, "name": "db", "username": "db", "password": "Els3where!" }),
+        None,
+        "db",
+        json!({ "username": "db", "password": "Els3where!" }),
     )
     .await;
     create(
@@ -1735,23 +1605,14 @@ async fn a_folder_connector_needs_the_credentials_below(pool: PgPool) {
         "/api/devices",
         json!({
             "folder_id": f.linux, "name": "db01", "protocol": "ssh", "host": "db01", "port": 22,
-            "auth_mode": "stored", "credential_id": elsewhere,
+            "auth_mode": "profile", "profile_id": elsewhere,
         }),
     )
     .await;
+    // bob may use web01's root profile in Linux, so db01 is the only one
+    // refused.
     grant(
         &f.app, &f.alice, "folder", &f.servers, BOB_SID, "user", "manage",
-    )
-    .await;
-    // bob may use web01's root credential, so db01 is the only one refused.
-    grant(
-        &f.app,
-        &f.alice,
-        "collection",
-        &f.vault,
-        BOB_SID,
-        "user",
-        "manage",
     )
     .await;
     let bob = sign_in(&f.app, "bob").await;
@@ -1792,25 +1653,25 @@ async fn a_folder_connector_needs_the_credentials_below(pool: PgPool) {
         &format!("/api/devices/{db01}"),
         Some(json!({
             "folder_id": f.windows, "name": "db01", "protocol": "ssh", "host": "db01", "port": 22,
-            "auth_mode": "stored", "credential_id": elsewhere,
+            "auth_mode": "profile", "profile_id": elsewhere,
         })),
     )
     .await;
-    // The credential stays the same; only the new target asks for it, and bob
+    // The profile stays the same; only the new target asks for it, and bob
     // cannot even see it.
     assert_eq!(into_windows.status, StatusCode::NOT_FOUND);
 
-    // With the right to use the credential, both go through.
-    grant(
+    // Once the profile lies in a folder bob manages, he may use it, and the
+    // folder's connector goes through.
+    let moved = call(
         &f.app,
         &f.alice,
-        "collection",
-        &apart,
-        BOB_SID,
-        "user",
-        "connect",
+        "PUT",
+        &format!("/api/profiles/{elsewhere}"),
+        Some(json!({ "folder_id": f.servers, "name": "db", "username": "db" })),
     )
     .await;
+    assert_eq!(moved.status, StatusCode::NO_CONTENT, "{}", moved.json());
     assert_eq!(
         change(&f.servers, json!({ "connector_id": site }))
             .await

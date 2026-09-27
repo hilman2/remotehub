@@ -1,5 +1,12 @@
 /** Pure helpers to show the flat tree from the API as nested folders and collections. */
-import { allows, type Collection, type Device, type Folder, type Tree } from '$lib/api/catalog';
+import {
+	allows,
+	type Collection,
+	type Device,
+	type Folder,
+	type Profile,
+	type Tree
+} from '$lib/api/catalog';
 
 export interface FolderNode {
 	folder: Folder;
@@ -81,6 +88,15 @@ function walk<T extends { id: string; parent_id: string | null }>(
 		next = next.parent_id ? byId.get(next.parent_id) : undefined;
 	}
 	return path;
+}
+
+/**
+ * The login profiles a device in `folderId` may use (#192): those in that
+ * folder, in one above it, or at the top level. As the server's `in_reach`.
+ */
+export function profilesWithin(tree: Tree, folderId: string): Profile[] {
+	const above = new Set(pathTo(tree, folderId).map((folder) => folder.id));
+	return tree.profiles.filter((p) => p.folder_id === null || above.has(p.folder_id));
 }
 
 /**

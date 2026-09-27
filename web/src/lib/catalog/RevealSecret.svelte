@@ -13,7 +13,7 @@
 	import TotpCode from '$lib/vault/TotpCode.svelte';
 	import { totpOf } from '$lib/vault/totp';
 
-	let { owner, id }: { owner: 'credentials' | 'devices'; id: string } = $props();
+	let { owner, id }: { owner: 'credentials' | 'devices' | 'profiles'; id: string } = $props();
 
 	/** How long a shown or copied value stays. */
 	const SECONDS = 30;

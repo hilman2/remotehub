@@ -12,8 +12,9 @@ Remote Desktop Manager) combined with a multi-user password vault in the spirit 
 - Reach other sites and segments through a **site connector** that connects out to remotehub, without
   inbound firewall rules, in Docker or as a Windows service. The customer opens and closes access at the
   connector, for a while or until further notice, and keeps a log of every connection.
-- Connect with the **credentials stored for the device**, with **personal credentials**, or with **your own AD account** —
-  stored passwords can be used without ever being shown (`connect` and `reveal` are separate permissions).
+- Connect with the **credentials stored for the device**, a **login profile** many devices share, with
+  **personal credentials**, or with **your own AD account**. Stored passwords can be used without ever
+  being shown (`connect` and `reveal` are separate permissions).
 - Keep all other credentials in a **vault with folder permissions based on AD groups**, import existing
   **KeePass (KDBX)** databases and keep an encrypted offline copy for emergencies.
 

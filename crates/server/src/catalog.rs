@@ -1,6 +1,6 @@
 //! Loads both trees and all grants for `authorize()` (crates/model).
 
-use remotehub_model::{Catalog, Grant, ObjectId, Role};
+use remotehub_model::{Catalog, Grant, ObjectId, Objects, Role};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -15,24 +15,27 @@ struct GrantLink {
     until: Option<i64>,
 }
 
-/// Folders with devices, collections with credentials (#190), and every
-/// grant, as `authorize()` needs them. Loaded per request: small (thousands
-/// of rows) and always current.
+/// Folders with devices and login profiles (#192), collections with
+/// credentials (#190), and every grant, as `authorize()` needs them. Loaded
+/// per request: small (thousands of rows) and always current.
 pub async fn load(db: &PgPool) -> Result<Catalog, sqlx::Error> {
-    let folders: Vec<(Uuid, Option<Uuid>)> = sqlx::query_as("SELECT id, parent_id FROM folders")
-        .fetch_all(db)
-        .await?;
-    let collections: Vec<(Uuid, Option<Uuid>)> =
-        sqlx::query_as("SELECT id, parent_id FROM collections")
+    let objects = Objects {
+        folders: sqlx::query_as("SELECT id, parent_id FROM folders")
             .fetch_all(db)
-            .await?;
-    let devices: Vec<(Uuid, Uuid)> = sqlx::query_as("SELECT id, folder_id FROM devices")
-        .fetch_all(db)
-        .await?;
-    let credentials: Vec<(Uuid, Uuid)> =
-        sqlx::query_as("SELECT id, collection_id FROM credentials")
+            .await?,
+        collections: sqlx::query_as("SELECT id, parent_id FROM collections")
             .fetch_all(db)
-            .await?;
+            .await?,
+        devices: sqlx::query_as("SELECT id, folder_id FROM devices")
+            .fetch_all(db)
+            .await?,
+        credentials: sqlx::query_as("SELECT id, collection_id FROM credentials")
+            .fetch_all(db)
+            .await?,
+        profiles: sqlx::query_as("SELECT id, folder_id FROM login_profiles")
+            .fetch_all(db)
+            .await?,
+    };
     // The database's clock decides when a grant runs out, as it wrote
     // expires_at; running out is decided in the model.
     let (now,): (i64,) = sqlx::query_as("SELECT extract(epoch FROM now())::bigint")
@@ -53,14 +56,7 @@ pub async fn load(db: &PgPool) -> Result<Catalog, sqlx::Error> {
             until: g.until,
         })
     });
-    Ok(Catalog::new(
-        folders,
-        collections,
-        devices,
-        credentials,
-        grants,
-        now,
-    ))
+    Ok(Catalog::new(objects, grants, now))
 }
 
 /// The object a row of requests points to (exactly one column is set).
@@ -96,6 +92,7 @@ pub fn kind(object: ObjectId) -> &'static str {
         ObjectId::Device(_) => "device",
         ObjectId::Credential(_) => "credential",
         ObjectId::Collection(_) => "collection",
+        ObjectId::Profile(_) => "profile",
     }
 }
 
@@ -104,17 +101,20 @@ pub fn id(object: ObjectId) -> Uuid {
         ObjectId::Folder(id)
         | ObjectId::Device(id)
         | ObjectId::Credential(id)
-        | ObjectId::Collection(id) => id,
+        | ObjectId::Collection(id)
+        | ObjectId::Profile(id) => id,
     }
 }
 
 /// The grant table's columns for an object: folder, device, credential and
-/// collection, exactly one set.
-pub fn grant_columns(object: ObjectId) -> [Option<Uuid>; 4] {
+/// collection, exactly one set. None for a login profile, which takes no
+/// grants of its own (#192).
+pub fn grant_columns(object: ObjectId) -> Option<[Option<Uuid>; 4]> {
     match object {
-        ObjectId::Folder(id) => [Some(id), None, None, None],
-        ObjectId::Device(id) => [None, Some(id), None, None],
-        ObjectId::Credential(id) => [None, None, Some(id), None],
-        ObjectId::Collection(id) => [None, None, None, Some(id)],
+        ObjectId::Folder(id) => Some([Some(id), None, None, None]),
+        ObjectId::Device(id) => Some([None, Some(id), None, None]),
+        ObjectId::Credential(id) => Some([None, None, Some(id), None]),
+        ObjectId::Collection(id) => Some([None, None, None, Some(id)]),
+        ObjectId::Profile(_) => None,
     }
 }

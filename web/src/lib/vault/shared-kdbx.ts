@@ -40,14 +40,6 @@ export async function exportCollection(tree: Tree, collectionId: string): Promis
 		for (const field of secret.fields ?? []) {
 			fields.push({ name: field.name, value: field.value, protected: true });
 		}
-		// KeePass has no place for a key: it goes into protected fields, and
-		// its passphrase into the password.
-		if (secret.private_key) {
-			fields.push({ name: 'SSH private key', value: secret.private_key, protected: true });
-		}
-		if (secret.certificate) {
-			fields.push({ name: 'SSH certificate', value: secret.certificate, protected: false });
-		}
 		const files: KdbxEntry['files'] = [];
 		for (const attachment of credential.attachments) {
 			const response = await fetch(attachmentUrl(credential.id, attachment.id));
@@ -60,7 +52,7 @@ export async function exportCollection(tree: Tree, collectionId: string): Promis
 			username: credential.domain
 				? `${credential.domain}\\${credential.username}`
 				: credential.username,
-			password: secret.password ?? secret.passphrase ?? '',
+			password: secret.password ?? '',
 			url: credential.url,
 			notes: credential.notes,
 			icon: credential.icon,
@@ -131,7 +123,6 @@ export async function importInto(
 			name: title.slice(0, 200),
 			username: entry.username.slice(0, 256),
 			domain: '',
-			kind: 'password',
 			password: entry.password,
 			url: entry.url.slice(0, 2000),
 			notes: entry.notes.slice(0, 10000),

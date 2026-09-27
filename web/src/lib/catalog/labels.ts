@@ -34,7 +34,7 @@ export const PROTOCOL_SHORT: Record<Protocol, string> = {
 };
 
 export const AUTH_MODE_LABELS: Record<AuthMode, () => string> = {
-	stored: m.auth_stored,
+	profile: m.auth_profile,
 	device: m.auth_device,
 	ask: m.auth_ask,
 	own: m.auth_own,
@@ -46,7 +46,8 @@ export const KIND_LABELS: Record<ObjectKind, () => string> = {
 	folder: m.catalog_kind_folder,
 	device: m.catalog_kind_device,
 	credential: m.catalog_kind_credential,
-	collection: m.catalog_kind_collection
+	collection: m.catalog_kind_collection,
+	profile: m.catalog_kind_profile
 };
 
 export const CREDENTIAL_KIND_LABELS: Record<CredentialKind, () => string> = {

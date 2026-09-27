@@ -155,7 +155,7 @@ async fn who_may_connect_reads_the_journal_and_leaves_notes(pool: PgPool) {
         "/api/devices",
         json!({
             "folder_id": folder, "name": "web01", "protocol": "ssh", "host": "web01",
-            "port": 22, "auth_mode": "ask", "credential_id": null,
+            "port": 22, "auth_mode": "ask",
         }),
     )
     .await;

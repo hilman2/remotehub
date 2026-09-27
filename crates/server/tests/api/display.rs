@@ -14,7 +14,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::common::{ORIGIN, collection, get, send};
+use crate::common::{ORIGIN, authed, get, lab_key, profile, send};
 use crate::terminal::{create, serve, setup};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -132,15 +132,15 @@ async fn device(app: &Router, token: &str, folder: &str, device: Value) -> Strin
     create(app, token, "/api/devices", body).await
 }
 
-/// The lab's `tester` account as a shared credential, in a collection of its
-/// own (#190). Returns the credential's id.
-async fn tester_credential(app: &Router, token: &str) -> String {
-    let keys = collection(app, token, None, "Lab").await;
-    create(
+/// The lab's `tester` account as a login profile in `folder` (#192).
+/// Returns the profile's id.
+async fn tester_profile(app: &Router, token: &str, folder: &str) -> String {
+    profile(
         app,
         token,
-        "/api/credentials",
-        json!({ "collection_id": keys, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
+        Some(folder),
+        "tester",
+        json!({ "username": "tester", "password": "Tester-Passw0rd!" }),
     )
     .await
 }
@@ -148,7 +148,7 @@ async fn tester_credential(app: &Router, token: &str) -> String {
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn each_protocol_has_its_endpoint_and_only_the_own_origin_opens_it(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
-    let ask = json!({ "auth_mode": "ask", "credential_id": null });
+    let ask = json!({ "auth_mode": "ask" });
     let mut rdp = json!({ "name": "rdp", "protocol": "rdp", "port": 3389 });
     rdp.as_object_mut()
         .unwrap()
@@ -184,50 +184,65 @@ async fn each_protocol_has_its_endpoint_and_only_the_own_origin_opens_it(pool: P
     );
 }
 
+/// Keys are SSH's: an RDP device takes no login profile with a key, and
+/// should the database hold one anyway, the key does not sign in.
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn an_ssh_key_does_not_sign_in_to_rdp(pool: PgPool) {
-    let (state, app, token, folder) = setup(pool).await;
-    let key = std::fs::read_to_string(
-        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
-            .join("../../deploy/testlab/ssh/tester_ed25519"),
-    )
-    .unwrap();
-    let keys = collection(&app, &token, None, "Lab").await;
-    let credential = create(
+    let (state, app, token, folder) = setup(pool.clone()).await;
+    let key = profile(
         &app,
         &token,
-        "/api/credentials",
-        json!({ "collection_id": keys, "name": "key", "kind": "ssh_key", "username": "tester", "private_key": key }),
+        Some(&folder),
+        "key",
+        json!({ "secret_kind": "ssh_key", "username": "tester", "private_key": lab_key("tester_ed25519") }),
     )
     .await;
-    let rdp = device(
+    let rdp = json!({
+        "folder_id": folder, "name": "desktop", "host": "desktop", "protocol": "rdp",
+        "port": 3389, "auth_mode": "profile", "profile_id": key,
+    });
+    let refused = send(&app, authed("POST", "/api/devices", Some(rdp), &token)).await;
+    assert_eq!(
+        refused.json()["params"]["field"],
+        "profile_id",
+        "{}",
+        refused.json()
+    );
+    // An SSH device takes the key; turned into RDP behind the API's back, it
+    // still reaches no desktop with it.
+    let ssh = device(
         &app,
         &token,
         &folder,
-        json!({ "protocol": "rdp", "port": 3389, "auth_mode": "stored", "credential_id": credential }),
+        json!({ "protocol": "ssh", "port": 22, "auth_mode": "profile", "profile_id": key }),
     )
     .await;
+    sqlx::query("UPDATE devices SET protocol = 'rdp', port = 3389 WHERE id = $1::uuid")
+        .bind(&ssh)
+        .execute(&pool)
+        .await
+        .unwrap();
     let address = serve(state).await;
 
-    let mut socket = open(address, &rdp, &token, "display", ORIGIN)
+    let mut socket = open(address, &ssh, &token, "display", ORIGIN)
         .await
         .unwrap();
     start(&mut socket, json!({})).await;
     let error: Value = serde_json::from_str(&text(&mut socket).await).unwrap();
     assert_eq!(error["code"], "invalid_request", "{error}");
-    assert_eq!(error["params"]["field"], "credential_id");
+    assert_eq!(error["params"]["field"], "profile_id");
 }
 
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
-async fn a_stored_credential_opens_an_rdp_desktop(pool: PgPool) {
+async fn a_login_profile_opens_an_rdp_desktop(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
-    let credential = tester_credential(&app, &token).await;
+    let login = tester_profile(&app, &token, &folder).await;
     let rdp = device(
         &app,
         &token,
         &folder,
-        json!({ "protocol": "rdp", "port": 3389, "auth_mode": "stored", "credential_id": credential }),
+        json!({ "protocol": "rdp", "port": 3389, "auth_mode": "profile", "profile_id": login }),
     )
     .await;
     let address = serve(state).await;
@@ -280,7 +295,7 @@ async fn vnc_asks_for_the_password_and_reports_a_wrong_one(pool: PgPool) {
         &app,
         &token,
         &folder,
-        json!({ "protocol": "vnc", "port": 5900, "auth_mode": "ask", "credential_id": null }),
+        json!({ "protocol": "vnc", "port": 5900, "auth_mode": "ask" }),
     )
     .await;
     let address = serve(state).await;
@@ -308,12 +323,12 @@ async fn vnc_asks_for_the_password_and_reports_a_wrong_one(pool: PgPool) {
 #[ignore = "needs the test lab"]
 async fn a_changed_rdp_certificate_stops_the_connection_until_the_pin_is_forgotten(pool: PgPool) {
     let (state, app, token, folder) = setup(pool.clone()).await;
-    let credential = tester_credential(&app, &token).await;
+    let login = tester_profile(&app, &token, &folder).await;
     let rdp = device(
         &app,
         &token,
         &folder,
-        json!({ "protocol": "rdp", "port": 3389, "auth_mode": "stored", "credential_id": credential }),
+        json!({ "protocol": "rdp", "port": 3389, "auth_mode": "profile", "profile_id": login }),
     )
     .await;
     let other = LAB_CERTIFICATE.replace("C1:E8", "00:00");
@@ -371,17 +386,17 @@ async fn a_changed_rdp_certificate_stops_the_connection_until_the_pin_is_forgott
     }
 }
 
-/// A desktop of the test lab, open and drawn: RDP with a stored credential,
-/// VNC with the password as asked.
+/// A desktop of the test lab, open and drawn: RDP with a login profile, VNC
+/// with the password as asked.
 async fn open_desktop(pool: PgPool, protocol: &str) -> Socket {
     let (state, app, token, folder) = setup(pool).await;
     let (id, start_with) = if protocol == "rdp" {
-        let credential = tester_credential(&app, &token).await;
-        let rdp = json!({ "protocol": "rdp", "port": 3389, "auth_mode": "stored", "credential_id": credential });
+        let login = tester_profile(&app, &token, &folder).await;
+        let rdp =
+            json!({ "protocol": "rdp", "port": 3389, "auth_mode": "profile", "profile_id": login });
         (device(&app, &token, &folder, rdp).await, json!({}))
     } else {
-        let vnc =
-            json!({ "protocol": "vnc", "port": 5900, "auth_mode": "ask", "credential_id": null });
+        let vnc = json!({ "protocol": "vnc", "port": 5900, "auth_mode": "ask" });
         (
             device(&app, &token, &folder, vnc).await,
             json!({ "password": "Vnc-Pw1!" }),
@@ -495,7 +510,7 @@ async fn an_rdp_desktop_opens_with_its_laps_password(pool: PgPool) {
         &app,
         &token,
         &folder,
-        json!({ "host": "desktop-target", "protocol": "rdp", "port": 3389, "auth_mode": "laps", "credential_id": null }),
+        json!({ "host": "desktop-target", "protocol": "rdp", "port": 3389, "auth_mode": "laps" }),
     )
     .await;
     let address = serve(state).await;
@@ -558,14 +573,14 @@ async fn web_device(app: &Router, token: &str, folder: &str, device: Value) -> S
 
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
-async fn an_https_device_opens_signed_in_with_its_stored_credential(pool: PgPool) {
+async fn an_https_device_opens_signed_in_with_its_login_profile(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
-    let credential = tester_credential(&app, &token).await;
+    let login = tester_profile(&app, &token, &folder).await;
     let web = web_device(
         &app,
         &token,
         &folder,
-        json!({ "auth_mode": "stored", "credential_id": credential }),
+        json!({ "auth_mode": "profile", "profile_id": login }),
     )
     .await;
     let address = serve(state).await;
@@ -611,13 +626,7 @@ async fn an_https_device_opens_signed_in_with_its_stored_credential(pool: PgPool
 #[ignore = "needs the test lab"]
 async fn asked_credentials_reach_the_web_interface_as_typed(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
-    let web = web_device(
-        &app,
-        &token,
-        &folder,
-        json!({ "auth_mode": "ask", "credential_id": null }),
-    )
-    .await;
+    let web = web_device(&app, &token, &folder, json!({ "auth_mode": "ask" })).await;
     let address = serve(state).await;
     let before = sign_ins().await["count"].clone();
 
@@ -640,13 +649,7 @@ async fn asked_credentials_reach_the_web_interface_as_typed(pool: PgPool) {
 #[ignore = "needs the test lab"]
 async fn a_changed_https_certificate_stops_the_connection(pool: PgPool) {
     let (state, app, token, folder) = setup(pool.clone()).await;
-    let web = web_device(
-        &app,
-        &token,
-        &folder,
-        json!({ "auth_mode": "ask", "credential_id": null }),
-    )
-    .await;
+    let web = web_device(&app, &token, &folder, json!({ "auth_mode": "ask" })).await;
     let presented = remotehub_gateway::tls::https_certificate(
         &web_host(),
         &web_host(),
@@ -742,12 +745,12 @@ async fn the_browser_signs_in_only_where_the_pinned_key_is(_pool: PgPool) {
 async fn an_rdp_desktop_behind_a_connector_opens_through_it(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
     let (connector, secret) = crate::connectors::new_connector(&app, &token, "lab").await;
-    let credential = tester_credential(&app, &token).await;
+    let login = tester_profile(&app, &token, &folder).await;
     let rdp = device(
         &app,
         &token,
         &folder,
-        json!({ "protocol": "rdp", "port": 3389, "auth_mode": "stored", "credential_id": credential,
+        json!({ "protocol": "rdp", "port": 3389, "auth_mode": "profile", "profile_id": login,
                 "connector_mode": "connector", "connector_id": connector }),
     )
     .await;
@@ -783,8 +786,7 @@ async fn an_https_device_behind_a_connector_signs_in_through_it(pool: PgPool) {
         &app,
         &token,
         &folder,
-        json!({ "auth_mode": "ask", "credential_id": null, "connector_mode": "connector",
-                "connector_id": connector }),
+        json!({ "auth_mode": "ask", "connector_mode": "connector", "connector_id": connector }),
     )
     .await;
     let address = serve(state.clone()).await;
@@ -820,7 +822,7 @@ async fn a_desktop_asks_for_the_purpose_first(pool: PgPool) {
         "/api/devices",
         json!({
             "folder_id": folder, "name": "nowhere", "protocol": "rdp", "host": "nowhere.invalid",
-            "port": 3389, "auth_mode": "ask", "credential_id": null,
+            "port": 3389, "auth_mode": "ask",
         }),
     )
     .await;

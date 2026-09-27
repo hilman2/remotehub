@@ -1,8 +1,9 @@
 //! Domain types of remotehub and [`Catalog::authorize`] — the only place that
 //! decides permissions (ADR 0005).
 //!
-//! Objects live in two trees: folders contain folders and devices;
-//! collections contain collections and shared credentials (#190). A grant
+//! Objects live in two trees: folders contain folders, devices and the
+//! login profiles devices share (#192); collections contain collections and
+//! shared credentials (#190). A grant
 //! gives a principal (the SID of a user or a group) a role on one object. Roles are ordered, `list < connect < reveal < edit <
 //! manage`; a grant on a folder holds for everything below it; grants only
 //! ever allow, and so does a grant on a collection for what is in it. A
@@ -22,12 +23,12 @@ use uuid::Uuid;
 pub enum Role {
     /// See that the object exists.
     List,
-    /// Open a session with a device, or let a device use a credential —
+    /// Open a session with a device, or let a device use a login profile —
     /// without seeing the password.
     Connect,
-    /// See a credential's password.
+    /// See a password: of a credential, a login profile or a device.
     Reveal,
-    /// Create, change and delete devices and credentials.
+    /// Create, change and delete devices, login profiles and credentials.
     Edit,
     /// Everything, including folders and grants.
     Manage,
@@ -64,6 +65,9 @@ pub enum ObjectId {
     Device(Uuid),
     Credential(Uuid),
     Collection(Uuid),
+    /// A login profile (#192). It takes no grants of its own: its folder's
+    /// hold for it, and one at the top level is for administrators only.
+    Profile(Uuid),
 }
 
 /// Who asks: all SIDs that identify them (their own and their groups').
@@ -90,20 +94,29 @@ pub struct Catalog {
     collection_parent: HashMap<Uuid, Option<Uuid>>,
     device_folder: HashMap<Uuid, Uuid>,
     credential_collection: HashMap<Uuid, Uuid>,
+    profile_folder: HashMap<Uuid, Option<Uuid>>,
     grants: HashMap<ObjectId, Vec<(String, Role)>>,
+}
+
+/// The objects of a catalog, each with what contains it.
+#[derive(Debug, Clone, Default)]
+pub struct Objects {
+    /// Folders and their parent.
+    pub folders: Vec<(Uuid, Option<Uuid>)>,
+    /// Collections and their parent.
+    pub collections: Vec<(Uuid, Option<Uuid>)>,
+    /// Devices and their folder.
+    pub devices: Vec<(Uuid, Uuid)>,
+    /// Credentials and their collection.
+    pub credentials: Vec<(Uuid, Uuid)>,
+    /// Login profiles and their folder; none at the top level.
+    pub profiles: Vec<(Uuid, Option<Uuid>)>,
 }
 
 impl Catalog {
     /// The catalog as of `now` (Unix time, seconds): grants that ran out
-    /// before it grant nothing. Credentials name their collection.
-    pub fn new(
-        folders: impl IntoIterator<Item = (Uuid, Option<Uuid>)>,
-        collections: impl IntoIterator<Item = (Uuid, Option<Uuid>)>,
-        devices: impl IntoIterator<Item = (Uuid, Uuid)>,
-        credentials: impl IntoIterator<Item = (Uuid, Uuid)>,
-        grants: impl IntoIterator<Item = Grant>,
-        now: i64,
-    ) -> Self {
+    /// before it grant nothing.
+    pub fn new(objects: Objects, grants: impl IntoIterator<Item = Grant>, now: i64) -> Self {
         let mut by_object: HashMap<ObjectId, Vec<(String, Role)>> = HashMap::new();
         for grant in grants {
             if grant.until.is_some_and(|until| until <= now) {
@@ -115,10 +128,11 @@ impl Catalog {
                 .push((grant.principal, grant.role));
         }
         Catalog {
-            folder_parent: folders.into_iter().collect(),
-            collection_parent: collections.into_iter().collect(),
-            device_folder: devices.into_iter().collect(),
-            credential_collection: credentials.into_iter().collect(),
+            folder_parent: objects.folders.into_iter().collect(),
+            collection_parent: objects.collections.into_iter().collect(),
+            device_folder: objects.devices.into_iter().collect(),
+            credential_collection: objects.credentials.into_iter().collect(),
+            profile_folder: objects.profiles.into_iter().collect(),
             grants: by_object,
         }
     }
@@ -129,11 +143,13 @@ impl Catalog {
             ObjectId::Collection(id) => self.collection_parent.contains_key(&id),
             ObjectId::Device(id) => self.device_folder.contains_key(&id),
             ObjectId::Credential(id) => self.credential_collection.contains_key(&id),
+            ObjectId::Profile(id) => self.profile_folder.contains_key(&id),
         }
     }
 
-    /// The folder or collection that contains an object: a device's folder,
-    /// a credential's collection, a folder's or collection's parent.
+    /// The folder or collection that contains an object: a device's or a
+    /// login profile's folder, a credential's collection, a folder's or
+    /// collection's parent.
     pub fn container(&self, object: ObjectId) -> Option<ObjectId> {
         match object {
             ObjectId::Folder(id) => self
@@ -154,6 +170,12 @@ impl Catalog {
                 .get(&id)
                 .copied()
                 .map(ObjectId::Collection),
+            ObjectId::Profile(id) => self
+                .profile_folder
+                .get(&id)
+                .copied()
+                .flatten()
+                .map(ObjectId::Folder),
         }
     }
 
@@ -163,7 +185,8 @@ impl Catalog {
             ObjectId::Folder(id)
             | ObjectId::Collection(id)
             | ObjectId::Device(id)
-            | ObjectId::Credential(id) => id,
+            | ObjectId::Credential(id)
+            | ObjectId::Profile(id) => id,
         })
     }
 
@@ -285,7 +308,8 @@ impl Catalog {
                 self.credential_collection
                     .keys()
                     .map(|id| ObjectId::Credential(*id)),
-            );
+            )
+            .chain(self.profile_folder.keys().map(|id| ObjectId::Profile(*id)));
         let roles: HashMap<ObjectId, Role> = objects
             .filter_map(|o| Some((o, self.effective_role(subject, o)?)))
             .collect();
@@ -303,7 +327,7 @@ impl Catalog {
                     ObjectId::Collection(id) => {
                         collections_path_only.insert(id);
                     }
-                    ObjectId::Device(_) | ObjectId::Credential(_) => {}
+                    ObjectId::Device(_) | ObjectId::Credential(_) | ObjectId::Profile(_) => {}
                 }
             }
         }

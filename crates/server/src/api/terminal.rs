@@ -200,7 +200,7 @@ async fn run(
             target.id,
             json!({
                 "protocol": "ssh", "host": target.host, "port": port, "username": username,
-                "auth_mode": target.auth_mode, "credential_id": target.credential_id,
+                "auth_mode": target.auth_mode, "profile_id": target.profile_id,
                 "purpose": purpose,
             }),
             &address,

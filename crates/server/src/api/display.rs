@@ -192,8 +192,9 @@ async fn run(
         }
     };
 
-    // 2. Credentials: from the vault, as entered, or the own account. VNC
-    // servers usually only know a password; the user name may stay empty.
+    // 2. Credentials: stored with the device or its login profile, as
+    // entered, or the own account. VNC servers usually only know a
+    // password; the user name may stay empty.
     let resolved = match own {
         Some(own) => own,
         None if target.protocol == "vnc" && target.auth_mode == "ask" => password
@@ -209,7 +210,7 @@ async fn run(
         Ok(Credentials {
             login: Login::Key(_),
             ..
-        }) => Err(Problem::new(ErrorCode::InvalidRequest).param("field", "credential_id")),
+        }) => Err(Problem::new(ErrorCode::InvalidRequest).param("field", "profile_id")),
         other => other,
     };
     let credentials = match credentials {
@@ -408,7 +409,7 @@ async fn run(
             json!({
                 "protocol": target.protocol, "host": target.host, "port": target.port,
                 "username": username, "auth_mode": target.auth_mode,
-                "credential_id": target.credential_id, "purpose": purpose,
+                "profile_id": target.profile_id, "purpose": purpose,
             }),
             &address,
         ),
@@ -646,7 +647,7 @@ mod tests {
             host: "desktop".into(),
             port: 3389,
             auth_mode: "ask".into(),
-            credential_id: None,
+            profile_id: None,
             host_key: None,
             keyboard_layout: None,
             certificate_fingerprint: None,

@@ -9,8 +9,8 @@ import { frequent, rank, type Pick } from '$lib/search/rank';
 import { totpOf } from './totp';
 import type { Entry } from './vault';
 
-/** Kinds of entries the sidebar filters by. */
-export type Kind = 'logins' | 'keys' | 'totp' | 'files';
+/** What the sidebar filters entries by. */
+export type Kind = 'totp' | 'files';
 
 /** Where the owner looks. */
 export type Scope =
@@ -123,7 +123,7 @@ export function personalItems(entries: Entry[]): Item[] {
 	return entries.flatMap((entry): Item[] => {
 		const content = entry.content;
 		if (!content || content.kind === 'folder') return [];
-		const kinds: Kind[] = ['logins'];
+		const kinds: Kind[] = [];
 		if ((content.fields ?? []).some(isTotp)) kinds.push('totp');
 		if ((content.attachments ?? []).length > 0) kinds.push('files');
 		const folder = content.parent ?? null;
@@ -148,7 +148,7 @@ export function personalItems(entries: Entry[]): Item[] {
 /** The shared credentials this user sees, as list items. */
 export function sharedItems(tree: Tree): Item[] {
 	return tree.credentials.map((credential): Item => {
-		const kinds: Kind[] = [credential.kind === 'ssh_key' ? 'keys' : 'logins'];
+		const kinds: Kind[] = [];
 		if (credential.fields.some(isTotp)) kinds.push('totp');
 		if (credential.attachments.length > 0) kinds.push('files');
 		return {

@@ -17,13 +17,9 @@ function credential(id: string, name: string, collection: string, more: Partial<
 		id,
 		collection_id: collection,
 		name,
-		kind: 'password',
 		username: 'admin',
 		domain: '',
 		version: 1,
-		key_algorithm: null,
-		key_fingerprint: null,
-		has_certificate: false,
 		url: '',
 		notes: '',
 		icon: 0,
@@ -40,6 +36,7 @@ const tree: Tree = {
 	purpose_required: false,
 	folders: [],
 	devices: [],
+	profiles: [],
 	collections: [
 		{ id: 'm', parent_id: null, name: 'Müller', role: 'edit' },
 		{ id: 'ms', parent_id: 'm', name: 'Server', role: 'edit' },
@@ -47,7 +44,7 @@ const tree: Tree = {
 	],
 	credentials: [
 		credential('c1', 'Domain admin', 'ms', { domain: 'MUELLER' }),
-		credential('c2', 'Deploy key', 'm', { kind: 'ssh_key' }),
+		credential('c2', 'Deploy portal', 'm'),
 		credential('c3', 'Office shop', 'b', {
 			fields: [{ name: 'TOTP', protected: true }],
 			attachments: [{ id: 'f', name: 'invoice.pdf', size: 10 }]
@@ -91,7 +88,7 @@ describe('the vault list', () => {
 		expect(titles({ kind: 'all' })).toEqual([
 			'Bank',
 			'Bookshop',
-			'Deploy key',
+			'Deploy portal',
 			'Domain admin',
 			'Office shop'
 		]);
@@ -105,17 +102,15 @@ describe('the vault list', () => {
 	});
 
 	it('reaches into what lies below a collection or personal folder, and no further', () => {
-		expect(titles({ kind: 'collection', id: 'm' })).toEqual(['Deploy key', 'Domain admin']);
+		expect(titles({ kind: 'collection', id: 'm' })).toEqual(['Deploy portal', 'Domain admin']);
 		expect(titles({ kind: 'collection', id: 'ms' })).toEqual(['Domain admin']);
 		expect(titles({ kind: 'personal', folder: 'shops' })).toEqual(['Bookshop']);
 		expect(titles({ kind: 'personal', folder: null })).toEqual(['Bank', 'Bookshop']);
 	});
 
 	it('filters by kind', () => {
-		expect(titles({ kind: 'filter', filter: 'keys' })).toEqual(['Deploy key']);
 		expect(titles({ kind: 'filter', filter: 'totp' })).toEqual(['Office shop']);
 		expect(titles({ kind: 'filter', filter: 'files' })).toEqual(['Office shop']);
-		expect(titles({ kind: 'filter', filter: 'logins' })).not.toContain('Deploy key');
 	});
 
 	it('searches the whole vault, whatever the scope', () => {
@@ -141,7 +136,7 @@ describe('the vault list', () => {
 			'Bank',
 			'Bookshop',
 			'Office shop',
-			'Deploy key',
+			'Deploy portal',
 			'Domain admin'
 		]);
 	});
