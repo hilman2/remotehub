@@ -92,7 +92,9 @@ export const AUDIT_ACTIONS = [
 	'vault_recovery.approved',
 	'vault_recovery.cancelled',
 	'vault_recovery.opened',
-	'vault_recovery.completed'
+	'vault_recovery.completed',
+	'extension.connected',
+	'extension.disconnected'
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

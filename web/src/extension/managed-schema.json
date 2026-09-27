@@ -1,0 +1,10 @@
+{
+	"type": "object",
+	"properties": {
+		"serverUrl": {
+			"title": "remotehub address",
+			"description": "The address of remotehub, e.g. https://remotehub.example.com. Users can no longer change it.",
+			"type": "string"
+		}
+	}
+}

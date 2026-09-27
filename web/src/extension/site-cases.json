@@ -1,0 +1,230 @@
+[
+	{
+		"login": "https://portal.example.com",
+		"page": "https://portal.example.com",
+		"matches": true,
+		"why": "the same host"
+	},
+	{
+		"login": "https://portal.example.com",
+		"page": "https://login.example.com",
+		"matches": true,
+		"why": "the same registrable domain"
+	},
+	{
+		"login": "https://example.com",
+		"page": "https://login.example.com",
+		"matches": true,
+		"why": "a subdomain of the login's domain"
+	},
+	{
+		"login": "https://portal.example.com/sign-in?next=/home#top",
+		"page": "https://login.example.com",
+		"matches": true,
+		"why": "path, query and fragment do not count"
+	},
+	{
+		"login": "https://user@portal.example.com",
+		"page": "https://portal.example.com",
+		"matches": true,
+		"why": "a user name in the URL does not count"
+	},
+	{
+		"login": "HTTPS://Portal.Example.COM/",
+		"page": "https://portal.example.com",
+		"matches": true,
+		"why": "scheme and host in any case"
+	},
+	{
+		"login": "portal.example.com",
+		"page": "https://login.example.com",
+		"matches": true,
+		"why": "a login without a scheme counts as https"
+	},
+	{
+		"login": "portal.example.com:8443",
+		"page": "https://portal.example.com:8443",
+		"matches": true,
+		"why": "a login without a scheme keeps its port"
+	},
+	{
+		"login": "portal.example.com",
+		"page": "http://portal.example.com",
+		"matches": false,
+		"why": "a login without a scheme is not plain http"
+	},
+	{
+		"login": "https://portal.example.com.",
+		"page": "https://portal.example.com",
+		"matches": true,
+		"why": "a trailing dot names the same host"
+	},
+	{
+		"login": "https://example.com",
+		"page": "https://example.com.evil.net",
+		"matches": false,
+		"why": "the login's domain at the start of another"
+	},
+	{
+		"login": "https://example.com",
+		"page": "https://evil-example.com",
+		"matches": false,
+		"why": "the login's domain at the end of another name"
+	},
+	{
+		"login": "https://example.com",
+		"page": "https://example.net",
+		"matches": false,
+		"why": "another top-level domain"
+	},
+	{
+		"login": "https://shop.example.co.uk",
+		"page": "https://login.example.co.uk",
+		"matches": true,
+		"why": "the same domain under a suffix of two labels"
+	},
+	{
+		"login": "https://example.co.uk",
+		"page": "https://other.co.uk",
+		"matches": false,
+		"why": "co.uk is a public suffix, not a shared domain"
+	},
+	{
+		"login": "https://mine.github.io",
+		"page": "https://other.github.io",
+		"matches": false,
+		"why": "github.io is a public suffix in the private section"
+	},
+	{
+		"login": "https://github.io",
+		"page": "https://evil.github.io",
+		"matches": false,
+		"why": "a public suffix matches only itself"
+	},
+	{
+		"login": "https://wiki.intranet.local",
+		"page": "https://sso.intranet.local",
+		"matches": true,
+		"why": "an unlisted top-level domain counts as a suffix of one label"
+	},
+	{
+		"login": "https://bücher.example",
+		"page": "https://xn--bcher-kva.example",
+		"matches": true,
+		"why": "international names compare in punycode"
+	},
+	{
+		"login": "https://раураl.com",
+		"page": "https://paypal.com",
+		"matches": false,
+		"why": "Cyrillic look-alike letters are another name"
+	},
+	{
+		"login": "https://portal.example.com",
+		"page": "http://portal.example.com",
+		"matches": false,
+		"why": "an https login on a plain http page"
+	},
+	{
+		"login": "http://portal.example.com",
+		"page": "https://portal.example.com",
+		"matches": false,
+		"why": "the scheme must be the same"
+	},
+	{
+		"login": "http://printer.example.com",
+		"page": "http://printer.example.com",
+		"matches": true,
+		"why": "plain http on the very same host"
+	},
+	{
+		"login": "http://printer.example.com",
+		"page": "http://other.example.com",
+		"matches": false,
+		"why": "plain http never reaches a neighbour"
+	},
+	{
+		"login": "https://portal.example.com:8443",
+		"page": "https://portal.example.com",
+		"matches": false,
+		"why": "another port"
+	},
+	{
+		"login": "https://portal.example.com:443",
+		"page": "https://login.example.com",
+		"matches": true,
+		"why": "443 is the port https names by default"
+	},
+	{
+		"login": "https://10.0.0.5",
+		"page": "https://10.0.0.5",
+		"matches": true,
+		"why": "the same IP address"
+	},
+	{
+		"login": "https://10.0.0.5",
+		"page": "https://10.0.0.6",
+		"matches": false,
+		"why": "another IP address"
+	},
+	{
+		"login": "https://10.0.0.5",
+		"page": "https://10.0.0.5:8443",
+		"matches": false,
+		"why": "the same IP address, another port"
+	},
+	{
+		"login": "https://[::1]",
+		"page": "https://[::1]",
+		"matches": true,
+		"why": "the same IPv6 address"
+	},
+	{
+		"login": "https://web-target",
+		"page": "https://web-target",
+		"matches": true,
+		"why": "a host without a dot matches itself"
+	},
+	{
+		"login": "https://web-target",
+		"page": "https://web-target:8443",
+		"matches": false,
+		"why": "a host without a dot, another port"
+	},
+	{
+		"login": "http://localhost:5180",
+		"page": "http://localhost:5180",
+		"matches": true,
+		"why": "localhost over http, the same port"
+	},
+	{
+		"login": "",
+		"page": "https://portal.example.com",
+		"matches": false,
+		"why": "a login without a URL matches no page"
+	},
+	{
+		"login": "ftp://portal.example.com",
+		"page": "https://portal.example.com",
+		"matches": false,
+		"why": "only http and https"
+	},
+	{
+		"login": "https://portal.example.com",
+		"page": "null",
+		"matches": false,
+		"why": "the opaque origin of a sandboxed frame"
+	},
+	{
+		"login": "https://portal.example.com",
+		"page": "javascript:alert(1)",
+		"matches": false,
+		"why": "no web page at all"
+	},
+	{
+		"login": "https://portal.example.com",
+		"page": "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+		"matches": false,
+		"why": "an extension's page"
+	}
+]

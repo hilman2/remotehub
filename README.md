@@ -17,6 +17,8 @@ Remote Desktop Manager) combined with a multi-user password vault in the spirit 
   being shown (`connect` and `reveal` are separate permissions).
 - Keep all other credentials in a **vault with folder permissions based on AD groups**, import existing
   **KeePass (KDBX)** databases and keep an encrypted offline copy for emergencies.
+- Fill vault logins into web pages with the **browser extension** for Edge and Chrome, which remotehub
+  serves itself: on request only, only into the pages they belong to, each fill audited.
 
 User interface in English and German from day one.
 

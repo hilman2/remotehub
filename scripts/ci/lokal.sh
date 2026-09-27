@@ -33,14 +33,17 @@ MAILPIT_IMAGE="axllent/mailpit:v1.31.2"
 CADDY_IMAGE="caddy:2.11.4"
 
 # What each part depends on (path prefixes). scripts/ci/ counts for all.
-RUST_INPUTS=(crates/ migrations/ Cargo.toml Cargo.lock rust-toolchain.toml deploy/dev/rust.Dockerfile)
+# The server's tests read the extension's cases of which pages a login belongs to (#201).
+RUST_INPUTS=(crates/ migrations/ Cargo.toml Cargo.lock rust-toolchain.toml deploy/dev/rust.Dockerfile
+  web/src/extension/site-cases.json)
 WEB_INPUTS=(web/ deploy/dev/web.Dockerfile)
 LAB_INPUTS=("${RUST_INPUTS[@]}" deploy/testlab/ deploy/guacd/ deploy/browser/ deploy/ops/caddy/)
 # The end-to-end tests check the UI most; CI_E2E=1 forces them.
-E2E_INPUTS=(web/src/ web/tests/e2e/ web/playwright.config.ts deploy/ops/kratos/ deploy/testlab/oidc/)
+E2E_INPUTS=(web/src/ web/tests/e2e/ web/playwright.config.ts web/vite.extension.config.ts deploy/ops/kratos/ deploy/testlab/oidc/)
 # The production images build a release binary; they are tried when they or
 # the ops package change, and in full runs (every commit on main, releases).
-IMAGE_INPUTS=(deploy/Dockerfile .dockerignore deploy/ops/ deploy/guacd/ deploy/browser/ deploy/connector/)
+IMAGE_INPUTS=(deploy/Dockerfile .dockerignore deploy/ops/ deploy/guacd/ deploy/browser/ deploy/connector/
+  web/scripts/pack-extension.mjs web/vite.extension.config.ts)
 
 # Files changed between the merge base with main and the commit under test.
 # Fails when everything has to run: CI_FULL=1, no merge base, or a commit
@@ -314,10 +317,11 @@ part_web() { # tools
       step svelte-check pnpm exec svelte-check --tsconfig ./tsconfig.json --fail-on-warnings
       step vitest pnpm exec vitest --run &
       step build pnpm exec vite build &
+      step extension pnpm build:extension &
       wait
 
       failed=0
-      for name in svelte-check lint vitest build; do
+      for name in svelte-check lint vitest build extension; do
         echo "── $name: $(cat "/tmp/$name.result")"
         cat "/tmp/$name.log"
         echo
@@ -393,6 +397,7 @@ part_e2e() { # tools
     -e REMOTEHUB_MASTER_KEY_FILE="${CI_SRC}/deploy/dev/master.key" \
     -e REMOTEHUB_SSH_CA_KEY_FILE="${CI_SRC}/deploy/testlab/ssh/remotehub_ca" \
     -e REMOTEHUB_WEB_DIR="${CI_SRC}/web/build" \
+    -e REMOTEHUB_EXTENSION_IDS=obnekonmlefgdhgodgbjapgoophnhlao \
     -e REMOTEHUB_KRATOS_URL=http://kratos:4433 \
     -e REMOTEHUB_KRATOS_ADMIN_URL=http://kratos:4434 \
     -e REMOTEHUB_COURIER_TOKEN=ci-courier-token \

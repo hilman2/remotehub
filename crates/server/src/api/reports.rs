@@ -288,6 +288,8 @@ pub async fn user(
     // as in `session::lookup`, so `is_admin` and `subject` decide as there.
     let mut them = Session {
         token_hash: Vec::new(),
+        id: Uuid::nil(),
+        client: "web".to_owned(),
         user_id,
         username: username.clone(),
         display_name: display_name.clone(),

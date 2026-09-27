@@ -35,7 +35,9 @@ const IDENTICAL_IN_GERMAN = new Set<string>([
 	'connectors_setup_windows_program',
 	'connectors_setup_windows_sums',
 	'access_more',
-	'access_group_own'
+	'access_group_own',
+	'extension_name',
+	'extension_unlock_passphrase'
 ]);
 
 /** Every message as text; plural and select variants as their JSON. */

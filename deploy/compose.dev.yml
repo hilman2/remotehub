@@ -85,6 +85,10 @@ services:
       REMOTEHUB_COURIER_TOKEN: dev-courier-token
       # Settings -> Certificate, with the lab's Caddy (#146).
       REMOTEHUB_CADDY_SOCKET: /run/caddy/admin.sock
+      # The browser extension built with the development key (#201,
+      # web/extension-dev-key.pem): `pnpm build:extension`, then load
+      # web/build-extension unpacked.
+      REMOTEHUB_EXTENSION_IDS: obnekonmlefgdhgodgbjapgoophnhlao
     command: >
       watchexec --poll 1000ms --restart --watch crates --watch migrations --watch Cargo.toml
       --exts rs,toml,sql,ftl -- cargo run --package remotehub-server

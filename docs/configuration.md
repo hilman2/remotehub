@@ -15,7 +15,8 @@ the setup wizard and under *Settings → Directory*.
 | `REMOTEHUB_TRUSTED_PROXIES` | – | Reverse proxies, as addresses or ranges (`10.0.0.0/8`), separated by commas. A request from one of them names its client in `X-Forwarded-For`: the right-most address there that is no trusted proxy counts, for the audit log and the limit on failed sign-ins. From anywhere else the header is ignored. The ops package sets the gateway of its network. |
 | `REMOTEHUB_CADDY_SOCKET` | – | The admin socket of Caddy of the ops package. With it, *Settings → Certificate* shows and sets the certificate Caddy serves. remotehub then expects the rest where the ops package puts it: Caddy's Caddyfile at `/run/caddy-config/Caddyfile`, the directory Caddy imports from at `/run/caddy-sites`, and Caddy itself at `caddy:443`. The ops package sets it. |
 | `REMOTEHUB_WEB_DIR` | set in the image | Directory of the built web UI. Without it the server serves only the API. |
-| `REMOTEHUB_CONNECTOR_DOWNLOADS` | set in the image | Directory with `remotehub-connector.exe`, served under `/downloads/` with its `SHA256SUMS`. Without it the connectors page links to the GitHub release. |
+| `REMOTEHUB_DOWNLOADS` | set in the image | Directory with what remotehub serves under `/downloads/`, with a `SHA256SUMS` of it: the site connector for Windows (`remotehub-connector.exe`), and the browser extension as `remotehub-extension.zip` and, signed, `remotehub-extension.crx` with `remotehub-extension.json`, from which remotehub writes the update manifest `remotehub-extension.xml`. Without the connector the connectors page links to the GitHub release. |
+| `REMOTEHUB_EXTENSION_IDS` | – | IDs of browser extensions that may connect besides the one in `REMOTEHUB_DOWNLOADS`, separated by commas: builds of your own. |
 | `REMOTEHUB_LOG_FORMAT` | `text` | `text` or `json` (one JSON object per line). |
 | `RUST_LOG` | `info` | Log levels, e.g. `info,remotehub_server=debug`. |
 

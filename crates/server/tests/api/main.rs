@@ -19,6 +19,7 @@ mod connectors;
 mod directory;
 mod display;
 mod downloads;
+mod extension;
 mod generated;
 mod generator;
 mod groups;

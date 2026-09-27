@@ -1,9 +1,14 @@
-# Production image of remotehub: the server binary, the built web UI and the
-# site connector for Windows it serves (#188), nothing else. No shell, no
-# package manager; runs as the unprivileged user 65532 and needs no writable
-# file system. Build from the repository root:
+# Production image of remotehub: the server binary, the built web UI, and
+# what it serves under /downloads: the site connector for Windows (#188) and
+# the browser extension (#201). Nothing else: no shell, no package manager;
+# runs as the unprivileged user 65532 and needs no writable file system.
+# Build from the repository root:
 #
 #   docker build -f deploy/Dockerfile --build-arg VERSION=0.1.0 -t remotehub .
+#
+# The extension is signed with the key given as the secret `extension_key`
+# (release.sh: --secret id=extension_key,src=<PEM file>); without it, with
+# the development key in web/, whose ID only development and the CI allow.
 #
 # The ops package (deploy/ops) runs it with PostgreSQL and guacd.
 
@@ -18,6 +23,11 @@ COPY web/ ./
 # SvelteKit's version name: fixed per release instead of a timestamp (#49).
 ARG VERSION
 RUN REMOTEHUB_WEB_VERSION="${VERSION}" pnpm build
+# After the UI's build, which compiled the messages the extension uses too.
+RUN --mount=type=secret,id=extension_key \
+    if [ -s /run/secrets/extension_key ]; then export REMOTEHUB_EXTENSION_KEY=/run/secrets/extension_key; fi \
+ && REMOTEHUB_EXTENSION_VERSION="${VERSION}" pnpm build:extension \
+ && node scripts/pack-extension.mjs build-extension /downloads
 
 # Keep in sync with rust-toolchain.toml (the CI job `base` checks it).
 FROM rust:1.98.1-trixie AS server
@@ -50,9 +60,10 @@ LABEL org.opencontainers.image.title="remotehub" \
 COPY --from=server /remotehub /usr/local/bin/remotehub
 COPY --from=web /web/build /usr/share/remotehub/web
 # The release publishes this very file, taken from the image (release.sh).
-COPY --from=server /remotehub-connector.exe /usr/share/remotehub/connector/remotehub-connector.exe
+COPY --from=server /remotehub-connector.exe /usr/share/remotehub/downloads/remotehub-connector.exe
+COPY --from=web /downloads/ /usr/share/remotehub/downloads/
 ENV REMOTEHUB_WEB_DIR=/usr/share/remotehub/web \
-    REMOTEHUB_CONNECTOR_DOWNLOADS=/usr/share/remotehub/connector
+    REMOTEHUB_DOWNLOADS=/usr/share/remotehub/downloads
 USER 65532:65532
 EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=6s --start-period=60s --retries=3 \

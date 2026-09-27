@@ -43,8 +43,12 @@ pub struct Config {
     pub database_password: Option<SecretString>,
     /// Built SPA (web/build) to serve; in development Vite serves the UI.
     pub web_dir: Option<PathBuf>,
-    /// Directory with `remotehub-connector.exe` to serve (#188).
-    pub connector_downloads: Option<PathBuf>,
+    /// Directory with the site connector for Windows (#188) and the browser
+    /// extension (#201) to serve under `/downloads/`.
+    pub downloads: Option<PathBuf>,
+    /// IDs of browser extensions allowed to connect besides the one in
+    /// `downloads` (#201): builds of your own, and the development build.
+    pub extension_ids: Vec<String>,
     /// Log as JSON lines instead of human-readable text.
     pub log_json: bool,
     /// Origin under which people open remotehub (`https://remotehub.example.com`).
@@ -123,7 +127,20 @@ impl Config {
         let listen = listen_address(&lookup)?;
         let (database_url, database_password) = database(&lookup)?;
         let web_dir = setting("REMOTEHUB_WEB_DIR")?.map(PathBuf::from);
-        let connector_downloads = setting("REMOTEHUB_CONNECTOR_DOWNLOADS")?.map(PathBuf::from);
+        let downloads = setting("REMOTEHUB_DOWNLOADS")?.map(PathBuf::from);
+        let extension_ids = setting("REMOTEHUB_EXTENSION_IDS")?
+            .map(|list| {
+                list.split([',', ' '])
+                    .filter(|entry| !entry.is_empty())
+                    .map(|entry| {
+                        crate::downloads::is_extension_id(entry)
+                            .then(|| entry.to_owned())
+                            .ok_or_else(|| invalid("REMOTEHUB_EXTENSION_IDS", entry))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
 
         let log_json = match setting("REMOTEHUB_LOG_FORMAT")?.as_deref() {
             None | Some("text") => false,
@@ -247,7 +264,8 @@ impl Config {
             database_url,
             database_password,
             web_dir,
-            connector_downloads,
+            downloads,
+            extension_ids,
             log_json,
             public_origin,
             session,
@@ -343,7 +361,8 @@ impl fmt::Debug for Config {
             .field("database_url", &"<redacted>")
             .field("database_password", &"<redacted>")
             .field("web_dir", &self.web_dir)
-            .field("connector_downloads", &self.connector_downloads)
+            .field("downloads", &self.downloads)
+            .field("extension_ids", &self.extension_ids)
             .field("log_json", &self.log_json)
             .field("public_origin", &self.public_origin)
             .field("session", &self.session)
@@ -443,6 +462,41 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn lists_extension_ids() {
+        assert!(
+            Config::from_lookup(lookup(&[]))
+                .unwrap()
+                .extension_ids
+                .is_empty()
+        );
+        let config = Config::from_lookup(lookup(&[(
+            "REMOTEHUB_EXTENSION_IDS",
+            "abcdefghijklmnopabcdefghijklmnop, ponmlkjihgfedcbaponmlkjihgfedcba",
+        )]))
+        .unwrap();
+        assert_eq!(
+            config.extension_ids,
+            [
+                "abcdefghijklmnopabcdefghijklmnop",
+                "ponmlkjihgfedcbaponmlkjihgfedcba"
+            ]
+        );
+        // Chromium's IDs are 32 letters from a to p; anything else would
+        // put a foreign host into the redirect.
+        for wrong in [
+            "abcdefghijklmnopabcdefghijklmnoq",
+            "abcdefghijklmnop",
+            "evil.example/abcdefghijklmnopabc",
+        ] {
+            assert_eq!(
+                Config::from_lookup(lookup(&[("REMOTEHUB_EXTENSION_IDS", wrong)])).unwrap_err(),
+                invalid("REMOTEHUB_EXTENSION_IDS", wrong),
+                "{wrong}"
+            );
+        }
     }
 
     #[test]
