@@ -52,6 +52,18 @@ export const loadVersions = (id: string) =>
 export const attachmentUrl = (credential: string, attachment: string) =>
 	`/api/credentials/${credential}/attachments/${attachment}`;
 
+/** A credential's file for the vault's viewer (#200), recorded as viewed; null if refused. */
+export async function viewAttachment(credential: string, attachment: string) {
+	try {
+		const response = await fetch(`${attachmentUrl(credential, attachment)}?purpose=view`, {
+			credentials: 'same-origin'
+		});
+		return response.ok ? await response.blob() : null;
+	} catch {
+		return null;
+	}
+}
+
 /** Sends a file as it is; one of the same name is replaced. */
 export async function uploadAttachment(
 	credential: string,

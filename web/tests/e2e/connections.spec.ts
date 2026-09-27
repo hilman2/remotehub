@@ -311,17 +311,38 @@ test('a shared credential keeps files and its earlier passwords', async ({ page 
 	await newCredential(page, credential, async (form) => {
 		await form.getByLabel('Password', { exact: true }).fill('Old-Passw0rd!');
 		await form.getByRole('tab', { name: 'Advanced' }).click();
-		await form.locator('input[type=file]').setInputFiles({
-			name: 'vpn.ovpn',
-			mimeType: 'text/plain',
-			buffer: Buffer.from('remote vpn.example.com')
-		});
+		await form.locator('input[type=file]').setInputFiles([
+			{
+				name: 'vpn.ovpn',
+				mimeType: 'text/plain',
+				buffer: Buffer.from('remote vpn.example.com')
+			},
+			{
+				// One red pixel.
+				name: 'badge.png',
+				mimeType: 'image/png',
+				buffer: Buffer.from(
+					'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==',
+					'base64'
+				)
+			}
+		]);
 	});
 
+	// Files are shown in the page (#200): text as text, an image as an image.
+	const pane = details(page);
+	await pane.getByRole('button', { name: /^vpn\.ovpn/ }).click();
+	await expect(dialog.getByTestId('file-text')).toHaveText('remote vpn.example.com');
+	await page.keyboard.press('Escape');
+	await pane.getByRole('button', { name: /^badge\.png/ }).click();
+	const image = dialog.getByTestId('file-image');
+	await expect(image).toBeVisible();
+	expect(await image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
+	await page.keyboard.press('Escape');
+
+	// A download stays possible, on purpose.
 	const downloading = page.waitForEvent('download');
-	await details(page)
-		.getByRole('link', { name: /vpn\.ovpn/ })
-		.click();
+	await pane.getByRole('button', { name: 'Download vpn.ovpn' }).click();
 	const download = await downloading;
 	expect(download.suggestedFilename()).toBe('vpn.ovpn');
 
@@ -480,9 +501,12 @@ test('vault entries keep files, earlier passwords and show TOTP codes', async ({
 	await expect(dialog.getByTestId('earlier-password')).toHaveText('First-Pass!');
 	await page.keyboard.press('Escape');
 
-	// The file comes back as it went in, opened in the browser.
+	// The file comes back as it went in, opened in the browser: shown, and
+	// from the viewer downloaded.
+	await pane.getByRole('button', { name: /^backup-codes\.txt/ }).click();
+	await expect(dialog.getByTestId('file-text')).toHaveText('11111 22222');
 	const downloading = page.waitForEvent('download');
-	await pane.getByRole('button', { name: /backup-codes\.txt/ }).click();
+	await dialog.getByRole('button', { name: 'Download', exact: true }).click();
 	const download = await downloading;
 	const chunks: Buffer[] = [];
 	for await (const chunk of await download.createReadStream()) chunks.push(chunk as Buffer);

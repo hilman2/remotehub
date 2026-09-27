@@ -161,7 +161,9 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   vault exports what the browser has already opened.
 - **Files and history (`api/attachments.rs`, `api/reveal.rs`):** a credential's files are sealed under
   their own ID (field `content`), at most 5 MiB each; downloading one needs `reveal` and is audited like a
-  reveal. Every sealed version of a credential stays, and `reveal` opens an older one by number. Personal
+  reveal. The vault shows text, images and PDF in the page instead (#200, `web/src/lib/vault/preview.ts`),
+  judged by their first bytes, never by a claimed type: HTML shows as text, SVG only as an image. A shared
+  file viewed so is audited with the purpose `view`. Every sealed version of a credential stays, and `reveal` opens an older one by number. Personal
   entries keep up to ten earlier states inside their sealed content, and their files are sealed in the
   browser under an associated data of their own (`…\nfile\n<id>`), so a file never opens as an entry.
 - **Password generator (`web/src/lib/vault/generate.ts`, `api/generator.rs`):** the browser makes

@@ -3,8 +3,9 @@
 //!
 //! - `POST /api/credentials/{id}/attachments?name=…`: the body is the file;
 //!   a file of the same name is replaced. Needs `edit`.
-//! - `GET /api/credentials/{id}/attachments/{attachment}`: the file, with
-//!   `reveal`, audited like every reveal.
+//! - `GET /api/credentials/{id}/attachments/{attachment}?purpose=…`: the
+//!   file, with `reveal`, audited like every reveal: `download` (the
+//!   default) or `view`, when the vault shows it in the page (#200).
 //! - `DELETE /api/credentials/{id}/attachments/{attachment}`: needs `edit`.
 
 use axum::body::Bytes;
@@ -31,6 +32,11 @@ const FIELD: &str = "content";
 #[derive(Deserialize)]
 pub struct Upload {
     name: String,
+}
+
+#[derive(Deserialize)]
+pub struct Fetch {
+    purpose: Option<String>,
 }
 
 fn sealed(error: secrets::SecretError) -> Problem {
@@ -124,7 +130,13 @@ pub async fn download(
     session: Session,
     ClientAddress(address): ClientAddress,
     Path((id, attachment)): Path<(Uuid, Uuid)>,
+    Query(fetch): Query<Fetch>,
 ) -> Result<impl IntoResponse, Problem> {
+    let purpose = match fetch.purpose.as_deref() {
+        None | Some("download") => "download",
+        Some("view") => "view",
+        Some(_) => return Err(invalid("purpose")),
+    };
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Reveal, ObjectId::Credential(id))?;
     let name: String = sqlx::query_scalar(
@@ -145,12 +157,13 @@ pub async fn download(
             &session,
             Action::CredentialRevealed,
             ObjectId::Credential(id),
-            json!({ "purpose": "download", "attachment": name }),
+            json!({ "purpose": purpose, "attachment": name }),
             &address,
         ),
     )
     .await?;
-    // Never shown in the page's origin: always a download.
+    // Never shown in the page's origin as it is: always a download. The
+    // vault's viewer fetches it and decides itself what it may show.
     let disposition = format!("attachment; filename*=UTF-8''{}", percent_encode(&name));
     Ok((
         [

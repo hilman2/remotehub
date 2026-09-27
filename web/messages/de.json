@@ -1040,5 +1040,13 @@
 	"generator_own_active": "Ihre eigene Vorgabe gilt.",
 	"generator_use_organisation": "Vorgabe der Organisation verwenden",
 	"generator_saved": "Gespeichert.",
-	"audit_generator_changed": "Vorgabe des Passwortgenerators geändert"
+	"audit_generator_changed": "Vorgabe des Passwortgenerators geändert",
+	"viewer_show_file": "{name} anzeigen",
+	"viewer_download_file": "{name} herunterladen",
+	"viewer_loading": "Die Datei wird geöffnet …",
+	"viewer_failed": "Die Datei ließ sich nicht öffnen.",
+	"viewer_none": "Diese Art Datei kann hier nicht angezeigt werden. Laden Sie sie herunter, um sie mit einem anderen Programm zu öffnen.",
+	"viewer_truncated": "Nur die ersten {count} Zeichen werden angezeigt.",
+	"viewer_download": "Herunterladen",
+	"viewer_download_hint": "Eine heruntergeladene Datei liegt unverschlüsselt auf diesem Rechner."
 }

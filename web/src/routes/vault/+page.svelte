@@ -906,7 +906,9 @@
 				];
 
 	function onkeydown(event: KeyboardEvent) {
-		if (dialogOpen || menu) return;
+		const target = event.target as HTMLElement | null;
+		// A dialog of the entry pane, the file viewer say, is none of this page's.
+		if (dialogOpen || menu || target?.closest('dialog')) return;
 		const mod = event.ctrlKey || event.metaKey;
 		const letter = event.key.toLowerCase();
 		if (mod && letter === 'f') {
@@ -914,7 +916,6 @@
 			search?.focus();
 			return;
 		}
-		const target = event.target as HTMLElement | null;
 		if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
 		if (mod && letter === 'l') {
 			event.preventDefault();
@@ -1671,6 +1672,7 @@
 								credential: current.credential,
 								role: current.credential.role
 							})}
+						onread={(ref) => (key ? readFile(key, ref) : Promise.resolve(null))}
 						ondownload={download}
 					/>
 				{/if}

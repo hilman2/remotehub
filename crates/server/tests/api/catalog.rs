@@ -1099,10 +1099,14 @@ async fn files_are_sealed_with_a_credential_and_downloaded_with_reveal(pool: PgP
         "connect",
     )
     .await;
-    assert_eq!(
-        call(&f.app, &bob, "GET", &uri, None).await.status,
-        StatusCode::FORBIDDEN
-    );
+    let view = format!("{uri}?purpose=view");
+    for target in [&uri, &view] {
+        assert_eq!(
+            call(&f.app, &bob, "GET", target, None).await.status,
+            StatusCode::FORBIDDEN,
+            "{target}"
+        );
+    }
     let refused = send(&f.app, upload(&id, "x.txt", b"x".to_vec(), &bob)).await;
     assert_eq!(refused.status, StatusCode::FORBIDDEN);
     grant(
@@ -1124,6 +1128,14 @@ async fn files_are_sealed_with_a_credential_and_downloaded_with_reveal(pool: PgP
         "attachment; filename*=UTF-8''cert.pem"
     );
     assert_eq!(got.headers["cache-control"], "no-store");
+    // The vault's viewer (#200) gets the same answer; only the audit log
+    // tells the two apart.
+    let viewed = call(&f.app, &bob, "GET", &view, None).await;
+    assert_eq!(viewed.status, StatusCode::OK);
+    assert_eq!(viewed.body, b"-----NEWER-----!");
+    assert_eq!(viewed.headers["content-type"], "application/octet-stream");
+    let odd = call(&f.app, &bob, "GET", &format!("{uri}?purpose=print"), None).await;
+    assert_eq!(odd.json()["params"]["field"], "purpose");
 
     let big = send(
         &f.app,
@@ -1175,10 +1187,15 @@ async fn files_are_sealed_with_a_credential_and_downloaded_with_reveal(pool: PgP
         .iter()
         .map(|e| (e["action"].as_str().unwrap(), &e["details"]))
         .collect();
-    assert!(actions.contains(&(
-        "credential.revealed",
-        &json!({ "purpose": "download", "attachment": "cert.pem" })
-    )));
+    for purpose in ["download", "view"] {
+        assert!(
+            actions.contains(&(
+                "credential.revealed",
+                &json!({ "purpose": purpose, "attachment": "cert.pem" })
+            )),
+            "{purpose}"
+        );
+    }
     assert!(
         actions
             .iter()

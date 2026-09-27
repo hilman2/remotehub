@@ -7,12 +7,15 @@
 		open = $bindable(false),
 		title,
 		wide = false,
+		large = false,
 		children
 	}: {
 		open: boolean;
 		title: string;
 		/** Room for commands and other long lines. */
 		wide?: boolean;
+		/** Room for a document or an image shown in it. */
+		large?: boolean;
 		children: Snippet;
 	} = $props();
 
@@ -28,9 +31,11 @@
 <dialog
 	bind:this={dialog}
 	onclose={() => (open = false)}
-	class="m-auto w-full rounded-card border border-line bg-surface p-0 text-ink shadow-float backdrop:bg-black/40 {wide
-		? 'max-w-3xl'
-		: 'max-w-lg'}"
+	class="m-auto w-full rounded-card border border-line bg-surface p-0 text-ink shadow-float backdrop:bg-black/40 {large
+		? 'max-w-6xl'
+		: wide
+			? 'max-w-3xl'
+			: 'max-w-lg'}"
 >
 	<div class="flex items-center justify-between border-b border-line px-5 py-3">
 		<h2 class="font-semibold">{title}</h2>
