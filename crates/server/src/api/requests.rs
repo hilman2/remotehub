@@ -248,8 +248,9 @@ fn columns(object: ObjectId) -> (Option<Uuid>, Option<Uuid>, Option<Uuid>) {
         ObjectId::Folder(id) => (Some(id), None, None),
         ObjectId::Device(id) => (None, Some(id), None),
         ObjectId::Credential(id) => (None, None, Some(id)),
-        // Refused before: requests name no collection.
-        ObjectId::Collection(_) => (None, None, None),
+        // Refused before: requests name no collection, and `object` never
+        // reads a login profile.
+        ObjectId::Collection(_) | ObjectId::Profile(_) => (None, None, None),
     }
 }
 

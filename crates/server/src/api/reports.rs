@@ -76,6 +76,9 @@ impl Names {
         let credentials: Vec<(Uuid, String)> = sqlx::query_as("SELECT id, name FROM credentials")
             .fetch_all(&state.db)
             .await?;
+        let profiles: Vec<(Uuid, String)> = sqlx::query_as("SELECT id, name FROM login_profiles")
+            .fetch_all(&state.db)
+            .await?;
         let objects = folders
             .iter()
             .map(|(id, _, name)| (ObjectId::Folder(*id), name.clone()))
@@ -89,6 +92,11 @@ impl Names {
                 credentials
                     .into_iter()
                     .map(|(id, n)| (ObjectId::Credential(id), n)),
+            )
+            .chain(
+                profiles
+                    .into_iter()
+                    .map(|(id, n)| (ObjectId::Profile(id), n)),
             )
             .collect();
         let tree = |rows: Vec<(Uuid, Option<Uuid>, String)>| {

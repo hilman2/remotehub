@@ -18,7 +18,7 @@ export interface Revealed {
 export type RevealPurpose = 'show' | 'copy' | 'export';
 
 export const reveal = (
-	owner: 'credentials' | 'devices',
+	owner: 'credentials' | 'devices' | 'profiles',
 	id: string,
 	purpose: RevealPurpose,
 	version?: number

@@ -25,6 +25,7 @@ mod http;
 mod journal;
 mod mail;
 mod personal;
+mod profiles;
 mod recovery;
 mod refresh;
 mod reports;

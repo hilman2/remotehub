@@ -1,8 +1,7 @@
 <script lang="ts">
-	import type { Credential, CredentialInput, CredentialKind } from '$lib/api/catalog';
+	import type { Credential, CredentialInput } from '$lib/api/catalog';
 	import { untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages';
-	import { CREDENTIAL_KIND_LABELS } from './labels';
 	import FieldsEditor, { type EditedField } from '$lib/vault/FieldsEditor.svelte';
 	import IconPicker from '$lib/vault/IconPicker.svelte';
 	import SecretFields, { secretInput } from './SecretFields.svelte';
@@ -26,13 +25,9 @@
 	const start = untrack(() => $state.snapshot(credential));
 	let collection = $state(untrack(() => start?.collection_id ?? collectionId));
 	let name = $state(start?.name ?? '');
-	let kind = $state<CredentialKind>(start?.kind ?? 'password');
 	let username = $state(start?.username ?? '');
 	let domain = $state(start?.domain ?? '');
 	let password = $state('');
-	let privateKey = $state('');
-	let passphrase = $state('');
-	let certificate = $state('');
 	let url = $state(start?.url ?? '');
 	let notes = $state(start?.notes ?? '');
 	let icon = $state(start?.icon ?? 0);
@@ -62,14 +57,17 @@
 					: { name: field.name, protected: field.protected, value: field.value }
 			)
 		};
-		if (!start) input.kind = kind;
-		// Updating without new secrets keeps the stored ones.
+		// Updating without a new password keeps the stored one.
 		Object.assign(
 			input,
-			secretInput(kind, !!start, { password, privateKey, passphrase, certificate })
+			secretInput('password', !!start, {
+				password,
+				privateKey: '',
+				passphrase: '',
+				certificate: ''
+			})
 		);
-		// The key stays for a retry with another passphrase.
-		password = passphrase = '';
+		password = '';
 		onsubmit(input);
 	}
 
@@ -85,13 +83,6 @@
 	<select id="credential-collection" class={field} required bind:value={collection}>
 		{#each places as place (place.id)}
 			<option value={place.id}>{place.path}</option>
-		{/each}
-	</select>
-
-	<label class={label} for="credential-kind">{m.credential_kind()}</label>
-	<select id="credential-kind" class={field} disabled={!!start} bind:value={kind}>
-		{#each Object.entries(CREDENTIAL_KIND_LABELS) as [value, text] (value)}
-			<option {value}>{text()}</option>
 		{/each}
 	</select>
 
@@ -118,15 +109,7 @@
 		</div>
 	</div>
 
-	<SecretFields
-		id="credential"
-		{kind}
-		keep={!!start}
-		bind:password
-		bind:privateKey
-		bind:passphrase
-		bind:certificate
-	/>
+	<SecretFields id="credential" kind="password" keep={!!start} bind:password />
 
 	<label class={label} for="credential-url">{m.field_url()}</label>
 	<input id="credential-url" class={field} maxlength="2000" spellcheck="false" bind:value={url} />

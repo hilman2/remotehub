@@ -279,6 +279,40 @@ pub async fn collection(app: &Router, token: &str, parent: Option<&str>, name: &
     response.json()["id"].as_str().unwrap().to_owned()
 }
 
+/// A login profile (#192) created by `token`'s user: in `folder`, or at the
+/// top level without one (administrators only). `extra` is merged into the
+/// body and carries the login, e.g. `{"username": "root", "password": "…"}`
+/// or `{"secret_kind": "ssh_key", "private_key": …}`. Returns its id.
+pub async fn profile(
+    app: &Router,
+    token: &str,
+    folder: Option<&str>,
+    name: &str,
+    extra: Value,
+) -> String {
+    let mut body = serde_json::json!({ "folder_id": folder, "name": name });
+    body.as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    let response = send(app, authed("POST", "/api/profiles", Some(body), token)).await;
+    assert_eq!(
+        response.status,
+        StatusCode::CREATED,
+        "profile {name}: {}",
+        response.json()
+    );
+    response.json()["id"].as_str().unwrap().to_owned()
+}
+
+/// A file of the lab's SSH target (deploy/testlab/ssh): its keys and
+/// certificates.
+pub fn lab_key(file: &str) -> String {
+    let dir = std::path::PathBuf::from(
+        std::env::var("CARGO_MANIFEST_DIR").expect("set by cargo and nextest"),
+    );
+    std::fs::read_to_string(dir.join("../../deploy/testlab/ssh").join(file)).unwrap()
+}
+
 /// A request as a signed-in browser sends it: session cookie, own origin,
 /// JSON body if given.
 pub fn authed(method: &str, uri: &str, body: Option<Value>, token: &str) -> Request<Body> {

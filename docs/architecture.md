@@ -54,12 +54,13 @@ Crates are created with the issue that first needs them.
 1. The user clicks a device. The UI opens a WebSocket to `/api/sessions/{device}`.
 2. The server checks the session cookie and calls `authorize(user, Connect, device)`.
 3. It resolves the credentials according to the device's mode:
-   - **stored** — decrypted from the vault on the server (`connect` suffices, `reveal` is not needed);
+   - **login profile** or the **device's own credentials** — decrypted on the server (`connect`
+     suffices, `reveal` is not needed);
    - **ask** — entered by the user for this connection, never stored;
    - **own AD account** — the sign-in password, kept encrypted with a key that only the user's cookie holds.
 4. The server starts the engine:
    - **SSH:** russh connects, verifies the pinned host key, authenticates, opens a PTY. Only terminal
-     bytes and resize events cross the WebSocket; xterm.js renders them. A stored credential is a
+     bytes and resize events cross the WebSocket; xterm.js renders them. A stored login is a
      password or an SSH key (OpenSSH or PEM, optionally with passphrase and OpenSSH user certificate); a
      key is parsed and matched to its certificate before it is sealed, and shown only by fingerprint.
    - **RDP/VNC:** the server opens a TCP connection to guacd, performs the Guacamole handshake
@@ -141,10 +142,11 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   only via `remotehub break-glass …`, which prints password and TOTP secret once. The TOTP secret is sealed
   in the vault. They sign in at `/sign-in/break-glass`, work when AD is down, are administrators, and every
   attempt is audited with `break_glass: true`; the UI shows a red banner during such a session.
-- **Permissions:** a folder tree holds devices, a tree of collections holds the shared credentials
-  (ADR 0014). A grant gives a group or a user a role on a folder, a collection or an entry:
-  `list < connect < reveal < edit < manage`. Grants are inherited downwards within their own tree and
-  only allow. `authorize()` is the single decision point and is tested table-driven.
+- **Permissions:** a folder tree holds devices and their login profiles, a tree of collections holds the
+  vault's shared credentials (ADRs 0014, 0015). A grant gives a group or a user a role on a folder, a
+  collection or an entry: `list < connect < reveal < edit < manage`. Grants are inherited downwards within
+  their own tree and only allow; a login profile takes none of its own and has its folder's. `authorize()`
+  is the single decision point and is tested table-driven.
 - **KeePass fields (`api/fields.rs`):** credentials carry URL, notes, one of KeePass' 69 standard icons
   (by number; the UI draws a Lucide icon for each) and custom fields. Plain fields are stored with the
   credential; protected ones are sealed as `field:<name>` with the credential's version. A change of a
@@ -162,8 +164,8 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   entries keep up to ten earlier states inside their sealed content, and their files are sealed in the
   browser under an associated data of their own (`…\nfile\n<id>`), so a file never opens as an entry. The
   browser makes passwords (Web Crypto, no look-alikes) and shows TOTP codes of `otpauth://` fields.
-- **Reveal (`api/reveal.rs`):** with `reveal`, a stored credential or a device's own credentials are shown
-  or copied on their page. Each time is audited (`credential.revealed`, with `show` or `copy`) before the
+- **Reveal (`api/reveal.rs`):** with `reveal`, a vault credential, a login profile or a device's own
+  credentials are shown or copied on their page. Each time is audited (`credential.revealed`, with `show` or `copy`) before the
   value leaves the server, and the answer is `no-store`. The UI hides a shown value and clears a copied
   one from the clipboard after 30 seconds.
 - **Just-in-time access:** someone who sees an object asks for `connect` or `reveal` on it for up to a day,
@@ -171,9 +173,13 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   decides their own request. An approval becomes a user grant with `expires_at`, and the catalog, built
   with the database's `now`, drops it once it has run out; open sessions keep running. Every step is
   audited (`access.*`).
-- **Stored credentials only go where their users may send them:** linking a credential to a device, or
-  changing protocol, host or port of a device that has one, needs `connect` on that credential. Otherwise
-  anyone with `edit` on a device could point it at their own server and capture the password. A device's
+- **Login profiles (`api/profiles.rs`, ADR 0015):** a login many devices share, a password or an SSH key,
+  sealed with the profile as owner. It lies in a device folder, and only devices in that folder or below
+  may use it (`in_reach`, SQL `folder_within`); a move of a folder or a profile that would leave a device
+  outside is refused. A key profile is for SSH devices only.
+- **Stored logins only go where their users may send them:** linking a login profile to a device, or
+  changing protocol, host, port or connector of a device that has one, needs `connect` on that profile.
+  Otherwise anyone with `edit` on a device could point it at their own server and capture the password. A device's
   own credentials (sign-in mode `device`, password sealed with the device as owner) go to another target,
   connector included, with whoever may `reveal` them, which `edit` includes; the audit entry of the change
   marks it (`secret_kept`, #174). Anyone else enters the password again.
@@ -202,8 +208,9 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   ciphertext and wrapped keys for their owner only (`api/personal.rs`); nobody, the operator included, can
   reset the passphrase.
 - **Collections** (ADR 0014, `api/collections.rs`): shared credentials lie in a tree of their own, apart
-  from the device folders. `/vault` lists them together with the personal entries, which need the personal
-  vault unlocked; the shared ones do not (`web/src/lib/vault/items.ts`).
+  from the device folders, and no device uses them (ADR 0015). `/vault` lists them together with the
+  personal entries, which need the personal vault unlocked; the shared ones do not
+  (`web/src/lib/vault/items.ts`).
 - **Organisation recovery key** (ADR 0009, `api/recovery.rs`, `/recovery`): the browser also wraps each
   vault key for the organisation's public key (ECDH P-256, HKDF, AES-KW), as an unlock of kind
   `organisation` the owner cannot remove. An administrator asks for a recovery, a security officer who
@@ -251,7 +258,8 @@ The browser never talks to a target or to guacd, and never receives a stored pas
 | VNC | guacd 1.6 | Guacamole JS client | `.guac` on the server |
 | HTTPS | Chromium in the browser service, shown through guacd as VNC | Guacamole JS client | `.guac` on the server |
 
-- SSH signs in with a stored password or key, asked credentials, the own account, or a certificate from
+- SSH signs in with a password or key of the device or its login profile, asked credentials, the own
+  account, or a certificate from
   remotehub's own CA (`crates/gateway/src/ssh_ca.rs`): a fresh Ed25519 key per connection, signed for the
   user's name as principal and valid for five minutes. Targets trust the CA's public key
   (`/api/ssh-ca.pub`); the CA key is a file like the master key.

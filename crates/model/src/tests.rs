@@ -1,16 +1,18 @@
 //! Table-driven tests for `authorize()`.
 //!
-//! Trees and grants, folders with devices and collections with credentials
-//! (#190):
+//! Trees and grants, folders with devices and login profiles (#192),
+//! collections with credentials (#190):
 //!
 //! ```text
 //! Servers            ops: connect         Shared           ops: connect
 //! ├── Linux          linux: edit          ├── Linux keys   linux: edit
-//! │   └── web01      (device)             │   └── root-pw  alice: reveal
-//! └── Windows                             └── Windows keys
-//!     └── dc01       helpdesk: list           └── da-pw
+//! │   ├── web01      (device)             │   └── root-pw  alice: reveal
+//! │   └── linux-root (profile)            └── Windows keys
+//! └── Windows                                 └── da-pw
+//!     └── dc01       helpdesk: list
 //! Network            net: manage
 //! └── switch01       (device)
+//! local-admin        (profile at the top)
 //! ```
 
 use super::*;
@@ -27,6 +29,8 @@ const DC01: Uuid = Uuid::from_u128(12);
 const SWITCH01: Uuid = Uuid::from_u128(13);
 const ROOT_PW: Uuid = Uuid::from_u128(21);
 const DA_PW: Uuid = Uuid::from_u128(22);
+const LINUX_ROOT: Uuid = Uuid::from_u128(31);
+const LOCAL_ADMIN: Uuid = Uuid::from_u128(32);
 
 /// The catalogs' "now", in Unix seconds.
 const NOW: i64 = 1_800_000_000;
@@ -42,19 +46,22 @@ fn grant(object: ObjectId, principal: &str, role: Role) -> Grant {
 
 fn catalog() -> Catalog {
     Catalog::new(
-        [
-            (SERVERS, None),
-            (LINUX, Some(SERVERS)),
-            (WINDOWS, Some(SERVERS)),
-            (NETWORK, None),
-        ],
-        [
-            (SHARED, None),
-            (LINUX_KEYS, Some(SHARED)),
-            (WINDOWS_KEYS, Some(SHARED)),
-        ],
-        [(WEB01, LINUX), (DC01, WINDOWS), (SWITCH01, NETWORK)],
-        [(ROOT_PW, LINUX_KEYS), (DA_PW, WINDOWS_KEYS)],
+        Objects {
+            folders: vec![
+                (SERVERS, None),
+                (LINUX, Some(SERVERS)),
+                (WINDOWS, Some(SERVERS)),
+                (NETWORK, None),
+            ],
+            collections: vec![
+                (SHARED, None),
+                (LINUX_KEYS, Some(SHARED)),
+                (WINDOWS_KEYS, Some(SHARED)),
+            ],
+            devices: vec![(WEB01, LINUX), (DC01, WINDOWS), (SWITCH01, NETWORK)],
+            credentials: vec![(ROOT_PW, LINUX_KEYS), (DA_PW, WINDOWS_KEYS)],
+            profiles: vec![(LINUX_ROOT, Some(LINUX)), (LOCAL_ADMIN, None)],
+        },
         [
             grant(ObjectId::Folder(SERVERS), "S-ops", Role::Connect),
             grant(ObjectId::Folder(LINUX), "S-linux", Role::Edit),
@@ -82,7 +89,7 @@ fn admin() -> Subject {
     }
 }
 
-use ObjectId::{Collection, Credential, Device, Folder};
+use ObjectId::{Collection, Credential, Device, Folder, Profile};
 
 #[test]
 fn effective_roles() {
@@ -124,6 +131,13 @@ fn effective_roles() {
         ("ops on Linux keys",     &ops, Collection(LINUX_KEYS),  Some(Role::Connect)),
         ("net on da-pw",          &net, Credential(DA_PW),       None),
         ("helpdesk on Shared",    &helpdesk, Collection(SHARED), None),
+        // A login profile has its folder's grants (#192); one at the top
+        // has none, only administrators reach it.
+        ("ops on linux-root",     &ops, Profile(LINUX_ROOT),       Some(Role::Connect)),
+        ("linux+ops on linux-root", &linux_ops, Profile(LINUX_ROOT), Some(Role::Edit)),
+        ("helpdesk on linux-root", &helpdesk, Profile(LINUX_ROOT), None),
+        ("net on local-admin",    &net, Profile(LOCAL_ADMIN),      None),
+        ("admin on local-admin",  &admin, Profile(LOCAL_ADMIN),    Some(Role::Manage)),
         // Administrators manage everything that exists — and nothing else.
         ("admin on da-pw",        &admin, Credential(DA_PW),     Some(Role::Manage)),
         ("admin on unknown",      &admin, Device(Uuid::from_u128(99)), None),
@@ -189,8 +203,9 @@ fn visibility_includes_the_way_to_what_is_granted() {
     let ops = catalog.visible(&subject(&["S-ops"]));
     assert_eq!(
         ops.roles.len(),
-        10,
-        "Servers, Linux, Windows, web01, dc01; Shared, its two collections and two entries"
+        11,
+        "Servers, Linux, Windows, web01, dc01, linux-root; Shared, its two collections and \
+         two entries"
     );
     assert!(ops.path_only.is_empty() && ops.collections_path_only.is_empty());
 
@@ -198,7 +213,7 @@ fn visibility_includes_the_way_to_what_is_granted() {
         catalog.visible(&subject(&["S-nobody"])),
         Visibility::default()
     );
-    assert_eq!(catalog.visible(&admin()).roles.len(), 12);
+    assert_eq!(catalog.visible(&admin()).roles.len(), 14);
 }
 
 #[test]
@@ -220,6 +235,8 @@ fn containment() {
         catalog.container(Collection(LINUX_KEYS)),
         Some(Collection(SHARED))
     );
+    assert_eq!(catalog.container(Profile(LINUX_ROOT)), Some(Folder(LINUX)));
+    assert_eq!(catalog.container(Profile(LOCAL_ADMIN)), None);
 }
 
 #[test]
@@ -227,10 +244,10 @@ fn a_folder_loop_does_not_hang() {
     let a = Uuid::from_u128(1);
     let b = Uuid::from_u128(2);
     let catalog = Catalog::new(
-        [(a, Some(b)), (b, Some(a))],
-        [],
-        [],
-        [],
+        Objects {
+            folders: vec![(a, Some(b)), (b, Some(a))],
+            ..Objects::default()
+        },
         [grant(Folder(a), "S-x", Role::Edit)],
         NOW,
     );
@@ -249,10 +266,11 @@ fn a_just_in_time_grant_counts_until_it_runs_out() {
         };
         let permanent = grant(Device(DC01), "S-helpdesk", Role::List);
         Catalog::new(
-            [(WINDOWS, None)],
-            [],
-            [(DC01, WINDOWS)],
-            [],
+            Objects {
+                folders: vec![(WINDOWS, None)],
+                devices: vec![(DC01, WINDOWS)],
+                ..Objects::default()
+            },
             [permanent, jit],
             now,
         )

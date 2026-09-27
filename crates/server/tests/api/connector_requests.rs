@@ -28,7 +28,7 @@ async fn device(
         token,
         "/api/devices",
         json!({ "folder_id": folder, "name": name, "protocol": "ssh", "host": host,
-                "port": port.parse::<u16>().unwrap(), "auth_mode": "ask", "credential_id": null,
+                "port": port.parse::<u16>().unwrap(), "auth_mode": "ask",
                 "connector_mode": "connector", "connector_id": connector }),
     )
     .await
@@ -198,7 +198,7 @@ async fn a_request_is_checked_before_it_reaches_the_customer(pool: PgPool) {
         &token,
         "/api/devices",
         json!({ "folder_id": folder, "name": "direct", "protocol": "ssh", "host": "10.0.0.2",
-                "port": 22, "auth_mode": "ask", "credential_id": null }),
+                "port": 22, "auth_mode": "ask" }),
     )
     .await;
     let post = |body: Value, token: String| {

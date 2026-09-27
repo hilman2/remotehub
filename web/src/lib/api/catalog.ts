@@ -1,4 +1,7 @@
-/** Folders, devices, credentials and grants (crates/server/src/api/catalog.rs). */
+/**
+ * Folders, devices, login profiles, credentials and grants
+ * (crates/server/src/api/catalog.rs, profiles.rs).
+ */
 import { api, lasting } from './client';
 import type { KeyboardLayout } from './generated/keyboard';
 
@@ -19,9 +22,9 @@ export const DEFAULT_PORTS: Record<Protocol, number> = {
 /** Protocols shown as a picture (through guacd) rather than a terminal. */
 export const isGraphical = (protocol: Protocol) => protocol !== 'ssh';
 
-export type AuthMode = 'stored' | 'device' | 'ask' | 'own' | 'certificate' | 'laps';
+export type AuthMode = 'profile' | 'device' | 'ask' | 'own' | 'certificate' | 'laps';
 export const AUTH_MODES: readonly AuthMode[] = [
-	'stored',
+	'profile',
 	'device',
 	'ask',
 	'own',
@@ -41,7 +44,7 @@ export function authModesFor(protocol: Protocol): readonly AuthMode[] {
 	);
 }
 
-export type ObjectKind = 'folder' | 'device' | 'credential' | 'collection';
+export type ObjectKind = 'folder' | 'device' | 'credential' | 'collection' | 'profile';
 
 export interface Folder {
 	id: string;
@@ -64,7 +67,8 @@ export interface Device {
 	host: string;
 	port: number;
 	auth_mode: AuthMode;
-	credential_id: string | null;
+	/** Sign-in mode `profile`: the login profile it uses (#192). */
+	profile_id: string | null;
 	description: string;
 	/** RDP only; null uses the instance's default. */
 	keyboard_layout: KeyboardLayout | null;
@@ -92,6 +96,41 @@ export interface Device {
 
 export type CredentialKind = 'password' | 'ssh_key';
 
+/**
+ * A login many devices share (#192), a password or an SSH key. It lies in a
+ * device folder and has that folder's grants; one at the top level
+ * (`folder_id` null) is for administrators. Devices in its folder and below
+ * may use it.
+ */
+export interface Profile {
+	id: string;
+	folder_id: string | null;
+	name: string;
+	username: string;
+	domain: string;
+	secret_kind: CredentialKind;
+	/** SSH keys only: what identifies the key, never the key itself. */
+	key_algorithm: string | null;
+	key_fingerprint: string | null;
+	has_certificate: boolean;
+	/** RFC 3339, UTC. */
+	updated_at: string;
+	role: Role;
+}
+
+export interface ProfileInput {
+	folder_id: string | null;
+	name: string;
+	username: string;
+	domain: string;
+	secret_kind: CredentialKind;
+	/** Required when creating or changing the kind; omitted keeps what is stored. */
+	password?: string;
+	private_key?: string;
+	passphrase?: string;
+	certificate?: string;
+}
+
 /** Where shared credentials live, apart from the device folders (#190). */
 export interface Collection {
 	id: string;
@@ -106,14 +145,9 @@ export interface Credential {
 	/** The collection it lives in (#190). */
 	collection_id: string;
 	name: string;
-	kind: CredentialKind;
 	username: string;
 	domain: string;
 	version: number;
-	/** SSH keys only: what identifies the key, never the key itself. */
-	key_algorithm: string | null;
-	key_fingerprint: string | null;
-	has_certificate: boolean;
 	url: string;
 	notes: string;
 	/** One of KeePass' standard icons (lib/vault/icons.ts). */
@@ -127,6 +161,7 @@ export interface Credential {
 export interface Tree {
 	folders: Folder[];
 	devices: Device[];
+	profiles: Profile[];
 	collections: Collection[];
 	credentials: Credential[];
 	may_create_top_level: boolean;
@@ -143,7 +178,7 @@ export interface DeviceInput {
 	host: string;
 	port: number;
 	auth_mode: AuthMode;
-	credential_id: string | null;
+	profile_id: string | null;
 	description: string;
 	keyboard_layout: KeyboardLayout | null;
 	connector_mode: ConnectorMode;
@@ -165,13 +200,8 @@ export interface CredentialInput {
 	name: string;
 	username: string;
 	domain: string;
-	kind?: CredentialKind;
 	/** Required when creating; omitted when updating keeps the password. */
 	password?: string;
-	/** SSH keys: required when creating; omitted when updating keeps key, passphrase and certificate. */
-	private_key?: string;
-	passphrase?: string;
-	certificate?: string;
 	url?: string;
 	notes?: string;
 	icon?: number;
@@ -239,6 +269,12 @@ export const resetHostKey = (id: string) => api('DELETE', `/api/devices/${id}/ho
 /** Opens or closes a folder in this user's tree; the server keeps it. */
 export const setFolderOpen = (id: string, open: boolean) =>
 	api('PUT', `/api/folders/${id}/open`, { open }, lasting);
+
+export const createProfile = (input: ProfileInput) =>
+	api<{ id: string }>('POST', '/api/profiles', input);
+export const updateProfile = (id: string, input: ProfileInput) =>
+	api('PUT', `/api/profiles/${id}`, input);
+export const deleteProfile = (id: string) => api('DELETE', `/api/profiles/${id}`);
 
 export const createCredential = (input: CredentialInput) =>
 	api<{ id: string }>('POST', '/api/credentials', input);

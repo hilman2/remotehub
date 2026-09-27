@@ -38,11 +38,6 @@ async function openVault(page: Page) {
 	await expect(page.getByRole('heading', { name: 'Vault', level: 1 })).toBeVisible();
 }
 
-async function openDevices(page: Page) {
-	await page.getByRole('link', { name: 'Devices', exact: true }).click();
-	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
-}
-
 /** A collection at the top of the vault, shown once made. */
 async function newCollection(page: Page, name: string) {
 	await openVault(page);
@@ -90,12 +85,44 @@ async function freshVault(page: Page, passphrase: string) {
 	return recovery;
 }
 
-/** A device in the folder that signs in with the credential (SSH by default). */
+/** Switches the devices page between its connections and its login profiles. */
+const area = (page: Page, name: 'Connections' | 'Login profiles') =>
+	page.getByRole('navigation', { name: 'Devices area' }).getByRole('button', { name }).click();
+
+/**
+ * A login profile in `folder` (#192), for the devices below it; `fill`
+ * completes the form after name and folder. Leaves the page on the
+ * connections.
+ */
+async function newProfile(
+	page: Page,
+	folder: string,
+	name: string,
+	fill: (dialog: Locator) => Promise<void>
+) {
+	const dialog = page.getByRole('dialog');
+	await area(page, 'Login profiles');
+	await page.getByRole('button', { name: 'New login profile' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(name);
+	await dialog.getByLabel('Lies in').selectOption({ label: folder });
+	await fill(dialog);
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
+	await area(page, 'Connections');
+}
+
+/** A login profile for the lab's `tester`, with its password. */
+const testerLogin = async (dialog: Locator) => {
+	await dialog.getByLabel('User name', { exact: true }).fill('tester');
+	await dialog.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
+};
+
+/** A device in the folder that signs in with the login profile (SSH by default). */
 async function newDevice(
 	page: Page,
 	folder: string,
 	name: string,
-	credential: string,
+	profile: string,
 	protocol?: { label: string; host: string }
 ) {
 	const dialog = page.getByRole('dialog');
@@ -104,10 +131,10 @@ async function newDevice(
 	await dialog.getByLabel('Name', { exact: true }).fill(name);
 	if (protocol) await dialog.getByLabel('Protocol').selectOption({ label: protocol.label });
 	await dialog.getByLabel('Host name or IP address').fill(protocol?.host ?? sshHost);
-	await dialog.getByLabel('Sign in with').selectOption({ label: 'A stored credential' });
+	await dialog.getByLabel('Sign in with').selectOption({ label: 'A login profile' });
 	await dialog
-		.getByLabel('Credential', { exact: true })
-		.selectOption({ label: `${credential} · tester` });
+		.getByLabel('Login profile', { exact: true })
+		.selectOption({ label: `${profile} · tester` });
 	await dialog.getByRole('button', { name: 'Create' }).click();
 	await expect(page.getByRole('heading', { name })).toBeVisible();
 }
@@ -115,20 +142,20 @@ async function newDevice(
 test('an AD user adds an SSH device and works in its terminal', async ({ page }) => {
 	await signIn(page);
 
-	// A credential in the vault; the password is never shown again.
-	const credential = `tester ${run}`;
-	await newCredential(page, credential, async (dialog) => {
-		await dialog.getByLabel('User name', { exact: true }).fill('tester');
-		await dialog.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
-	});
-	await expect(page.locator('body')).not.toContainText('Tester-Passw0rd!');
-
-	// A folder at the top, and an SSH device in it that signs in with it.
-	await openDevices(page);
+	// A folder at the top with a login profile; the password is never shown
+	// again.
 	const folder = `E2E ${run}`;
 	await newFolder(page, folder);
+	const profile = `tester ${run}`;
+	await newProfile(page, folder, profile, testerLogin);
+	await expect(page.locator('body')).not.toContainText('Tester-Passw0rd!');
+
+	// An SSH device in it that signs in with the profile, which names it.
 	const name = `lab ssh ${run}`;
-	await newDevice(page, folder, name, credential);
+	await newDevice(page, folder, name, profile);
+	await page.getByRole('button', { name: new RegExp(`^${profile}`) }).click();
+	await expect(page.getByRole('heading', { name: 'Used by devices: 1' })).toBeVisible();
+	await page.getByRole('button', { name: new RegExp(name) }).click();
 
 	// Its terminal opens as a tab inside remotehub; the first connection pins
 	// the host key.
@@ -344,12 +371,15 @@ test('an SSH key protected by a passphrase signs in', async ({ page }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');
 
-	// The key comes from a file. Without its passphrase it is refused, and the
-	// form keeps the key for the second try.
+	// A login profile with a key from a file. Without its passphrase it is
+	// refused, and the form keeps the key for the second try.
+	const folder = `E2E keys ${run}`;
+	await newFolder(page, folder);
 	const credential = `tester key ${run}`;
-	await newCollection(page, `${credential} collection`);
-	await page.getByRole('button', { name: 'New', exact: true }).click();
+	await area(page, 'Login profiles');
+	await page.getByRole('button', { name: 'New login profile' }).click();
 	await dialog.getByLabel('Name', { exact: true }).fill(credential);
+	await dialog.getByLabel('Lies in').selectOption({ label: folder });
 	await dialog.getByLabel('Type').selectOption({ label: 'SSH key' });
 	await dialog.getByLabel('User name', { exact: true }).fill('tester');
 	await dialog
@@ -363,12 +393,10 @@ test('an SSH key protected by a passphrase signs in', async ({ page }) => {
 	await expect(page.getByRole('heading', { name: credential })).toBeVisible();
 
 	// Shown by its fingerprint, never by the key.
-	await expect(page.getByText(/^SHA256:/)).toBeVisible();
+	await expect(page.getByText(/SHA256:/)).toBeVisible();
 	await expect(page.locator('body')).not.toContainText('PRIVATE KEY');
 
-	await openDevices(page);
-	const folder = `E2E keys ${run}`;
-	await newFolder(page, folder);
+	await area(page, 'Connections');
 	await newDevice(page, folder, `lab ssh key ${run}`, credential);
 	await page.getByRole('button', { name: 'Connect', exact: true }).click();
 	// Typing waits for the session, as a person would.
@@ -609,16 +637,12 @@ test('access asked for just in time is approved by someone else', async ({ page,
 test('chosen users state a purpose, and the device journal keeps it', async ({ page, browser }) => {
 	await signIn(page);
 	const dialog = page.getByRole('dialog');
-	const credential = `journal tester ${run}`;
-	await newCredential(page, credential, async (form) => {
-		await form.getByLabel('User name', { exact: true }).fill('tester');
-		await form.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
-	});
-	await openDevices(page);
 	const folder = `E2E journal ${run}`;
 	await newFolder(page, folder);
+	const profile = `journal tester ${run}`;
+	await newProfile(page, folder, profile, testerLogin);
 	const name = `lab ssh journal ${run}`;
-	await newDevice(page, folder, name, credential);
+	await newDevice(page, folder, name, profile);
 
 	// bob may connect to it.
 	await page.getByRole('button', { name: 'Settings' }).click();
@@ -831,16 +855,12 @@ test('an RDP desktop opens in the browser', async ({ page, context }) => {
 	// Chromium asks before a page reads the clipboard; the test says yes.
 	await context.grantPermissions(['clipboard-read', 'clipboard-write']);
 	await signIn(page);
-	const credential = `desktop tester ${run}`;
-	await newCredential(page, credential, async (form) => {
-		await form.getByLabel('User name', { exact: true }).fill('tester');
-		await form.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
-	});
-	await openDevices(page);
 	const folder = `E2E desktops ${run}`;
 	await newFolder(page, folder);
+	const profile = `desktop tester ${run}`;
+	await newProfile(page, folder, profile, testerLogin);
 
-	await newDevice(page, folder, `lab rdp ${run}`, credential, {
+	await newDevice(page, folder, `lab rdp ${run}`, profile, {
 		label: 'Remote Desktop (RDP)',
 		host: desktopHost
 	});
@@ -985,16 +1005,12 @@ test('an administrator sets up a site connector and a device names it', async ({
 
 test('a web interface opens signed in, in a browser on the server', async ({ page }) => {
 	await signIn(page);
-	const credential = `appliance tester ${run}`;
-	await newCredential(page, credential, async (form) => {
-		await form.getByLabel('User name', { exact: true }).fill('tester');
-		await form.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
-	});
-	await openDevices(page);
 	const folder = `E2E appliances ${run}`;
 	await newFolder(page, folder);
+	const profile = `appliance tester ${run}`;
+	await newProfile(page, folder, profile, testerLogin);
 
-	await newDevice(page, folder, `lab appliance ${run}`, credential, {
+	await newDevice(page, folder, `lab appliance ${run}`, profile, {
 		label: 'Web interface (HTTPS)',
 		host: webHost
 	});

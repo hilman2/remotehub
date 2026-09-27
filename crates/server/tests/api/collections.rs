@@ -126,7 +126,7 @@ async fn a_collection_grant_reaches_what_is_in_it_and_a_folder_grant_no_credenti
         "/api/devices",
         json!({
             "folder_id": folder, "name": "web01", "protocol": "ssh", "host": "web01", "port": 22,
-            "auth_mode": "stored", "credential_id": root,
+            "auth_mode": "ask",
         }),
     )
     .await;
@@ -134,7 +134,7 @@ async fn a_collection_grant_reaches_what_is_in_it_and_a_folder_grant_no_credenti
     let reveal = format!("/api/credentials/{root}/reveal");
     let show = || Some(json!({ "purpose": "show" }));
 
-    // manage on the folder of the device that uses it: still no credential.
+    // manage on a device folder: still no credential.
     grant(&app, &alice, "folder", &folder, BOB_SID, "manage").await;
     let seen = tree(&app, &bob).await;
     assert_eq!(names(&seen, "devices"), ["web01"]);

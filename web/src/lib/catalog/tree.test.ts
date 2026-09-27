@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { allows, type Device, type Tree } from '$lib/api/catalog';
+import { allows, type Device, type Profile, type Tree } from '$lib/api/catalog';
 import { catalogItems } from '$lib/search/catalog';
 import { rank } from '$lib/search/rank';
-import { collectionPath, collectionsBelow, folderConnector, nest, pathTo } from './tree';
+import {
+	collectionPath,
+	collectionsBelow,
+	folderConnector,
+	nest,
+	pathTo,
+	profilesWithin
+} from './tree';
 
 function device(id: string, name: string, host: string): Device {
 	return {
@@ -13,7 +20,7 @@ function device(id: string, name: string, host: string): Device {
 		host,
 		port: 22,
 		auth_mode: 'ask',
-		credential_id: null,
+		profile_id: null,
 		description: '',
 		keyboard_layout: null,
 		certificate_fingerprint: null,
@@ -31,6 +38,22 @@ function device(id: string, name: string, host: string): Device {
 	};
 }
 
+function profile(id: string, folder: string | null, name: string): Profile {
+	return {
+		id,
+		folder_id: folder,
+		name,
+		username: 'admin',
+		domain: '',
+		secret_kind: 'password',
+		key_algorithm: null,
+		key_fingerprint: null,
+		has_certificate: false,
+		updated_at: '2026-09-27T00:00:00Z',
+		role: 'connect'
+	};
+}
+
 const tree: Tree = {
 	may_create_top_level: true,
 	open: [],
@@ -42,6 +65,12 @@ const tree: Tree = {
 		{ id: 'w', parent_id: 's', name: 'windows', role: 'connect', connector_id: 'office' }
 	],
 	devices: [device('d2', 'web02', 'web02.example.com'), device('d1', 'Web01', 'db.example.com')],
+	profiles: [
+		profile('p-servers', 's', 'Server admin'),
+		profile('p-linux', 'l', 'Linux root'),
+		profile('p-windows', 'w', 'Windows admin'),
+		profile('p-top', null, 'Local admin')
+	],
 	collections: [
 		{ id: 'k', parent_id: null, name: 'Keys', role: 'connect' },
 		{ id: 'kw', parent_id: 'k', name: 'Windows', role: 'connect' },
@@ -52,13 +81,9 @@ const tree: Tree = {
 			id: 'c',
 			collection_id: 'kw',
 			name: 'domain admin',
-			kind: 'password',
 			username: 'administrator',
 			domain: 'EXAMPLE',
 			version: 1,
-			key_algorithm: null,
-			key_fingerprint: null,
-			has_certificate: false,
 			url: '',
 			notes: '',
 			icon: 0,
@@ -103,6 +128,18 @@ describe('searching the catalog', () => {
 		// The folder itself first, then its content.
 		expect(find('linux')).toEqual(['folder:Linux', 'device:Web01', 'device:web02']);
 		expect(find('nothing matches')).toEqual([]);
+	});
+});
+
+describe('profilesWithin', () => {
+	it('offers the profiles of the folder, the folders above and the top, not a sibling', () => {
+		const names = (folder: string) =>
+			profilesWithin(tree, folder)
+				.map((p) => p.name)
+				.sort();
+		expect(names('l')).toEqual(['Linux root', 'Local admin', 'Server admin']);
+		expect(names('s')).toEqual(['Local admin', 'Server admin']);
+		expect(names('n')).toEqual(['Local admin']);
 	});
 });
 

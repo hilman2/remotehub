@@ -5,11 +5,11 @@
 		KEYBOARD_LAYOUTS,
 		PROTOCOLS,
 		allows,
-		type Credential,
 		type CredentialKind,
 		type Device,
 		type DeviceInput,
 		type KeyboardLayout,
+		type Profile,
 		type Protocol
 	} from '$lib/api/catalog';
 	import type { Connector } from '$lib/api/connectors';
@@ -27,7 +27,7 @@
 	let {
 		folderId,
 		device = null,
-		credentials,
+		profiles,
 		connectors = [],
 		inherited = null,
 		onsubmit,
@@ -35,7 +35,8 @@
 	}: {
 		folderId: string;
 		device?: Device | null;
-		credentials: Credential[];
+		/** The login profiles within the folder's reach (#192). */
+		profiles: Profile[];
 		connectors?: Connector[];
 		/** The connector the folder passes on (#176); null: none. */
 		inherited?: Connector | null;
@@ -50,7 +51,7 @@
 	let host = $state(start?.host ?? '');
 	let port = $state(start?.port ?? DEFAULT_PORTS.ssh);
 	let authMode = $state(start?.auth_mode ?? 'ask');
-	let credentialId = $state(start?.credential_id ?? '');
+	let profileId = $state(start?.profile_id ?? '');
 	let description = $state(start?.description ?? '');
 	let keyboardLayout = $state<KeyboardLayout | ''>(start?.keyboard_layout ?? '');
 	// `inherit`, `direct`, or the id of the device's own connector.
@@ -98,8 +99,14 @@
 		)
 	);
 
-	// Only credentials the user may use can be linked.
-	const usable = $derived(credentials.filter((c) => allows(c.role, 'connect')));
+	// Only profiles the user may use can be linked, and keys only for SSH.
+	const usable = $derived(
+		profiles.filter(
+			(p) => allows(p.role, 'connect') && (p.secret_kind === 'password' || protocol === 'ssh')
+		)
+	);
+	const login = (profile: Profile) =>
+		profile.domain ? `${profile.domain}\\${profile.username}` : profile.username;
 
 	function changeProtocol(next: Protocol) {
 		if (port === DEFAULT_PORTS[protocol]) port = DEFAULT_PORTS[next];
@@ -116,7 +123,7 @@
 			host,
 			port: Number(port),
 			auth_mode: authMode,
-			credential_id: authMode === 'stored' ? credentialId || null : null,
+			profile_id: authMode === 'profile' ? profileId || null : null,
 			description,
 			keyboard_layout: protocol === 'rdp' ? keyboardLayout || null : null,
 			connector_mode: reach === 'inherit' || reach === 'direct' ? reach : 'connector',
@@ -210,7 +217,7 @@
 	<label class={label} for="device-auth">{m.field_auth_mode()}</label>
 	<select id="device-auth" class={field} bind:value={authMode}>
 		{#each authModesFor(protocol) as mode (mode)}
-			<option value={mode} disabled={mode === 'stored' && usable.length === 0}>
+			<option value={mode} disabled={mode === 'profile' && usable.length === 0}>
 				{AUTH_MODE_LABELS[mode]()}
 			</option>
 		{/each}
@@ -274,11 +281,11 @@
 		{/if}
 	{/if}
 
-	{#if authMode === 'stored'}
-		<label class={label} for="device-credential">{m.field_credential()}</label>
-		<select id="device-credential" class={field} required bind:value={credentialId}>
-			{#each usable as credential (credential.id)}
-				<option value={credential.id}>{credential.name} · {credential.username}</option>
+	{#if authMode === 'profile'}
+		<label class={label} for="device-profile">{m.field_profile()}</label>
+		<select id="device-profile" class={field} required bind:value={profileId}>
+			{#each usable as profile (profile.id)}
+				<option value={profile.id}>{profile.name} · {login(profile)}</option>
 			{/each}
 		</select>
 	{/if}

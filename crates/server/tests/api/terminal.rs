@@ -17,7 +17,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::{self, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-use crate::common::{ORIGIN, authed, collection, send, sign_in_request, state};
+use crate::common::{ORIGIN, authed, lab_key, profile, send, sign_in_request, state};
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -138,19 +138,21 @@ fn ssh_host() -> String {
         .expect("REMOTEHUB_TEST_SSH_HOST points to the test lab")
 }
 
-async fn stored_device(
+/// A device on the lab's SSH target that signs in as `tester` with
+/// `password`, through a login profile in `folder`.
+async fn profile_device(
     app: &Router,
     token: &str,
     folder: &str,
     label: &str,
     password: &str,
 ) -> String {
-    let keys = collection(app, token, None, &format!("Lab ({label})")).await;
-    let credential = create(
+    let login = profile(
         app,
         token,
-        "/api/credentials",
-        json!({ "collection_id": keys, "name": format!("tester ({label})"), "username": "tester", "password": password }),
+        Some(folder),
+        &format!("tester ({label})"),
+        json!({ "username": "tester", "password": password }),
     )
     .await;
     create(
@@ -159,7 +161,7 @@ async fn stored_device(
         "/api/devices",
         json!({
             "folder_id": folder, "name": format!("target ({label})"), "protocol": "ssh", "host": ssh_host(),
-            "port": 22, "auth_mode": "stored", "credential_id": credential,
+            "port": 22, "auth_mode": "profile", "profile_id": login,
         }),
     )
     .await
@@ -174,7 +176,7 @@ async fn a_foreign_origin_or_no_session_cannot_open_a_terminal(pool: PgPool) {
         "/api/devices",
         json!({
             "folder_id": folder, "name": "x", "protocol": "ssh", "host": "x.example.com",
-            "port": 22, "auth_mode": "ask", "credential_id": null,
+            "port": 22, "auth_mode": "ask",
         }),
     )
     .await;
@@ -193,9 +195,9 @@ async fn a_foreign_origin_or_no_session_cannot_open_a_terminal(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
-async fn a_stored_credential_opens_a_shell_and_pins_the_host_key(pool: PgPool) {
+async fn a_login_profile_opens_a_shell_and_pins_the_host_key(pool: PgPool) {
     let (state, app, token, folder) = setup(pool.clone()).await;
-    let device = stored_device(&app, &token, &folder, "right", "Tester-Passw0rd!").await;
+    let device = profile_device(&app, &token, &folder, "right", "Tester-Passw0rd!").await;
     let address = serve(state).await;
 
     let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
@@ -260,12 +262,12 @@ async fn a_stored_credential_opens_a_shell_and_pins_the_host_key(pool: PgPool) {
 async fn a_device_behind_a_connector_opens_only_while_it_is_connected(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
     let (connector, secret) = crate::connectors::new_connector(&app, &token, "lab").await;
-    let keys = collection(&app, &token, None, "Lab").await;
-    let credential = create(
+    let login = profile(
         &app,
         &token,
-        "/api/credentials",
-        json!({ "collection_id": keys, "name": "tester", "username": "tester", "password": "Tester-Passw0rd!" }),
+        Some(&folder),
+        "tester",
+        json!({ "username": "tester", "password": "Tester-Passw0rd!" }),
     )
     .await;
     let device = create(
@@ -274,7 +276,7 @@ async fn a_device_behind_a_connector_opens_only_while_it_is_connected(pool: PgPo
         "/api/devices",
         json!({
             "folder_id": folder, "name": "behind", "protocol": "ssh", "host": ssh_host(),
-            "port": 22, "auth_mode": "stored", "credential_id": credential,
+            "port": 22, "auth_mode": "profile", "profile_id": login,
             "connector_mode": "connector", "connector_id": connector,
         }),
     )
@@ -306,12 +308,12 @@ async fn a_device_behind_a_connector_opens_only_while_it_is_connected(pool: PgPo
 async fn a_closed_connector_says_the_customer_closed_it(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
     let (connector, secret) = crate::connectors::new_connector(&app, &token, "lab").await;
-    let keys = collection(&app, &token, None, "Lab").await;
-    let credential = create(
+    let login = profile(
         &app,
         &token,
-        "/api/credentials",
-        json!({ "collection_id": keys, "name": "tester", "username": "tester", "password": "x" }),
+        Some(&folder),
+        "tester",
+        json!({ "username": "tester", "password": "x" }),
     )
     .await;
     let device = create(
@@ -320,7 +322,7 @@ async fn a_closed_connector_says_the_customer_closed_it(pool: PgPool) {
         "/api/devices",
         json!({
             "folder_id": folder, "name": "behind", "protocol": "ssh", "host": "10.1.1.1",
-            "port": 22, "auth_mode": "stored", "credential_id": credential,
+            "port": 22, "auth_mode": "profile", "profile_id": login,
             "connector_mode": "connector", "connector_id": connector,
         }),
     )
@@ -342,7 +344,7 @@ async fn a_closed_connector_says_the_customer_closed_it(pool: PgPool) {
 #[ignore = "needs the test lab"]
 async fn a_changed_host_key_stops_the_connection(pool: PgPool) {
     let (state, app, token, folder) = setup(pool.clone()).await;
-    let device = stored_device(&app, &token, &folder, "right", "Tester-Passw0rd!").await;
+    let device = profile_device(&app, &token, &folder, "right", "Tester-Passw0rd!").await;
     let other =
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIErqoGI5zlU7vi5Y/fdFH/EJV35jU1dDC5j8WCWzOszR other";
     sqlx::query("UPDATE devices SET host_key = $1, host_key_pinned_at = now()")
@@ -390,11 +392,11 @@ async fn asked_credentials_work_once_and_wrong_ones_are_reported(pool: PgPool) {
         "/api/devices",
         json!({
             "folder_id": folder, "name": "asking", "protocol": "ssh", "host": ssh_host(),
-            "port": 22, "auth_mode": "ask", "credential_id": null,
+            "port": 22, "auth_mode": "ask",
         }),
     )
     .await;
-    let wrong = stored_device(&app, &token, &folder, "wrong", "wrong").await;
+    let wrong = profile_device(&app, &token, &folder, "wrong", "wrong").await;
     let address = serve(state).await;
 
     let mut socket = open(address, &asking, &token, ORIGIN).await.unwrap();
@@ -447,7 +449,7 @@ async fn the_own_account_connects_with_the_sign_in_password(pool: PgPool) {
         "/api/devices",
         json!({
             "folder_id": folder, "name": "own", "protocol": "ssh", "host": ssh_host(),
-            "port": 22, "auth_mode": "own", "credential_id": null,
+            "port": 22, "auth_mode": "own",
         }),
     )
     .await;
@@ -497,19 +499,17 @@ async fn the_own_account_connects_with_the_sign_in_password(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 #[ignore = "needs the test lab"]
-async fn a_stored_key_with_certificate_opens_a_shell(pool: PgPool) {
+async fn a_profile_key_with_certificate_opens_a_shell(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
-    let dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
-        .join("../../deploy/testlab/ssh");
-    let read = |f: &str| std::fs::read_to_string(dir.join(f)).unwrap();
-    let keys = collection(&app, &token, None, "Lab").await;
-    let credential = create(
+    let login = profile(
         &app,
         &token,
-        "/api/credentials",
+        Some(&folder),
+        "certified",
         json!({
-            "collection_id": keys, "name": "certified", "kind": "ssh_key", "username": "tester",
-            "private_key": read("tester_ed25519_cert"), "certificate": read("tester_ed25519_cert-cert.pub"),
+            "secret_kind": "ssh_key", "username": "tester",
+            "private_key": lab_key("tester_ed25519_cert"),
+            "certificate": lab_key("tester_ed25519_cert-cert.pub"),
         }),
     )
     .await;
@@ -519,7 +519,7 @@ async fn a_stored_key_with_certificate_opens_a_shell(pool: PgPool) {
         "/api/devices",
         json!({
             "folder_id": folder, "name": "by certificate", "protocol": "ssh", "host": ssh_host(),
-            "port": 22, "auth_mode": "stored", "credential_id": credential,
+            "port": 22, "auth_mode": "profile", "profile_id": login,
         }),
     )
     .await;
@@ -558,7 +558,7 @@ async fn certificate_device(
         "/api/devices",
         json!({
             "folder_id": folder, "name": "as alice", "protocol": "ssh", "host": ssh_host(),
-            "port": 22, "auth_mode": "certificate", "credential_id": null,
+            "port": 22, "auth_mode": "certificate",
         }),
     )
     .await;
@@ -647,7 +647,7 @@ async fn only_ssh_devices_sign_in_with_a_certificate(pool: PgPool) {
             "/api/devices",
             Some(json!({
                 "folder_id": folder, "name": "rdp", "protocol": "rdp", "host": "desktop",
-                "port": 3389, "auth_mode": "certificate", "credential_id": null,
+                "port": 3389, "auth_mode": "certificate",
             })),
             &token,
         ),
@@ -664,7 +664,7 @@ async fn laps_device(app: &Router, token: &str, folder: &str, host: &str) -> Str
         "/api/devices",
         json!({
             "folder_id": folder, "name": format!("laps {host}"), "protocol": "ssh", "host": host,
-            "port": 22, "auth_mode": "laps", "credential_id": null,
+            "port": 22, "auth_mode": "laps",
         }),
     )
     .await
@@ -729,7 +729,7 @@ async fn without_a_laps_password_there_is_no_connection(pool: PgPool) {
                 "/api/devices",
                 Some(json!({
                     "folder_id": folder, "name": protocol, "protocol": protocol, "host": "x",
-                    "port": port, "auth_mode": "laps", "credential_id": null,
+                    "port": port, "auth_mode": "laps",
                 })),
                 &token,
             ),
@@ -767,7 +767,7 @@ async fn without_a_purpose_nothing_reaches_the_device(pool: PgPool) {
         "/api/devices",
         json!({
             "folder_id": folder, "name": "nowhere", "protocol": "ssh", "host": "nowhere.invalid",
-            "port": 22, "auth_mode": "ask", "credential_id": null,
+            "port": 22, "auth_mode": "ask",
         }),
     )
     .await;
@@ -809,7 +809,7 @@ async fn without_a_purpose_nothing_reaches_the_device(pool: PgPool) {
 #[ignore = "needs the test lab"]
 async fn a_session_goes_into_the_journal_with_its_purpose(pool: PgPool) {
     let (state, app, token, folder) = setup(pool).await;
-    let device = stored_device(&app, &token, &folder, "journal", "Tester-Passw0rd!").await;
+    let device = profile_device(&app, &token, &folder, "journal", "Tester-Passw0rd!").await;
     require_purpose(&app, &token).await;
     let address = serve(state).await;
 
@@ -858,7 +858,7 @@ async fn a_device_signs_in_with_credentials_of_its_own(pool: PgPool) {
         "/api/devices",
         json!({
             "folder_id": folder, "name": "own", "protocol": "ssh", "host": ssh_host(),
-            "port": 22, "auth_mode": "device", "credential_id": null,
+            "port": 22, "auth_mode": "device",
             "username": "tester", "password": "Tester-Passw0rd!",
         }),
     )
@@ -892,7 +892,7 @@ async fn a_device_signs_in_with_a_key_of_its_own(pool: PgPool) {
         "/api/devices",
         json!({
             "folder_id": folder, "name": "own key", "protocol": "ssh", "host": ssh_host(),
-            "port": 22, "auth_mode": "device", "credential_id": null, "username": "tester",
+            "port": 22, "auth_mode": "device", "username": "tester",
             "secret_kind": "ssh_key", "private_key": key, "passphrase": "Key-Passw0rd!",
         }),
     )

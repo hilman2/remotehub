@@ -34,6 +34,8 @@ export const ERROR_CODES = [
 	'recovery_not_ready',
 	'connector_in_use',
 	'retarget_forbidden',
+	'profile_out_of_reach',
+	'profile_in_use',
 	'connector_offline',
 	'connector_closed',
 	'connector_target_closed',

@@ -242,7 +242,7 @@ async fn administrators_manage_connectors_and_devices_name_them(pool: PgPool) {
     // A device names an existing connector, and keeps it from being deleted.
     let device = |connector: Value| {
         json!({ "folder_id": folder, "name": "router", "protocol": "ssh", "host": "10.1.1.1",
-                "port": 22, "auth_mode": "ask", "credential_id": null,
+                "port": 22, "auth_mode": "ask",
                 "connector_mode": "connector", "connector_id": connector })
     };
     let unknown = send(
@@ -284,8 +284,8 @@ async fn administrators_manage_connectors_and_devices_name_them(pool: PgPool) {
     assert!(!log.contains(&secret));
 }
 
-/// Another connector is another target: the pins go, and a linked
-/// credential needs `connect` like for a new host.
+/// Another connector is another target: the pins go, and a linked login
+/// profile needs `connect` like for a new host.
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn moving_a_device_to_a_connector_forgets_its_pins(pool: PgPool) {
     let (_state, app, token, folder) = setup(pool.clone()).await;
@@ -297,7 +297,7 @@ async fn moving_a_device_to_a_connector_forgets_its_pins(pool: PgPool) {
             "connector"
         };
         json!({ "folder_id": folder, "name": "router", "protocol": "ssh", "host": "10.1.1.1",
-                "port": 22, "auth_mode": "ask", "credential_id": null,
+                "port": 22, "auth_mode": "ask",
                 "connector_mode": mode, "connector_id": connector })
     };
     let router = create(&app, &token, "/api/devices", body(Value::Null)).await;
@@ -778,7 +778,7 @@ async fn one_open_device_lets_only_itself_through(pool: PgPool) {
     let device = |name: &str, target: &str| {
         let (host, port) = target.rsplit_once(':').unwrap();
         json!({ "folder_id": folder, "name": name, "protocol": "ssh", "host": host,
-                "port": port.parse::<u16>().unwrap(), "auth_mode": "ask", "credential_id": null,
+                "port": port.parse::<u16>().unwrap(), "auth_mode": "ask",
                 "connector_mode": "connector", "connector_id": id })
     };
     for (name, target, expected) in [

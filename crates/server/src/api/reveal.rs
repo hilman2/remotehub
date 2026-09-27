@@ -4,6 +4,7 @@
 //! - `POST /api/credentials/{id}/reveal`: a shared credential.
 //! - `POST /api/devices/{id}/reveal`: a device's own credentials (sign-in
 //!   mode `device`).
+//! - `POST /api/profiles/{id}/reveal`: a login profile (#192).
 //!
 //! POST, so no cache and no link keeps the answer; it says `no-store` too.
 
@@ -150,13 +151,12 @@ pub async fn credential(
     let purpose = purpose(&input)?;
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Reveal, ObjectId::Credential(id))?;
-    type Row = (String, String, i32, String, sqlx::types::Json<Vec<Field>>);
-    let (username, domain, current, kind, fields): Row = sqlx::query_as(
-        "SELECT username, domain, version, kind, fields FROM credentials WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_one(&state.db)
-    .await?;
+    type Row = (String, String, i32, sqlx::types::Json<Vec<Field>>);
+    let (username, domain, current, fields): Row =
+        sqlx::query_as("SELECT username, domain, version, fields FROM credentials WHERE id = $1")
+            .bind(id)
+            .fetch_one(&state.db)
+            .await?;
     let version = input.version.unwrap_or(current);
     if !(1..=current).contains(&version) {
         return Err(invalid("version"));
@@ -180,7 +180,7 @@ pub async fn credential(
         .fetch_all(&state.db)
         .await?
     };
-    let mut revealed = open(&state, id, version, &kind, username, domain).await?;
+    let mut revealed = open(&state, id, version, "password", username, domain).await?;
     for name in names {
         let value = stored_text(&state, id, version, &secret_name(&name)).await?;
         revealed.fields.push(RevealedField {
@@ -242,5 +242,28 @@ pub async fn device(
     let revealed = open(&state, id, version, &kind, username, domain).await?;
     let details = json!({ "purpose": purpose });
     record(&state, &session, ("device", id), details, &address).await?;
+    Ok(answer(revealed))
+}
+
+pub async fn profile(
+    State(state): State<AppState>,
+    session: Session,
+    ClientAddress(address): ClientAddress,
+    Path(id): Path<Uuid>,
+    input: Result<Json<Reveal>, JsonRejection>,
+) -> Result<impl IntoResponse, Problem> {
+    let input = body(input)?;
+    let purpose = purpose(&input)?;
+    let (subject, catalog) = context(&state, &session).await?;
+    require(&catalog, &subject, Role::Reveal, ObjectId::Profile(id))?;
+    let (username, domain, version, kind): (String, String, i32, String) = sqlx::query_as(
+        "SELECT username, domain, secret_version, secret_kind FROM login_profiles WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await?;
+    let revealed = open(&state, id, version, &kind, username, domain).await?;
+    let details = json!({ "purpose": purpose });
+    record(&state, &session, ("profile", id), details, &address).await?;
     Ok(answer(revealed))
 }

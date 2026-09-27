@@ -40,7 +40,8 @@ pub struct Target {
     pub host: String,
     pub port: i32,
     pub auth_mode: String,
-    pub credential_id: Option<Uuid>,
+    /// Sign-in mode `profile`: the login profile it uses (#192).
+    pub profile_id: Option<Uuid>,
     pub host_key: Option<String>,
     pub keyboard_layout: Option<String>,
     pub certificate_fingerprint: Option<String>,
@@ -227,7 +228,7 @@ pub async fn target(
         None => return Err(Problem::new(ErrorCode::NotFound)),
     }
     let target: Target = sqlx::query_as(
-        "SELECT id, name, protocol, host, port, auth_mode, credential_id, host_key, keyboard_layout,
+        "SELECT id, name, protocol, host, port, auth_mode, profile_id, host_key, keyboard_layout,
                 certificate_fingerprint,
                 device_connector(connector_mode, connector_id, folder_id) AS connector_id
          FROM devices WHERE id = $1",
@@ -465,7 +466,7 @@ async fn sealed_login(
     Ok(Login::Key(Box::new(key)))
 }
 
-/// Credentials for the device's sign-in mode `stored`, `device`, `laps` or `ask`.
+/// Credentials for the device's sign-in mode `profile`, `device`, `laps` or `ask`.
 pub async fn credentials(
     state: &AppState,
     target: &Target,
@@ -473,20 +474,21 @@ pub async fn credentials(
     password: Option<SecretString>,
 ) -> Result<Credentials, Problem> {
     match target.auth_mode.as_str() {
-        "stored" => {
-            let credential = target
-                .credential_id
-                .ok_or(Problem::new(ErrorCode::InvalidRequest).param("field", "credential_id"))?;
+        "profile" => {
+            let profile = target
+                .profile_id
+                .ok_or(Problem::new(ErrorCode::InvalidRequest).param("field", "profile_id"))?;
             let (username, domain, version, kind): (String, String, i32, String) = sqlx::query_as(
-                "SELECT username, domain, version, kind FROM credentials WHERE id = $1",
+                "SELECT username, domain, secret_version, secret_kind FROM login_profiles
+                 WHERE id = $1",
             )
-            .bind(credential)
+            .bind(profile)
             .fetch_one(&state.db)
             .await?;
             Ok(Credentials {
                 username,
                 domain,
-                login: sealed_login(state, credential, version, &kind).await?,
+                login: sealed_login(state, profile, version, &kind).await?,
             })
         }
         "laps" => {

@@ -21,6 +21,7 @@ mod mail;
 mod origin;
 mod personal;
 pub mod problem;
+mod profiles;
 mod recovery;
 mod reports;
 mod requests;
@@ -176,6 +177,12 @@ pub fn router(state: AppState) -> Router<AppState> {
                 .layer(DefaultBodyLimit::max(8 * 1024 * 1024)),
         )
         .route("/devices/{id}/reveal", post(reveal::device))
+        .route("/profiles", post(profiles::create))
+        .route(
+            "/profiles/{id}",
+            put(profiles::update).delete(profiles::delete),
+        )
+        .route("/profiles/{id}/reveal", post(reveal::profile))
         .route(
             "/credentials/{id}",
             put(catalog::update_credential).delete(catalog::delete_credential),

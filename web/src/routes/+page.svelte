@@ -5,9 +5,7 @@
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import FolderClosed from '@lucide/svelte/icons/folder-closed';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
-	import KeyRound from '@lucide/svelte/icons/key-round';
 	import Lock from '@lucide/svelte/icons/lock';
-	import { vaultHref } from '$lib/vault/links';
 	import PanelLeftOpen from '@lucide/svelte/icons/panel-left-open';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -16,7 +14,6 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { resolve } from '$app/paths';
-	import { page } from '$app/state';
 	import {
 		allows,
 		createDevice,
@@ -49,6 +46,7 @@
 	import FolderNodeView from '$lib/catalog/FolderNodeView.svelte';
 	import Grants from '$lib/catalog/Grants.svelte';
 	import Journal from '$lib/catalog/Journal.svelte';
+	import ProfilesView from '$lib/catalog/ProfilesView.svelte';
 	import RevealSecret from '$lib/catalog/RevealSecret.svelte';
 	import AskCustomer from '$lib/connectors/AskCustomer.svelte';
 	import DeviceAccess from '$lib/connectors/DeviceAccess.svelte';
@@ -58,7 +56,7 @@
 		ROLE_LABELS,
 		keyboardLayoutLabel
 	} from '$lib/catalog/labels';
-	import { folderConnector, nest, pathTo } from '$lib/catalog/tree';
+	import { folderConnector, nest, pathTo, profilesWithin } from '$lib/catalog/tree';
 	import Dialog from '$lib/components/Dialog.svelte';
 	import SettingsMenu, { type MenuItem } from '$lib/components/SettingsMenu.svelte';
 	import { getLocale } from '$lib/i18n';
@@ -152,13 +150,25 @@
 		} else error = errorMessage(result.code);
 		if (sites.ok) connectors = sites.data;
 		if (picked.ok) picks = picked.data;
-		// A link from the vault names the device to show (#190).
-		const linked = page.url.searchParams.get('device');
-		const target = linked && !selected ? tree?.devices.find((d) => d.id === linked) : undefined;
-		if (target && tree) {
-			selected = { kind: 'device', id: target.id };
-			for (const above of pathTo(tree, target.folder_id)) setOpen(above.id, true);
-		}
+	}
+
+	/** The connections or the login profiles (#192). */
+	let area = $state<'connections' | 'profiles'>('connections');
+	/** The login profile shown in the profiles area. */
+	let profileId = $state<string | null>(null);
+
+	/** Shows a device in the connections area, with the folders above it open. */
+	function showDevice(id: string) {
+		const target = tree?.devices.find((d) => d.id === id);
+		if (!target || !tree) return;
+		area = 'connections';
+		selected = { kind: 'device', id };
+		for (const above of pathTo(tree, target.folder_id)) setOpen(above.id, true);
+	}
+
+	function showProfile(id: string) {
+		profileId = id;
+		area = 'profiles';
 	}
 
 	const connectorOf = (device: Device) => connectors.find((c) => c.id === device.reached_through);
@@ -310,6 +320,12 @@
 	const button =
 		'inline-flex h-10 items-center gap-2 rounded-xl border border-line-strong bg-surface px-3.5 text-sm hover:bg-surface-2';
 	const card = 'flex flex-col gap-3 rounded-card border border-line bg-surface p-5';
+	// The property grid of a device.
+	const groupHead =
+		'bg-surface-2 px-4 py-1.5 text-xs font-semibold tracking-wide text-ink-2 uppercase';
+	const grid = 'grid grid-cols-[minmax(8rem,14rem)_minmax(0,1fr)]';
+	const key = 'border-t border-line px-4 py-2.5 text-ink-2';
+	const value = 'border-t border-line px-4 py-2.5 break-words';
 </script>
 
 {#snippet requestAccess(kind: ObjectKind, id: string, name: string, role: Role | null)}
@@ -408,279 +424,333 @@
 	</div>
 {/if}
 
+{#snippet areaTabs()}
+	<nav
+		aria-label={m.devices_area()}
+		class="grid grid-cols-2 gap-1 rounded-xl bg-surface-2 p-1 text-sm"
+	>
+		{#each [{ key: 'connections', label: m.devices_connections() }, { key: 'profiles', label: m.profiles_title() }] as tab (tab.key)}
+			<button
+				type="button"
+				class="h-8 rounded-lg px-2 text-ink-2 aria-[current=page]:bg-surface aria-[current=page]:font-semibold aria-[current=page]:text-ink aria-[current=page]:shadow-sm"
+				aria-current={area === tab.key ? 'page' : undefined}
+				onclick={() => (area = tab.key as typeof area)}
+			>
+				{tab.label}
+			</button>
+		{/each}
+	</nav>
+{/snippet}
+
 <div
 	class="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden"
 	class:hidden={tabs.active !== null}
 >
-	<aside
-		class="flex shrink-0 flex-col gap-4 border-b border-line bg-sunken px-3 py-5 lg:w-84 lg:overflow-y-auto lg:border-r lg:border-b-0"
-	>
-		<div class="flex items-center gap-2 px-2">
-			<h1 class="eyebrow">{m.devices_title()}</h1>
-			{#if tree?.may_create_top_level}
-				<button
-					type="button"
-					class="ml-auto flex size-8 items-center justify-center rounded-lg border border-line-strong text-ink-2 hover:bg-surface-2 hover:text-ink"
-					title={m.catalog_new_folder()}
-					onclick={() => show({ type: 'folder', parent: null, folder: null })}
-				>
-					<FolderPlus size={15} aria-hidden="true" />
-					<span class="sr-only">{m.catalog_new_folder()}</span>
-				</button>
-			{/if}
-		</div>
-		<label class="relative block">
-			<span class="sr-only">{m.catalog_search()}</span>
-			<Search size={16} class="absolute top-3 left-3 text-ink-3" aria-hidden="true" />
-			<input
-				type="search"
-				class="h-10 w-full rounded-xl border border-line-strong bg-page pr-3 pl-9 text-sm"
-				placeholder={m.catalog_search()}
-				bind:value={query}
-				onkeydown={onSearchKey}
-			/>
-		</label>
-		{#if searching}
-			{#if results.length === 0}
-				<p class="px-2 text-sm text-ink-2">{m.catalog_no_match()}</p>
-			{:else}
-				<ul aria-label={m.search_results()} class="flex flex-col gap-0.5">
-					{#each results as hit, index (pickKey(hit.kind, hit.id))}
-						{@render result(hit, index === active)}
-					{/each}
-				</ul>
-			{/if}
-		{:else if tree && tree.folders.length > 0}
-			{#if favourites.length > 0}
-				<div class="flex flex-col gap-1">
-					<h2 class="px-2 eyebrow">{m.search_frequent()}</h2>
-					<ul class="flex flex-col gap-0.5">
-						{#each favourites as hit (hit.id)}
-							{@render result(hit, false)}
-						{/each}
-					</ul>
-				</div>
-			{/if}
-			<nav aria-label={m.devices_title()}>
-				<ul role="tree" aria-label={m.devices_title()} class="flex flex-col gap-0.5">
-					{#each roots as node (node.folder.id)}
-						<FolderNodeView
-							{node}
-							{selected}
-							expanded={(id) => openFolders.has(id)}
-							onselect={choose}
-							ontoggle={toggle}
-							onopen={connectTo}
-						/>
-					{/each}
-				</ul>
-			</nav>
-		{/if}
-	</aside>
-
-	<section
-		class="flex min-w-0 flex-1 flex-col gap-7 px-5 py-8 sm:px-10 lg:overflow-y-auto lg:py-10"
-		aria-live="polite"
-	>
-		{#if error && !dialogOpen}
-			<p class="flex items-center gap-2 text-sm" role="alert">
-				<CircleAlert size={16} class="text-critical" aria-hidden="true" />
-				{error}
-			</p>
-		{/if}
-
-		{#if tree && tree.folders.length === 0}
-			<p class="font-display text-2xl text-ink-2">{m.devices_empty_title()}</p>
-		{:else if folder}
-			<div class="flex flex-wrap items-end gap-6">
-				<div class="min-w-0 flex-1">{@render heading(path(folder.parent_id), folder.name)}</div>
-				<div class="flex items-center gap-2">
-					{@render requestAccess('folder', folder.id, folder.name, folder.role)}
-					<SettingsMenu
-						label={m.catalog_settings()}
-						items={settings('folder', folder.id, folder.name, folder.role, {
-							label: m.catalog_rename(),
-							icon: Pencil,
-							onselect: () => show({ type: 'folder', parent: folder.parent_id, folder })
-						})}
-					/>
-				</div>
-			</div>
-			{#if folder.role}
-				<div class="flex flex-wrap gap-2">
-					<span class="chip">{m.catalog_access({ role: ROLE_LABELS[folder.role]() })}</span>
-					{#if passedOn(folder.id) && allows(folder.role, 'connect')}
-						<AskCustomer kind="folder" id={folder.id} />
-					{/if}
-				</div>
-			{/if}
-			{#if allows(folder.role, 'edit')}
-				<div class="flex flex-wrap gap-2">
+	{#if area === 'profiles' && tree}
+		<ProfilesView
+			{tree}
+			bind:selected={profileId}
+			tabs={areaTabs}
+			onchange={load}
+			onshowdevice={showDevice}
+		/>
+	{:else}
+		<aside
+			class="flex shrink-0 flex-col gap-4 border-b border-line bg-sunken px-3 py-5 lg:w-84 lg:overflow-y-auto lg:border-r lg:border-b-0"
+		>
+			{@render areaTabs()}
+			<div class="flex items-center gap-2 px-2">
+				<h1 class="eyebrow">{m.devices_title()}</h1>
+				{#if tree?.may_create_top_level}
 					<button
 						type="button"
-						class={button}
-						onclick={() => show({ type: 'device', folderId: folder.id, device: null })}
+						class="ml-auto flex size-8 items-center justify-center rounded-lg border border-line-strong text-ink-2 hover:bg-surface-2 hover:text-ink"
+						title={m.catalog_new_folder()}
+						onclick={() => show({ type: 'folder', parent: null, folder: null })}
 					>
-						<Plus size={16} aria-hidden="true" />
-						{m.catalog_new_device()}
+						<FolderPlus size={15} aria-hidden="true" />
+						<span class="sr-only">{m.catalog_new_folder()}</span>
 					</button>
-					{#if allows(folder.role, 'manage')}
+				{/if}
+			</div>
+			<label class="relative block">
+				<span class="sr-only">{m.catalog_search()}</span>
+				<Search size={16} class="absolute top-3 left-3 text-ink-3" aria-hidden="true" />
+				<input
+					type="search"
+					class="h-10 w-full rounded-xl border border-line-strong bg-page pr-3 pl-9 text-sm"
+					placeholder={m.catalog_search()}
+					bind:value={query}
+					onkeydown={onSearchKey}
+				/>
+			</label>
+			{#if searching}
+				{#if results.length === 0}
+					<p class="px-2 text-sm text-ink-2">{m.catalog_no_match()}</p>
+				{:else}
+					<ul aria-label={m.search_results()} class="flex flex-col gap-0.5">
+						{#each results as hit, index (pickKey(hit.kind, hit.id))}
+							{@render result(hit, index === active)}
+						{/each}
+					</ul>
+				{/if}
+			{:else if tree && tree.folders.length > 0}
+				{#if favourites.length > 0}
+					<div class="flex flex-col gap-1">
+						<h2 class="px-2 eyebrow">{m.search_frequent()}</h2>
+						<ul class="flex flex-col gap-0.5">
+							{#each favourites as hit (hit.id)}
+								{@render result(hit, false)}
+							{/each}
+						</ul>
+					</div>
+				{/if}
+				<nav aria-label={m.devices_title()}>
+					<ul role="tree" aria-label={m.devices_title()} class="flex flex-col gap-0.5">
+						{#each roots as node (node.folder.id)}
+							<FolderNodeView
+								{node}
+								{selected}
+								expanded={(id) => openFolders.has(id)}
+								onselect={choose}
+								ontoggle={toggle}
+								onopen={connectTo}
+							/>
+						{/each}
+					</ul>
+				</nav>
+			{/if}
+		</aside>
+
+		<section
+			class="flex min-w-0 flex-1 flex-col gap-7 px-5 py-8 sm:px-10 lg:overflow-y-auto lg:py-10"
+			aria-live="polite"
+		>
+			{#if error && !dialogOpen}
+				<p class="flex items-center gap-2 text-sm" role="alert">
+					<CircleAlert size={16} class="text-critical" aria-hidden="true" />
+					{error}
+				</p>
+			{/if}
+
+			{#if tree && tree.folders.length === 0}
+				<p class="font-display text-2xl text-ink-2">{m.devices_empty_title()}</p>
+			{:else if folder}
+				<div class="flex flex-wrap items-end gap-6">
+					<div class="min-w-0 flex-1">{@render heading(path(folder.parent_id), folder.name)}</div>
+					<div class="flex items-center gap-2">
+						{@render requestAccess('folder', folder.id, folder.name, folder.role)}
+						<SettingsMenu
+							label={m.catalog_settings()}
+							items={settings('folder', folder.id, folder.name, folder.role, {
+								label: m.catalog_rename(),
+								icon: Pencil,
+								onselect: () => show({ type: 'folder', parent: folder.parent_id, folder })
+							})}
+						/>
+					</div>
+				</div>
+				{#if folder.role}
+					<div class="flex flex-wrap gap-2">
+						<span class="chip">{m.catalog_access({ role: ROLE_LABELS[folder.role]() })}</span>
+						{#if passedOn(folder.id) && allows(folder.role, 'connect')}
+							<AskCustomer kind="folder" id={folder.id} />
+						{/if}
+					</div>
+				{/if}
+				{#if allows(folder.role, 'edit')}
+					<div class="flex flex-wrap gap-2">
 						<button
 							type="button"
 							class={button}
-							onclick={() => show({ type: 'folder', parent: folder.id, folder: null })}
+							onclick={() => show({ type: 'device', folderId: folder.id, device: null })}
 						>
-							<FolderPlus size={16} aria-hidden="true" />
-							{m.catalog_new_subfolder()}
+							<Plus size={16} aria-hidden="true" />
+							{m.catalog_new_device()}
 						</button>
-					{/if}
-				</div>
-			{/if}
-			{@render requestedNotice(folder.id)}
-		{:else if device}
-			<div class="flex flex-wrap items-end gap-6">
-				<div class="flex min-w-0 flex-1 flex-col gap-4">
-					{@render heading(path(device.folder_id), device.name)}
-					<div class="flex flex-wrap gap-2">
-						<span class="chip font-mono">{device.host}:{device.port}</span>
-						<span class="chip">{PROTOCOL_LABELS[device.protocol]()}</span>
-						{#if device.reached_through}
-							{@const connector = connectorOf(device)}
-							<span class="chip">
-								{#if connector?.online}
-									<span class="size-2 rounded-full bg-ok" aria-hidden="true"></span>
-								{:else}
-									<TriangleAlert size={13} class="text-warning" aria-hidden="true" />
-								{/if}
-								<span>
-									{connector?.name ?? ''} · {connector?.online
-										? m.connector_online()
-										: m.connector_offline()}
-								</span>
-							</span>
-							{#if allows(device.role, 'connect')}
-								<DeviceAccess deviceId={device.id} />
-								<AskCustomer kind="device" id={device.id} />
-							{/if}
-						{/if}
-						<span class="chip">{m.catalog_access({ role: ROLE_LABELS[device.role]() })}</span>
-					</div>
-				</div>
-				<div class="flex flex-col items-end gap-2">
-					<div class="flex items-center gap-2">
-						{@render requestAccess('device', device.id, device.name, device.role)}
-						<SettingsMenu
-							label={m.catalog_settings()}
-							items={settings('device', device.id, device.name, device.role, {
-								label: m.catalog_edit(),
-								icon: Pencil,
-								onselect: () => show({ type: 'device', folderId: device.folder_id, device })
-							})}
-						/>
-						{#if allows(device.role, 'connect')}
+						{#if allows(folder.role, 'manage')}
 							<button
 								type="button"
-								class="inline-flex h-14 items-center rounded-2xl bg-accent px-8 font-display text-lg font-semibold text-accent-ink hover:brightness-110"
-								onclick={() => connectTo(device.id)}
+								class={button}
+								onclick={() => show({ type: 'folder', parent: folder.id, folder: null })}
 							>
-								{m.device_connect()}
+								<FolderPlus size={16} aria-hidden="true" />
+								{m.catalog_new_subfolder()}
 							</button>
 						{/if}
 					</div>
-					{#if allows(device.role, 'connect')}
-						<!-- A window of its own, e.g. for a second screen. -->
-						<a
-							href={resolve('/connect/[id]', { id: device.id })}
-							target="_blank"
-							rel="noopener"
-							class="inline-flex items-center gap-1.5 text-sm text-ink-2 underline hover:text-ink"
-						>
-							<ExternalLink size={14} aria-hidden="true" />
-							{m.session_new_window()}
-						</a>
+				{/if}
+				{@render requestedNotice(folder.id)}
+			{:else if device}
+				<div class="flex flex-wrap items-end gap-6">
+					<div class="flex min-w-0 flex-1 flex-col gap-4">
+						{@render heading(path(device.folder_id), device.name)}
+						<div class="flex flex-wrap gap-2">
+							{#if device.reached_through}
+								{@const connector = connectorOf(device)}
+								<span class="chip">
+									{#if connector?.online}
+										<span class="size-2 rounded-full bg-ok" aria-hidden="true"></span>
+									{:else}
+										<TriangleAlert size={13} class="text-warning" aria-hidden="true" />
+									{/if}
+									<span>
+										{connector?.name ?? ''} · {connector?.online
+											? m.connector_online()
+											: m.connector_offline()}
+									</span>
+								</span>
+								{#if allows(device.role, 'connect')}
+									<DeviceAccess deviceId={device.id} />
+									<AskCustomer kind="device" id={device.id} />
+								{/if}
+							{/if}
+							<span class="chip">{m.catalog_access({ role: ROLE_LABELS[device.role]() })}</span>
+						</div>
+					</div>
+					<div class="flex flex-col items-end gap-2">
+						<div class="flex items-center gap-2">
+							{@render requestAccess('device', device.id, device.name, device.role)}
+							<SettingsMenu
+								label={m.catalog_settings()}
+								items={settings('device', device.id, device.name, device.role, {
+									label: m.catalog_edit(),
+									icon: Pencil,
+									onselect: () => show({ type: 'device', folderId: device.folder_id, device })
+								})}
+							/>
+							{#if allows(device.role, 'connect')}
+								<button
+									type="button"
+									class="inline-flex h-14 items-center rounded-2xl bg-accent px-8 font-display text-lg font-semibold text-accent-ink hover:brightness-110"
+									onclick={() => connectTo(device.id)}
+								>
+									{m.device_connect()}
+								</button>
+							{/if}
+						</div>
+						{#if allows(device.role, 'connect')}
+							<!-- A window of its own, e.g. for a second screen. -->
+							<a
+								href={resolve('/connect/[id]', { id: device.id })}
+								target="_blank"
+								rel="noopener"
+								class="inline-flex items-center gap-1.5 text-sm text-ink-2 underline hover:text-ink"
+							>
+								<ExternalLink size={14} aria-hidden="true" />
+								{m.session_new_window()}
+							</a>
+						{/if}
+					</div>
+				</div>
+
+				<!-- Its properties, grouped as a connection manager lists them (#192). -->
+				<div class="shrink-0 overflow-hidden rounded-card border border-line bg-surface text-sm">
+					<h3 class={groupHead}>{m.device_group_connection()}</h3>
+					<dl class={grid}>
+						<dt class={key}>{m.field_protocol()}</dt>
+						<dd class={value}>{PROTOCOL_LABELS[device.protocol]()}</dd>
+						<dt class={key}>{m.field_host()}</dt>
+						<dd class="{value} font-mono">{device.host}</dd>
+						<dt class={key}>{m.field_port()}</dt>
+						<dd class="{value} font-mono">{device.port}</dd>
+						{#if device.protocol === 'rdp'}
+							<dt class={key}>{m.field_keyboard_layout()}</dt>
+							<dd class={value}>
+								{device.keyboard_layout
+									? keyboardLayoutLabel(device.keyboard_layout, getLocale())
+									: m.keyboard_layout_default()}
+							</dd>
+						{/if}
+					</dl>
+					<h3 class={groupHead}>{m.device_group_sign_in()}</h3>
+					<dl class={grid}>
+						<dt class={key}>{m.field_auth_mode()}</dt>
+						<dd class={value}>{AUTH_MODE_LABELS[device.auth_mode]()}</dd>
+						{#if device.profile_id}
+							{@const profile = tree?.profiles.find((p) => p.id === device.profile_id)}
+							<dt class={key}>{m.field_profile()}</dt>
+							<dd class={value}>
+								{#if profile}
+									<button
+										type="button"
+										class="text-left text-accent hover:underline"
+										onclick={() => showProfile(profile.id)}
+									>
+										{profile.name} ·
+										<span class="font-mono">
+											{profile.domain ? `${profile.domain}\\${profile.username}` : profile.username}
+										</span>
+									</button>
+								{:else}
+									{m.profile_not_visible()}
+								{/if}
+							</dd>
+						{:else if device.auth_mode === 'device'}
+							<dt class={key}>{m.field_username()}</dt>
+							<dd class="{value} font-mono">
+								{device.domain ? `${device.domain}\\${device.username}` : device.username}
+							</dd>
+						{/if}
+						{#if device.profile_id || device.auth_mode === 'device'}
+							<dt class={key}>
+								{device.secret_kind === 'ssh_key' && device.auth_mode === 'device'
+									? m.credential_key()
+									: m.field_password()}
+							</dt>
+							<dd class="{value} flex flex-col gap-2">
+								<span class="flex items-center gap-2 text-ink-2">
+									<Lock size={14} class="text-ok" aria-hidden="true" />
+									{m.device_secret_on_server()}
+								</span>
+								{#if device.auth_mode === 'device' && device.key_fingerprint}
+									<span class="font-mono text-xs break-all text-ink-2">
+										{device.key_algorithm} · {device.key_fingerprint}
+									</span>
+								{/if}
+								{#if device.auth_mode === 'device' && allows(device.role, 'reveal')}
+									{#key device.id}
+										<RevealSecret owner="devices" id={device.id} />
+									{/key}
+								{/if}
+							</dd>
+						{/if}
+					</dl>
+					{#if device.description}
+						<h3 class={groupHead}>{m.device_group_general()}</h3>
+						<dl class={grid}>
+							<dt class={key}>{m.field_description()}</dt>
+							<dd class="{value} whitespace-pre-line">{device.description}</dd>
+						</dl>
 					{/if}
 				</div>
-			</div>
 
-			<div class="grid gap-4 md:grid-cols-3">
-				<section class={card}>
-					<h3 class="eyebrow">{m.field_auth_mode()}</h3>
-					<p class="text-lg font-semibold break-words">
-						{#if device.credential_id}
-							<!-- The entry lives in the vault's collections (#190). -->
-							<a
-								class="inline-flex items-center gap-2 text-accent hover:underline"
-								href={vaultHref(device.credential_id)}
-							>
-								<KeyRound size={16} aria-hidden="true" />
-								{tree?.credentials.find((c) => c.id === device.credential_id)?.name ??
-									m.credential_not_visible()}
-							</a>
-						{:else if device.auth_mode === 'device'}
-							<span class="font-mono">
-								{device.domain ? `${device.domain}\\${device.username}` : device.username}
-							</span>
-						{:else}
-							{AUTH_MODE_LABELS[device.auth_mode]()}
-						{/if}
-					</p>
-					{#if device.auth_mode === 'device' && device.key_fingerprint}
-						<p class="font-mono text-xs leading-relaxed break-all text-ink-2">
-							{device.key_algorithm} · {device.key_fingerprint}
-						</p>
+				<div class="grid gap-4 md:grid-cols-3">
+					{#if device.protocol === 'ssh'}
+						<section class={card}>
+							<h3 class="eyebrow">{m.device_host_key()}</h3>
+							{@render pin(device.host_key_fingerprint, device.role)}
+						</section>
+					{:else if device.protocol === 'rdp' || device.protocol === 'https'}
+						<section class={card}>
+							<h3 class="eyebrow">{m.device_certificate()}</h3>
+							{@render pin(device.certificate_fingerprint, device.role)}
+						</section>
 					{/if}
-					{#if device.credential_id || device.auth_mode === 'device'}
-						<p class="mt-auto flex items-center gap-2 text-sm text-ink-2">
-							<Lock size={14} aria-hidden="true" />
-							{AUTH_MODE_LABELS[device.auth_mode]()}
-						</p>
+					{#if allows(device.role, 'connect')}
+						<section class="{card} md:col-span-3">
+							<h3 class="eyebrow">{m.journal_title()}</h3>
+							<Journal deviceId={device.id} />
+						</section>
 					{/if}
-					{#if device.auth_mode === 'device' && allows(device.role, 'reveal')}
-						{#key device.id}
-							<RevealSecret owner="devices" id={device.id} />
-						{/key}
-					{/if}
-				</section>
-				{#if device.protocol === 'ssh'}
-					<section class={card}>
-						<h3 class="eyebrow">{m.device_host_key()}</h3>
-						{@render pin(device.host_key_fingerprint, device.role)}
-					</section>
-				{:else if device.protocol === 'rdp' || device.protocol === 'https'}
-					<section class={card}>
-						<h3 class="eyebrow">{m.device_certificate()}</h3>
-						{@render pin(device.certificate_fingerprint, device.role)}
-					</section>
-				{/if}
-				{#if device.protocol === 'rdp'}
-					<section class={card}>
-						<h3 class="eyebrow">{m.field_keyboard_layout()}</h3>
-						<p class="text-lg font-semibold">
-							{device.keyboard_layout
-								? keyboardLayoutLabel(device.keyboard_layout, getLocale())
-								: m.keyboard_layout_default()}
-						</p>
-					</section>
-				{/if}
-				{#if device.description}
-					<section class="{card} md:col-span-3">
-						<h3 class="eyebrow">{m.field_description()}</h3>
-						<p class="whitespace-pre-line">{device.description}</p>
-					</section>
-				{/if}
-				{#if allows(device.role, 'connect')}
-					<section class="{card} md:col-span-3">
-						<h3 class="eyebrow">{m.journal_title()}</h3>
-						<Journal deviceId={device.id} />
-					</section>
-				{/if}
-			</div>
+				</div>
 
-			{@render requestedNotice(device.id)}
-		{:else if tree}
-			<p class="font-display text-2xl text-ink-3">{m.catalog_select_hint()}</p>
-		{/if}
-	</section>
+				{@render requestedNotice(device.id)}
+			{:else if tree}
+				<p class="font-display text-2xl text-ink-3">{m.catalog_select_hint()}</p>
+			{/if}
+		</section>
+	{/if}
 </div>
 
 <Dialog bind:open={dialogOpen} title={dialogTitle}>
@@ -736,7 +806,7 @@
 				<DeviceForm
 					folderId={open.folderId}
 					device={open.device}
-					credentials={tree.credentials}
+					profiles={profilesWithin(tree, open.folderId)}
 					{connectors}
 					inherited={passedOn(open.folderId)}
 					onsubmit={saveDevice}
