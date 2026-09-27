@@ -178,7 +178,10 @@
 			{/if}
 		</div>
 
-		<dl class="mt-3 grid grid-cols-[8rem_minmax(0,1fr)_auto] items-center gap-x-3 text-sm">
+		<!-- The values take the width they need, so their buttons follow right after them. -->
+		<dl
+			class="mt-3 grid grid-cols-[8rem_fit-content(28rem)_minmax(0,1fr)] items-center gap-x-3 text-sm"
+		>
 			<dt class={key}>{m.field_username()}</dt>
 			<dd class="{value} font-mono">{item.username}</dd>
 			<dd>
