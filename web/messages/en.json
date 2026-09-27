@@ -1040,5 +1040,13 @@
 	"generator_own_active": "Your own default applies.",
 	"generator_use_organisation": "Use the organisation's default",
 	"generator_saved": "Saved.",
-	"audit_generator_changed": "Changed the password generator's default"
+	"audit_generator_changed": "Changed the password generator's default",
+	"viewer_show_file": "Show {name}",
+	"viewer_download_file": "Download {name}",
+	"viewer_loading": "Opening the file …",
+	"viewer_failed": "The file could not be opened.",
+	"viewer_none": "This kind of file cannot be shown here. Download it to open it with another program.",
+	"viewer_truncated": "Only the first {count} characters are shown.",
+	"viewer_download": "Download",
+	"viewer_download_hint": "A downloaded file lies unencrypted on this computer."
 }

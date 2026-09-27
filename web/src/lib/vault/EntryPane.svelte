@@ -7,6 +7,7 @@
 	 */
 	import Clock from '@lucide/svelte/icons/clock';
 	import Copy from '@lucide/svelte/icons/copy';
+	import Download from '@lucide/svelte/icons/download';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import Eye from '@lucide/svelte/icons/eye';
 	import EyeOff from '@lucide/svelte/icons/eye-off';
@@ -17,10 +18,12 @@
 	import { allows } from '$lib/api/catalog';
 	import { errorMessage } from '$lib/api/errors';
 	import { requestableRoles } from '$lib/api/requests';
-	import { attachmentUrl, credentialCode, reveal } from '$lib/api/reveal';
+	import { attachmentUrl, credentialCode, reveal, viewAttachment } from '$lib/api/reveal';
 	import { ROLE_LABELS } from '$lib/catalog/labels';
+	import Dialog from '$lib/components/Dialog.svelte';
 	import { formatLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
+	import FileViewer from './FileViewer.svelte';
 	import { icon } from './icons';
 	import { isExpired, isExpiring, personalTotp, today, type Item } from './items';
 	import TotpCode from './TotpCode.svelte';
@@ -33,6 +36,7 @@
 		onedit,
 		onrestore,
 		onrequest,
+		onread,
 		ondownload
 	}: {
 		item: Item;
@@ -40,9 +44,42 @@
 		onedit: () => void;
 		onrestore: () => void;
 		onrequest: () => void;
-		/** A personal entry's file, opened in this browser. */
+		/** A personal entry's file, opened in this browser; null if it cannot be. */
+		onread: (file: FileRef) => Promise<Blob | null>;
+		/** A personal entry's file, opened in this browser and downloaded. */
 		ondownload: (file: FileRef) => void;
 	} = $props();
+
+	/** The file shown in the viewer (#200). */
+	let viewing = $state<{
+		name: string;
+		load: () => Promise<Blob | null>;
+		download: () => void;
+	} | null>(null);
+	let viewerOpen = $state(false);
+
+	/** A file of the entry as a download: its own choice, audited as such. */
+	function download(file: { id: string; name: string }) {
+		if (item.source === 'personal') {
+			ondownload(file as FileRef);
+			return;
+		}
+		const link = document.createElement('a');
+		link.href = attachmentUrl(item.id, file.id);
+		link.download = file.name;
+		link.click();
+	}
+
+	function view(file: { id: string; name: string }) {
+		const shown = item;
+		viewing = {
+			name: file.name,
+			load: () =>
+				shown.source === 'personal' ? onread(file as FileRef) : viewAttachment(shown.id, file.id),
+			download: () => download(file)
+		};
+		viewerOpen = true;
+	}
 
 	/** How long a shown secret stays. */
 	const SECONDS = 30;
@@ -345,24 +382,12 @@
 				<dd class="{value} col-span-2 flex flex-wrap gap-x-4 gap-y-1">
 					{#if item.source === 'personal'}
 						{#each item.entry.content?.attachments ?? [] as file (file.id)}
-							<button
-								type="button"
-								class="text-accent hover:underline"
-								onclick={() => ondownload(file)}
-							>
-								{file.name} ({size(file.size)})
-							</button>
+							{@render fileItem(file)}
 						{/each}
 					{:else}
 						{#each item.credential.attachments as file (file.id)}
 							{#if may('reveal')}
-								<!-- eslint-disable svelte/no-navigation-without-resolve -- an API download -->
-								<a
-									class="text-accent hover:underline"
-									href={attachmentUrl(item.id, file.id)}
-									download>{file.name} ({size(file.size)})</a
-								>
-								<!-- eslint-enable svelte/no-navigation-without-resolve -->
+								{@render fileItem(file)}
 							{:else}
 								<span>{file.name}</span>
 							{/if}
@@ -408,3 +433,31 @@
 		{/if}
 	</div>
 </section>
+
+{#snippet fileItem(file: { id: string; name: string; size: number })}
+	<span class="inline-flex items-center gap-1">
+		<button
+			type="button"
+			class="text-accent hover:underline"
+			title={m.viewer_show_file({ name: file.name })}
+			onclick={() => view(file)}
+		>
+			{file.name} ({size(file.size)})
+		</button>
+		<button
+			type="button"
+			class="rounded-md p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"
+			title={m.viewer_download_file({ name: file.name })}
+			aria-label={m.viewer_download_file({ name: file.name })}
+			onclick={() => download(file)}
+		>
+			<Download size={13} aria-hidden="true" />
+		</button>
+	</span>
+{/snippet}
+
+<Dialog bind:open={viewerOpen} title={viewing?.name ?? ''} large>
+	{#if viewerOpen && viewing}
+		<FileViewer name={viewing.name} load={viewing.load} ondownload={viewing.download} />
+	{/if}
+</Dialog>
