@@ -2,7 +2,7 @@
 	/**
 	 * Settings of the instance, for administrators: the directory and who
 	 * administers (#144), the mail server (#145), the certificate (#146),
-	 * who states a purpose (#90),
+	 * the password generator's default (#194), who states a purpose (#90),
 	 * who needs a second factor (#107).
 	 */
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
@@ -15,6 +15,7 @@
 	import { session } from '$lib/session.svelte';
 	import CertificateForm from '$lib/settings/CertificateForm.svelte';
 	import DirectoryForm from '$lib/settings/DirectoryForm.svelte';
+	import GeneratorForm from '$lib/settings/GeneratorForm.svelte';
 	import MailForm from '$lib/settings/MailForm.svelte';
 </script>
 
@@ -50,6 +51,14 @@
 		<h2 id="certificate-title" class="text-xl font-semibold">{m.certificate_title()}</h2>
 		<p class="mt-1 text-sm text-ink-2">{m.certificate_hint()}</p>
 		<CertificateForm />
+	</section>
+	<section
+		class="mt-8 max-w-2xl rounded-card border border-line bg-surface p-6"
+		aria-labelledby="generator-title"
+	>
+		<h2 id="generator-title" class="text-xl font-semibold">{m.generator_title()}</h2>
+		<p class="mt-1 text-sm text-ink-2">{m.generator_hint()}</p>
+		<GeneratorForm />
 	</section>
 	<PrincipalRules
 		id="administrator-search"

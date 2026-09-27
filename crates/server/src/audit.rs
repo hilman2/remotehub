@@ -41,6 +41,7 @@ audit_actions! {
     DirectoryRemoved = "directory.removed",
     MailChanged = "mail.changed",
     MailRemoved = "mail.removed",
+    GeneratorChanged = "generator.changed",
     TlsCertificateUploaded = "tls_certificate.uploaded",
     TlsCertificateReset = "tls_certificate.reset",
     FolderCreated = "folder.created",

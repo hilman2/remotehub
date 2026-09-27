@@ -163,8 +163,11 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   their own ID (field `content`), at most 5 MiB each; downloading one needs `reveal` and is audited like a
   reveal. Every sealed version of a credential stays, and `reveal` opens an older one by number. Personal
   entries keep up to ten earlier states inside their sealed content, and their files are sealed in the
-  browser under an associated data of their own (`…\nfile\n<id>`), so a file never opens as an entry. The
-  browser makes passwords (Web Crypto, no look-alikes).
+  browser under an associated data of their own (`…\nfile\n<id>`), so a file never opens as an entry.
+- **Password generator (`web/src/lib/vault/generate.ts`, `api/generator.rs`):** the browser makes
+  passwords and passphrases (Web Crypto; words from the BIP-39 English list) as the user's own default
+  says, else the organisation's, which administrators set under *Settings* (audited as
+  `generator.changed`). The server keeps only the settings (`generator_settings`).
 - **One-time codes (`api/reveal.rs`, `crates/totp`):** the server makes a shared credential's current TOTP
   code (`POST /api/credentials/{id}/code`); it takes `reveal` and is audited as `credential.code_shown`.
   The secret leaves the server only in an export. The browser makes the codes of personal entries.

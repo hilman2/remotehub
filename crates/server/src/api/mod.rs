@@ -14,6 +14,7 @@ pub mod courier;
 mod directory;
 mod display;
 mod fields;
+mod generator;
 mod groups;
 pub mod health;
 mod journal;
@@ -110,6 +111,12 @@ pub fn router(state: AppState) -> Router<AppState> {
             get(mail::get).put(mail::save).delete(mail::remove),
         )
         .route("/settings/mail/test", post(mail::test))
+        .route("/settings/generator", put(generator::save_organisation))
+        .route("/generator", get(generator::get))
+        .route(
+            "/generator/own",
+            put(generator::save_own).delete(generator::remove_own),
+        )
         .route(
             "/settings/certificate",
             get(certificate::status)
