@@ -233,7 +233,6 @@ struct CredentialRow {
     collection_id: Uuid,
     name: String,
     username: String,
-    domain: String,
     version: i32,
     url: String,
     notes: String,
@@ -243,6 +242,17 @@ struct CredentialRow {
     fields: sqlx::types::Json<Vec<Field>>,
     /// Files kept with it (#100), without their content.
     attachments: sqlx::types::Json<Vec<Attachment>>,
+    /// Words to find it by (#193).
+    tags: Vec<String>,
+    /// `YYYY-MM-DD`: the day its password runs out; none: never.
+    expires_on: Option<String>,
+    /// Whether a one-time password is sealed with it; its codes come from
+    /// `POST /api/credentials/{id}/code`.
+    has_totp: bool,
+    /// RFC 3339, UTC.
+    updated_at: String,
+    /// RFC 3339, UTC: in the recycle bin since; none: in its collection.
+    deleted_at: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -281,12 +291,17 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
     .await?;
     let profiles: Vec<ProfileRow> = sqlx::query_as(PROFILES).fetch_all(&state.db).await?;
     let credentials: Vec<CredentialRow> = sqlx::query_as(
-        "SELECT c.id, c.collection_id, c.name, c.username, c.domain, c.version,
+        "SELECT c.id, c.collection_id, c.name, c.username, c.version,
                 c.url, c.notes, c.icon, c.fields,
                 coalesce((SELECT json_agg(json_build_object('id', a.id, 'name', a.name,
                                                             'size', a.size) ORDER BY a.name)
                           FROM credential_attachments a WHERE a.credential_id = c.id),
-                         '[]') AS attachments
+                         '[]') AS attachments,
+                c.tags, c.expires_on::text AS expires_on, c.has_totp,
+                to_char(c.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
+                    AS updated_at,
+                to_char(c.deleted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
+                    AS deleted_at
          FROM credentials c ORDER BY lower(c.name)",
     )
     .fetch_all(&state.db)
@@ -1231,8 +1246,6 @@ pub struct CredentialInput {
     #[serde(default)]
     username: String,
     #[serde(default)]
-    domain: String,
-    #[serde(default)]
     url: String,
     #[serde(default)]
     notes: String,
@@ -1240,6 +1253,16 @@ pub struct CredentialInput {
     icon: i16,
     #[serde(default)]
     fields: Vec<FieldInput>,
+    /// Words to find it by (#193).
+    #[serde(default)]
+    tags: Vec<String>,
+    /// `YYYY-MM-DD`; none: never runs out.
+    #[serde(default)]
+    expires_on: Option<String>,
+    /// Its one-time password: an `otpauth://totp/` link or a base32
+    /// secret. Absent on a change: the sealed one stays; empty: removed.
+    #[serde(default)]
+    totp: Option<SecretString>,
     #[serde(flatten)]
     secrets: SecretInput,
 }
@@ -1250,7 +1273,12 @@ struct Details {
     notes: String,
     icon: i16,
     fields: fields::Checked,
+    tags: Vec<String>,
+    expires_on: Option<String>,
 }
+
+/// The sealed field of a credential's one-time password (#193).
+pub(super) const TOTP_FIELD: &str = "totp";
 
 fn details(input: &CredentialInput) -> Result<Details, Problem> {
     let url = input.url.trim();
@@ -1264,12 +1292,70 @@ fn details(input: &CredentialInput) -> Result<Details, Problem> {
     if !(0..=68).contains(&input.icon) {
         return Err(invalid("icon"));
     }
+    let mut tags: Vec<String> = Vec::new();
+    for tag in &input.tags {
+        let tag = tag.trim();
+        if tag.is_empty() || tag.chars().count() > 50 || tag.chars().any(char::is_control) {
+            return Err(invalid("tags"));
+        }
+        if !tags.iter().any(|known| known.eq_ignore_ascii_case(tag)) {
+            tags.push(tag.to_owned());
+        }
+    }
+    if tags.len() > 20 {
+        return Err(invalid("tags"));
+    }
+    let expires_on = input
+        .expires_on
+        .as_deref()
+        .map(str::trim)
+        .filter(|day| !day.is_empty())
+        .map(|day| calendar_day(day).ok_or_else(|| invalid("expires_on")))
+        .transpose()?;
     Ok(Details {
         url: url.to_owned(),
         notes: notes.to_owned(),
         icon: input.icon,
         fields: fields::check(&input.fields)?,
+        tags,
+        expires_on,
     })
+}
+
+/// A day as `YYYY-MM-DD`, if `text` is one that exists.
+fn calendar_day(text: &str) -> Option<String> {
+    let mut parts = text.splitn(3, '-');
+    let year: i32 = parts.next()?.parse().ok()?;
+    // PostgreSQL's calendar has no year 0, and five digits no longer fit
+    // the form the UI writes.
+    if !(1..=9999).contains(&year) {
+        return None;
+    }
+    let month: u8 = parts.next()?.parse().ok()?;
+    let day: u8 = parts.next()?.parse().ok()?;
+    let date =
+        time::Date::from_calendar_date(year, time::Month::try_from(month).ok()?, day).ok()?;
+    Some(format!(
+        "{:04}-{:02}-{:02}",
+        date.year(),
+        u8::from(date.month()),
+        date.day()
+    ))
+}
+
+/// A one-time password as given: None to keep the sealed one, `Some(None)`
+/// to remove it, `Some(Some(text))` to seal `text`, which must read as one.
+fn totp_input(input: &CredentialInput) -> Result<Option<Option<SecretString>>, Problem> {
+    match &input.totp {
+        None => Ok(None),
+        Some(text) if text.expose_secret().trim().is_empty() => Ok(Some(None)),
+        Some(text) => {
+            crate::totp::Params::parse(text.expose_secret()).ok_or_else(|| invalid("totp"))?;
+            Ok(Some(Some(SecretString::from(
+                text.expose_secret().trim().to_owned(),
+            ))))
+        }
+    }
 }
 
 /// Copies sealed fields of `from` to the new version `to`, for what a
@@ -1464,6 +1550,25 @@ pub(super) async fn seal_version(
     Ok(())
 }
 
+async fn seal_totp(
+    tx: &mut sqlx::PgConnection,
+    state: &AppState,
+    id: Uuid,
+    version: i32,
+    totp: &SecretString,
+) -> Result<(), Problem> {
+    secrets::store(
+        &mut *tx,
+        &state.vault,
+        id,
+        version,
+        TOTP_FIELD,
+        totp.expose_secret().as_bytes(),
+    )
+    .await
+    .map_err(secret_problem)
+}
+
 pub async fn create_credential(
     State(state): State<AppState>,
     session: Session,
@@ -1473,9 +1578,9 @@ pub async fn create_credential(
     let input = body(input)?;
     let name = name(&input.name, "name")?;
     let username = plain(&input.username, "username")?;
-    let domain = plain(&input.domain, "domain")?;
     let secrets = new_secrets("password", &input.secrets)?.ok_or_else(|| invalid("password"))?;
     let details = details(&input)?;
+    let totp = totp_input(&input)?.flatten();
     // A new credential has no protected value to keep.
     if !details.fields.kept.is_empty() {
         return Err(invalid("fields"));
@@ -1490,23 +1595,32 @@ pub async fn create_credential(
 
     let mut tx = state.db.begin().await?;
     let id: Uuid = sqlx::query_scalar(
-        "INSERT INTO credentials (collection_id, name, username, domain, url, notes, icon, fields)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+        "INSERT INTO credentials (collection_id, name, username, url, notes, icon, fields, tags,
+                                  expires_on, has_totp)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10) RETURNING id",
     )
     .bind(input.collection_id)
     .bind(&name)
     .bind(&username)
-    .bind(&domain)
     .bind(&details.url)
     .bind(&details.notes)
     .bind(details.icon)
     .bind(sqlx::types::Json(&details.fields.stored))
+    .bind(&details.tags)
+    .bind(&details.expires_on)
+    .bind(totp.is_some())
     .fetch_one(&mut *tx)
     .await
     .map_err(database)?;
     seal_version(&mut tx, &state, id, 1, &secrets).await?;
     seal_fields(&mut tx, &state, id, 1, &details.fields.sealed).await?;
-    let details = json!({ "name": name, "username": username, "domain": domain });
+    if let Some(totp) = &totp {
+        seal_totp(&mut tx, &state, id, 1, totp).await?;
+    }
+    let details = json!({
+        "name": name, "username": username, "tags": details.tags,
+        "expires_on": details.expires_on, "has_totp": totp.is_some(),
+    });
     audit::record(
         &mut *tx,
         entry(
@@ -1532,7 +1646,6 @@ pub async fn update_credential(
     let input = body(input)?;
     let name = name(&input.name, "name")?;
     let username = plain(&input.username, "username")?;
-    let domain = plain(&input.domain, "domain")?;
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Edit, ObjectId::Credential(id))?;
     if catalog.parent(ObjectId::Credential(id)) != Some(input.collection_id) {
@@ -1543,38 +1656,47 @@ pub async fn update_credential(
             ObjectId::Collection(input.collection_id),
         )?;
     }
-    let (before, stored): (i32, sqlx::types::Json<Vec<Field>>) =
-        sqlx::query_as("SELECT version, fields FROM credentials WHERE id = $1")
+    let (before, stored, had_totp): (i32, sqlx::types::Json<Vec<Field>>, bool) =
+        sqlx::query_as("SELECT version, fields, has_totp FROM credentials WHERE id = $1")
             .bind(id)
             .fetch_one(&state.db)
             .await?;
     let secrets = new_secrets("password", &input.secrets)?;
     let details = details(&input)?;
+    let totp = totp_input(&input)?;
     if !details.fields.keeps_only_what_was(&stored) {
         return Err(invalid("fields"));
     }
     // Every secret belongs to a version: one that changes makes a new one,
     // and what did not change is copied into it.
     let fields_changed = details.fields.changes_secrets(&stored);
-    let changed = secrets.is_some() || fields_changed;
+    let totp_changed = matches!(totp, Some(Some(_))) || (had_totp && matches!(totp, Some(None)));
+    let changed = secrets.is_some() || fields_changed || totp_changed;
+    let has_totp = match &totp {
+        None => had_totp,
+        Some(given) => given.is_some(),
+    };
 
     let mut tx = state.db.begin().await?;
     let version: i32 = sqlx::query_scalar(
-        "UPDATE credentials SET collection_id = $2, name = $3, username = $4, domain = $5,
-             url = $7, notes = $8, icon = $9, fields = $10,
-             version = version + CASE WHEN $6 THEN 1 ELSE 0 END, updated_at = now()
+        "UPDATE credentials SET collection_id = $2, name = $3, username = $4,
+             url = $6, notes = $7, icon = $8, fields = $9, tags = $10, expires_on = $11::date,
+             has_totp = $12,
+             version = version + CASE WHEN $5 THEN 1 ELSE 0 END, updated_at = now()
          WHERE id = $1 RETURNING version",
     )
     .bind(id)
     .bind(input.collection_id)
     .bind(&name)
     .bind(&username)
-    .bind(&domain)
     .bind(changed)
     .bind(&details.url)
     .bind(&details.notes)
     .bind(details.icon)
     .bind(sqlx::types::Json(&details.fields.stored))
+    .bind(&details.tags)
+    .bind(&details.expires_on)
+    .bind(has_totp)
     .fetch_one(&mut *tx)
     .await
     .map_err(database)?;
@@ -1588,16 +1710,23 @@ pub async fn update_credential(
         if secrets.is_none() {
             kept.push(PASSWORD_FIELD.to_owned());
         }
+        if totp.is_none() && had_totp {
+            kept.push(TOTP_FIELD.to_owned());
+        }
         carry(&mut tx, &state, id, before, version, &kept).await?;
         seal_fields(&mut tx, &state, id, version, &details.fields.sealed).await?;
     }
     if let Some(secrets) = &secrets {
         seal_version(&mut tx, &state, id, version, secrets).await?;
     }
+    if let Some(Some(totp)) = &totp {
+        seal_totp(&mut tx, &state, id, version, totp).await?;
+    }
     let details = json!({
-        "name": name, "username": username, "domain": domain,
+        "name": name, "username": username, "tags": details.tags,
+        "expires_on": details.expires_on, "has_totp": has_totp,
         "collection_id": input.collection_id, "secret_changed": secrets.is_some(),
-        "fields_changed": fields_changed,
+        "fields_changed": fields_changed, "totp_changed": totp_changed,
     });
     audit::record(
         &mut *tx,
@@ -1614,7 +1743,84 @@ pub async fn update_credential(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+pub struct DeleteQuery {
+    #[serde(default)]
+    purge: bool,
+}
+
+/// `DELETE /api/credentials/{id}`: moves a credential into the recycle bin
+/// (#193); one already there stays there. With `?purge=true` it goes for
+/// good, with its sealed secrets and files, wherever it lies.
 pub async fn delete_credential(
+    State(state): State<AppState>,
+    session: Session,
+    ClientAddress(address): ClientAddress,
+    Path(id): Path<Uuid>,
+    query: Result<Query<DeleteQuery>, QueryRejection>,
+) -> Result<StatusCode, Problem> {
+    let Query(query) = query.map_err(|_| Problem::new(ErrorCode::InvalidRequest))?;
+    let (subject, catalog) = context(&state, &session).await?;
+    require(&catalog, &subject, Role::Edit, ObjectId::Credential(id))?;
+    let mut tx = state.db.begin().await?;
+    if query.purge {
+        purge_credentials(&mut tx, &[id]).await?;
+    } else {
+        // A repeated request, a double click say, must not purge what the
+        // first one binned.
+        let binned = sqlx::query(
+            "UPDATE credentials SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if binned == 0 {
+            return Ok(StatusCode::NO_CONTENT);
+        }
+    }
+    audit::record(
+        &mut *tx,
+        entry(
+            &session,
+            Action::CredentialDeleted,
+            ObjectId::Credential(id),
+            json!({ "purged": query.purge }),
+            &address,
+        ),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Deletes credentials for good, with their sealed secrets and files.
+pub(super) async fn purge_credentials(
+    tx: &mut sqlx::PgConnection,
+    ids: &[Uuid],
+) -> Result<(), Problem> {
+    // The files' contents are sealed under their own IDs.
+    sqlx::query(
+        "DELETE FROM secret_fields
+         WHERE owner_id IN (SELECT id FROM credential_attachments WHERE credential_id = ANY($1))",
+    )
+    .bind(ids)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM secret_fields WHERE owner_id = ANY($1)")
+        .bind(ids)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM credentials WHERE id = ANY($1)")
+        .bind(ids)
+        .execute(&mut *tx)
+        .await?;
+    Ok(())
+}
+
+/// `POST /api/credentials/{id}/restore`: takes a credential out of the
+/// recycle bin, back into its collection.
+pub async fn restore_credential(
     State(state): State<AppState>,
     session: Session,
     ClientAddress(address): ClientAddress,
@@ -1623,27 +1829,21 @@ pub async fn delete_credential(
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Edit, ObjectId::Credential(id))?;
     let mut tx = state.db.begin().await?;
-    // The files' contents are sealed under their own IDs.
-    sqlx::query(
-        "DELETE FROM secret_fields
-         WHERE owner_id IN (SELECT id FROM credential_attachments WHERE credential_id = $1)",
+    let restored = sqlx::query(
+        "UPDATE credentials SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL",
     )
     .bind(id)
     .execute(&mut *tx)
-    .await?;
-    sqlx::query("DELETE FROM secret_fields WHERE owner_id = $1")
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("DELETE FROM credentials WHERE id = $1")
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
+    .await?
+    .rows_affected();
+    if restored == 0 {
+        return Err(invalid("id"));
+    }
     audit::record(
         &mut *tx,
         entry(
             &session,
-            Action::CredentialDeleted,
+            Action::CredentialRestored,
             ObjectId::Credential(id),
             json!({}),
             &address,

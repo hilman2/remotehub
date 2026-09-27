@@ -20,10 +20,47 @@ export interface KdbxEntry {
 	icon: number;
 	fields: { name: string; value: string; protected: boolean }[];
 	files: { name: string; data: Uint8Array<ArrayBuffer> }[];
+	tags?: string[];
+	/** `YYYY-MM-DD`: when it runs out; none: never. */
+	expires?: string | null;
+	/** Its one-time password: an `otpauth://` link or a base32 secret. */
+	totp?: string;
 }
 
 /** The fields every KeePass entry has; the rest are custom fields. */
 const STANDARD = ['Title', 'UserName', 'Password', 'URL', 'Notes'];
+
+/**
+ * The one-time password of an entry's custom fields, and the fields without
+ * it. KeePassXC keeps an `otpauth://` link in `otp`; KeePass 2 keeps the
+ * secret and its settings in `TimeOtp-*` fields.
+ */
+export function takeTotp(fields: KdbxEntry['fields']): {
+	totp: string;
+	fields: KdbxEntry['fields'];
+} {
+	const byName = (name: string) =>
+		fields.find((field) => field.name.toLowerCase() === name.toLowerCase())?.value;
+	const link = byName('otp');
+	if (link) return { totp: link, fields: fields.filter((f) => f.name.toLowerCase() !== 'otp') };
+	const secret = byName('TimeOtp-Secret-Base32');
+	if (!secret) return { totp: '', fields };
+	const query = new URLSearchParams({ secret });
+	const algorithm = byName('TimeOtp-Algorithm');
+	if (algorithm) query.set('algorithm', algorithm.replace('HMAC-', '').replace('-', ''));
+	const digits = byName('TimeOtp-Length');
+	if (digits) query.set('digits', digits);
+	const period = byName('TimeOtp-Period');
+	if (period) query.set('period', period);
+	return {
+		totp: `otpauth://totp/entry?${query}`,
+		fields: fields.filter((f) => !f.name.startsWith('TimeOtp-'))
+	};
+}
+
+/** A date as `YYYY-MM-DD` in the local calendar. */
+const day = (date: Date) =>
+	`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 let engineReady = false;
 
@@ -79,6 +116,8 @@ export async function readKdbx(file: ArrayBuffer, password: string): Promise<Kdb
 					protected: value instanceof kdbxweb.ProtectedValue
 				});
 			}
+			const otp = takeTotp(fields);
+			const expiry = entry.times.expires && entry.times.expiryTime;
 			entries.push({
 				path,
 				title: text(entry.fields.get('Title')),
@@ -87,8 +126,11 @@ export async function readKdbx(file: ArrayBuffer, password: string): Promise<Kdb
 				url: text(entry.fields.get('URL')),
 				notes: text(entry.fields.get('Notes')),
 				icon: entry.icon ?? 0,
-				fields,
-				files: [...entry.binaries].map(([name, value]) => ({ name, data: bytes(value) }))
+				fields: otp.fields,
+				files: [...entry.binaries].map(([name, value]) => ({ name, data: bytes(value) })),
+				tags: [...(entry.tags ?? [])],
+				expires: expiry ? day(expiry) : null,
+				totp: otp.totp
 			});
 		}
 		for (const child of group.groups) walk(child, [...path, child.name ?? '']);
@@ -129,6 +171,12 @@ export async function writeKdbx(
 				field.name,
 				field.protected ? kdbxweb.ProtectedValue.fromString(field.value) : field.value
 			);
+		}
+		if (item.totp) entry.fields.set('otp', kdbxweb.ProtectedValue.fromString(item.totp));
+		if (item.tags?.length) entry.tags = [...item.tags];
+		if (item.expires) {
+			entry.times.expires = true;
+			entry.times.expiryTime = new Date(`${item.expires}T00:00:00`);
 		}
 		for (const file of item.files) {
 			entry.binaries.set(file.name, await db.createBinary(file.data.slice().buffer));

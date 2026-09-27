@@ -145,8 +145,8 @@ export interface Credential {
 	/** The collection it lives in (#190). */
 	collection_id: string;
 	name: string;
+	/** "DOMAIN\user" where a domain belongs, as KeePass keeps it. */
 	username: string;
-	domain: string;
 	version: number;
 	url: string;
 	notes: string;
@@ -155,6 +155,16 @@ export interface Credential {
 	fields: CredentialField[];
 	/** Files kept with it (#100), without content. */
 	attachments: { id: string; name: string; size: number }[];
+	/** Words to find it by (#193). */
+	tags: string[];
+	/** `YYYY-MM-DD`: when its password runs out; null: never. */
+	expires_on: string | null;
+	/** Whether it has a one-time password; codes come from the server. */
+	has_totp: boolean;
+	/** RFC 3339, UTC. */
+	updated_at: string;
+	/** RFC 3339, UTC: in the recycle bin since; null: in its collection. */
+	deleted_at: string | null;
 	role: Role;
 }
 
@@ -199,7 +209,6 @@ export interface CredentialInput {
 	collection_id: string;
 	name: string;
 	username: string;
-	domain: string;
 	/** Required when creating; omitted when updating keeps the password. */
 	password?: string;
 	url?: string;
@@ -207,6 +216,10 @@ export interface CredentialInput {
 	icon?: number;
 	/** A protected field without `value` keeps the one it has. */
 	fields?: { name: string; protected?: boolean; value?: string }[];
+	tags?: string[];
+	expires_on?: string | null;
+	/** An `otpauth://` link or base32 secret; omitted keeps it, empty removes it. */
+	totp?: string;
 }
 
 /** A custom field of a credential (#98); protected ones come without value. */
@@ -280,7 +293,12 @@ export const createCredential = (input: CredentialInput) =>
 	api<{ id: string }>('POST', '/api/credentials', input);
 export const updateCredential = (id: string, input: CredentialInput) =>
 	api('PUT', `/api/credentials/${id}`, input);
-export const deleteCredential = (id: string) => api('DELETE', `/api/credentials/${id}`);
+/** Into the recycle bin (#193); for one already there, for good. */
+/** Moves a credential into the recycle bin; with `purge`, deletes it for good. */
+export const deleteCredential = (id: string, purge = false) =>
+	api('DELETE', `/api/credentials/${id}${purge ? '?purge=true' : ''}`);
+/** Out of the recycle bin, back into its collection. */
+export const restoreCredential = (id: string) => api('POST', `/api/credentials/${id}/restore`);
 
 export const loadGrants = (kind: ObjectKind, id: string) =>
 	api<{ direct: GrantRow[]; inherited: GrantRow[] }>('GET', `/api/grants?kind=${kind}&id=${id}`);

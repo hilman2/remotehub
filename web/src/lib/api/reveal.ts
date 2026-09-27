@@ -12,7 +12,21 @@ export interface Revealed {
 	certificate?: string;
 	/** A credential's protected custom fields (#98). */
 	fields?: { name: string; value: string }[];
+	/** A credential's one-time password, for an export only (#193). */
+	totp?: string;
 }
+
+/** A one-time code the server computed (#193). */
+export interface Code {
+	code: string;
+	/** Seconds it still holds. */
+	remaining: number;
+	period: number;
+}
+
+/** The current one-time code of a shared credential; audited like a reveal. */
+export const credentialCode = (id: string, purpose: 'show' | 'copy') =>
+	api<Code>('POST', `/api/credentials/${id}/code`, { purpose });
 
 /** Why it is revealed; the audit log keeps it. */
 export type RevealPurpose = 'show' | 'copy' | 'export';

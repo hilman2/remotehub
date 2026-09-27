@@ -19,14 +19,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-use super::catalog::{body, context, invalid, require};
+use super::catalog::{TOTP_FIELD, body, context, invalid, require};
 use super::connect::stored_text;
 use super::fields::{Field, secret_name};
 use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
-use crate::AppState;
 use crate::audit::{self, Action, Actor, Entry};
 use crate::session::Session;
+use crate::{AppState, totp};
 
 #[derive(Deserialize)]
 pub struct Reveal {
@@ -61,6 +61,20 @@ pub struct Revealed {
     /// The protected custom fields of a credential (#98), in order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     fields: Vec<RevealedField>,
+    /// A credential's one-time password (#193), for a KeePass export only:
+    /// otherwise its codes come from `code`, and the secret stays here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    totp: Option<String>,
+}
+
+/// A one-time code of a credential (#193).
+#[derive(Serialize)]
+pub struct Code {
+    code: String,
+    /// Seconds it still holds.
+    remaining: u64,
+    /// Seconds each code holds.
+    period: u64,
 }
 
 #[derive(Serialize)]
@@ -93,6 +107,7 @@ async fn open(
         passphrase: None,
         certificate: None,
         fields: Vec::new(),
+        totp: None,
     };
     if kind == "ssh_key" {
         revealed.private_key = text("private_key").await?;
@@ -111,6 +126,25 @@ async fn record(
     details: serde_json::Value,
     address: &str,
 ) -> Result<(), Problem> {
+    record_as(
+        state,
+        session,
+        Action::CredentialRevealed,
+        object,
+        details,
+        address,
+    )
+    .await
+}
+
+async fn record_as(
+    state: &AppState,
+    session: &Session,
+    action: Action,
+    object: (&str, Uuid),
+    details: serde_json::Value,
+    address: &str,
+) -> Result<(), Problem> {
     audit::record(
         &state.db,
         Entry {
@@ -118,7 +152,7 @@ async fn record(
                 id: Some(session.user_id),
                 name: &session.username,
             },
-            action: Action::CredentialRevealed,
+            action,
             object: Some(object),
             details,
             address: Some(address),
@@ -151,9 +185,9 @@ pub async fn credential(
     let purpose = purpose(&input)?;
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Reveal, ObjectId::Credential(id))?;
-    type Row = (String, String, i32, sqlx::types::Json<Vec<Field>>);
-    let (username, domain, current, fields): Row =
-        sqlx::query_as("SELECT username, domain, version, fields FROM credentials WHERE id = $1")
+    type Row = (String, i32, sqlx::types::Json<Vec<Field>>);
+    let (username, current, fields): Row =
+        sqlx::query_as("SELECT username, version, fields FROM credentials WHERE id = $1")
             .bind(id)
             .fetch_one(&state.db)
             .await?;
@@ -180,7 +214,8 @@ pub async fn credential(
         .fetch_all(&state.db)
         .await?
     };
-    let mut revealed = open(&state, id, version, "password", username, domain).await?;
+    // Vault entries keep "DOMAIN\user" in the user name, as KeePass does.
+    let mut revealed = open(&state, id, version, "password", username, String::new()).await?;
     for name in names {
         let value = stored_text(&state, id, version, &secret_name(&name)).await?;
         revealed.fields.push(RevealedField {
@@ -190,9 +225,66 @@ pub async fn credential(
                 .unwrap_or_default(),
         });
     }
+    if purpose == "export" {
+        revealed.totp = stored_text(&state, id, version, TOTP_FIELD)
+            .await?
+            .map(|v| v.expose_secret().to_owned());
+    }
     let details = json!({ "purpose": purpose, "version": version });
     record(&state, &session, ("credential", id), details, &address).await?;
     Ok(answer(revealed))
+}
+
+/// `POST /api/credentials/{id}/code`: the credential's current one-time
+/// code (#193), for `show` or `copy`. The server computes it, so its secret
+/// never leaves; like a password it takes `reveal` and is audited.
+pub async fn code(
+    State(state): State<AppState>,
+    session: Session,
+    ClientAddress(address): ClientAddress,
+    Path(id): Path<Uuid>,
+    input: Result<Json<Reveal>, JsonRejection>,
+) -> Result<impl IntoResponse, Problem> {
+    let input = body(input)?;
+    let purpose = match input.purpose.as_str() {
+        "show" | "copy" => input.purpose.as_str(),
+        _ => return Err(invalid("purpose")),
+    };
+    let (subject, catalog) = context(&state, &session).await?;
+    require(&catalog, &subject, Role::Reveal, ObjectId::Credential(id))?;
+    let (version, has_totp): (i32, bool) =
+        sqlx::query_as("SELECT version, has_totp FROM credentials WHERE id = $1")
+            .bind(id)
+            .fetch_one(&state.db)
+            .await?;
+    if !has_totp {
+        return Err(Problem::new(ErrorCode::NotFound));
+    }
+    let secret = stored_text(&state, id, version, TOTP_FIELD)
+        .await?
+        .ok_or(Problem::new(ErrorCode::Internal))?;
+    let params = totp::Params::parse(secret.expose_secret()).ok_or_else(|| {
+        tracing::error!(credential = %id, "a sealed one-time password does not read");
+        Problem::new(ErrorCode::Internal)
+    })?;
+    let (code, remaining) = params.code_at(totp::unix_now());
+    record_as(
+        &state,
+        &session,
+        Action::CredentialCodeShown,
+        ("credential", id),
+        json!({ "purpose": purpose }),
+        &address,
+    )
+    .await?;
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(Code {
+            code,
+            remaining,
+            period: params.period,
+        }),
+    ))
 }
 
 /// The versions of a credential's secrets, newest first; with `reveal`,

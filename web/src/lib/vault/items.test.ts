@@ -2,15 +2,17 @@ import { describe, expect, it } from 'vitest';
 import type { Credential, Tree } from '$lib/api/catalog';
 import {
 	counter,
+	isExpired,
+	isExpiring,
 	listed,
 	outline,
 	personalFolders,
 	personalItems,
 	sharedItems,
-	type Scope,
-	type Sort
+	type Column,
+	type Scope
 } from './items';
-import type { Entry } from './vault';
+import type { Entry, EntryContent } from './vault';
 
 function credential(id: string, name: string, collection: string, more: Partial<Credential> = {}) {
 	return {
@@ -18,13 +20,17 @@ function credential(id: string, name: string, collection: string, more: Partial<
 		collection_id: collection,
 		name,
 		username: 'admin',
-		domain: '',
 		version: 1,
 		url: '',
 		notes: '',
 		icon: 0,
 		fields: [],
 		attachments: [],
+		tags: [],
+		expires_on: null,
+		has_totp: false,
+		updated_at: '2026-09-01T10:00:00Z',
+		deleted_at: null,
 		role: 'reveal',
 		...more
 	} satisfies Credential;
@@ -43,48 +49,62 @@ const tree: Tree = {
 		{ id: 'b', parent_id: null, name: 'buying', role: 'reveal' }
 	],
 	credentials: [
-		credential('c1', 'Domain admin', 'ms', { domain: 'MUELLER' }),
-		credential('c2', 'Deploy portal', 'm'),
+		credential('c1', 'Domain admin', 'ms', {
+			username: 'MUELLER\\admin',
+			updated_at: '2026-09-20T08:00:00Z',
+			tags: ['windows']
+		}),
+		credential('c2', 'Deploy portal', 'm', { expires_on: '2026-09-30' }),
 		credential('c3', 'Office shop', 'b', {
-			fields: [{ name: 'TOTP', protected: true }],
-			attachments: [{ id: 'f', name: 'invoice.pdf', size: 10 }]
-		})
+			has_totp: true,
+			attachments: [{ id: 'f', name: 'invoice.pdf', size: 10 }],
+			expires_on: '2026-09-01'
+		}),
+		credential('c4', 'Old supplier', 'b', { deleted_at: '2026-09-25T12:00:00Z' })
 	]
 };
 
-const entry = (id: string, title: string, parent: string | null, folder = false): Entry => ({
+const entry = (
+	id: string,
+	title: string,
+	parent: string | null,
+	more: Partial<EntryContent> = {}
+): Entry => ({
 	id,
-	content: {
-		...(folder ? { kind: 'folder' as const } : {}),
-		parent,
-		title,
-		username: 'me',
-		password: 'secret',
-		url: '',
-		notes: ''
-	}
+	content: { parent, title, username: 'me', password: 'secret', url: '', notes: '', ...more }
 });
 
 const entries: Entry[] = [
-	entry('shops', 'Shops', null, true),
-	entry('books', 'Books', 'shops', true),
-	entry('p1', 'Bookshop', 'books'),
-	entry('p2', 'Bank', null),
+	entry('shops', 'Shops', null, { kind: 'folder' }),
+	entry('books', 'Books', 'shops', { kind: 'folder' }),
+	entry('p1', 'Bookshop', 'books', { changed: '2026-09-10T00:00:00Z', notes: 'Paperbacks' }),
+	entry('p2', 'Bank', null, {
+		fields: [{ name: 'otp', value: 'otpauth://totp/x?secret=JBSWY3DPEHPK3PXP', protected: true }]
+	}),
+	entry('p3', 'Forum', null, { deleted: '2026-09-26T00:00:00Z' }),
 	{ id: 'broken', content: null }
 ];
 
+const TODAY = '2026-09-27';
 const items = [...sharedItems(tree), ...personalItems(entries)];
 const context = {
 	folders: personalFolders(entries),
 	collections: tree.collections,
 	picks: [],
-	now: 0
+	now: 0,
+	today: TODAY
 };
-const titles = (scope: Scope, query = '', sort: Sort = 'name') =>
-	listed(items, { ...context, scope, sort, query, locale: 'en' }).map((item) => item.title);
+const titles = (scope: Scope, query = '', column: Column = 'title', descending = false) =>
+	listed(items, {
+		...context,
+		scope,
+		sort: { column, descending },
+		query,
+		locale: 'en'
+	}).map((item) => item.title);
 
-describe('the vault list', () => {
-	it('holds shared and readable personal entries, never folders', () => {
+describe('the vault table', () => {
+	it('holds shared and readable personal entries, never folders, the bins apart', () => {
 		expect(titles({ kind: 'all' })).toEqual([
 			'Bank',
 			'Bookshop',
@@ -92,9 +112,11 @@ describe('the vault list', () => {
 			'Domain admin',
 			'Office shop'
 		]);
+		expect(titles({ kind: 'bin', side: 'shared' })).toEqual(['Old supplier']);
+		expect(titles({ kind: 'bin', side: 'personal' })).toEqual(['Forum']);
 	});
 
-	it('writes the path and the domain as the list shows them', () => {
+	it('keeps the user name as written and the path of the collection', () => {
 		const admin = items.find((item) => item.id === 'c1');
 		expect(admin?.where).toBe('Müller / Server');
 		expect(admin?.username).toBe('MUELLER\\admin');
@@ -104,41 +126,61 @@ describe('the vault list', () => {
 	it('reaches into what lies below a collection or personal folder, and no further', () => {
 		expect(titles({ kind: 'collection', id: 'm' })).toEqual(['Deploy portal', 'Domain admin']);
 		expect(titles({ kind: 'collection', id: 'ms' })).toEqual(['Domain admin']);
+		expect(titles({ kind: 'collection', id: 'b' })).toEqual(['Office shop']);
 		expect(titles({ kind: 'personal', folder: 'shops' })).toEqual(['Bookshop']);
 		expect(titles({ kind: 'personal', folder: null })).toEqual(['Bank', 'Bookshop']);
 	});
 
-	it('filters by kind', () => {
-		expect(titles({ kind: 'filter', filter: 'totp' })).toEqual(['Office shop']);
-		expect(titles({ kind: 'filter', filter: 'files' })).toEqual(['Office shop']);
+	it('finds what runs out: run out today or before, and within two weeks', () => {
+		expect(titles({ kind: 'expiring' })).toEqual(['Deploy portal', 'Office shop']);
+		const [portal, shop] = ['c2', 'c3'].map((id) => items.find((item) => item.id === id)!);
+		expect(isExpired(shop, TODAY)).toBe(true);
+		expect(isExpired(portal, TODAY)).toBe(false);
+		expect(isExpiring(portal, TODAY)).toBe(true);
+		expect(isExpiring(portal, '2026-09-01')).toBe(false);
 	});
 
-	it('searches the whole vault, whatever the scope', () => {
+	it('knows one-time passwords, the shared ones and those kept in a field', () => {
+		const withTotp = items.filter((item) => item.hasTotp).map((item) => item.title);
+		expect(withTotp.sort()).toEqual(['Bank', 'Office shop']);
+	});
+
+	it('searches the whole vault but the bins, tags and notes included', () => {
 		expect(titles({ kind: 'collection', id: 'b' }, 'book')).toEqual(['Bookshop']);
-		expect(titles({ kind: 'personal', folder: null }, 'server')).toEqual(['Domain admin']);
+		expect(titles({ kind: 'personal', folder: null }, 'windows')).toEqual(['Domain admin']);
+		expect(titles({ kind: 'all' }, 'paperbacks')).toEqual(['Bookshop']);
+		expect(titles({ kind: 'all' }, 'supplier')).toEqual([]);
 	});
 
-	it('sorts by use, and by place with the personal vault first', () => {
+	it('sorts by any column, either way, ties by title', () => {
+		expect(titles({ kind: 'all' }, '', 'title', true)).toEqual([
+			'Office shop',
+			'Domain admin',
+			'Deploy portal',
+			'Bookshop',
+			'Bank'
+		]);
+		// Newest first; an entry never saved since #193 has no time and comes last.
+		expect(titles({ kind: 'all' }, '', 'changed', true).slice(0, 2)).toEqual([
+			'Domain admin',
+			'Bookshop'
+		]);
+		expect(titles({ kind: 'all' }, '', 'username')[0]).toBe('Deploy portal');
+	});
+
+	it('shows recent entries in the order of use', () => {
 		const picks = [
 			{ key: 'credential:c3', query: '', count: 5, last: 0 },
 			{ key: 'p2', query: '', count: 2, last: 0 }
 		];
-		const used = listed(items, {
+		const recent = listed(items, {
 			...context,
 			picks,
-			scope: { kind: 'all' },
-			sort: 'used',
-			query: '',
-			locale: 'en'
+			scope: { kind: 'recent' },
+			sort: { column: 'title', descending: false },
+			query: ''
 		});
-		expect(used.map((item) => item.title).slice(0, 2)).toEqual(['Office shop', 'Bank']);
-		expect(titles({ kind: 'all' }, '', 'place')).toEqual([
-			'Bank',
-			'Bookshop',
-			'Office shop',
-			'Deploy portal',
-			'Domain admin'
-		]);
+		expect(recent.map((item) => item.title)).toEqual(['Office shop', 'Bank']);
 	});
 
 	it('counts what each scope holds', () => {
@@ -146,6 +188,7 @@ describe('the vault list', () => {
 		expect(count({ kind: 'all' })).toBe(5);
 		expect(count({ kind: 'collection', id: 'm' })).toBe(2);
 		expect(count({ kind: 'personal', folder: 'books' })).toBe(1);
+		expect(count({ kind: 'bin', side: 'shared' })).toBe(1);
 	});
 });
 

@@ -147,9 +147,10 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   collection or an entry: `list < connect < reveal < edit < manage`. Grants are inherited downwards within
   their own tree and only allow; a login profile takes none of its own and has its folder's. `authorize()`
   is the single decision point and is tested table-driven.
-- **KeePass fields (`api/fields.rs`):** credentials carry URL, notes, one of KeePass' 69 standard icons
-  (by number; the UI draws a Lucide icon for each) and custom fields. Plain fields are stored with the
-  credential; protected ones are sealed as `field:<name>` with the credential's version. A change of a
+- **KeePass fields (`api/fields.rs`):** credentials carry URL, notes, tags, a day the password runs out,
+  one of KeePass' 69 standard icons (by number; the UI draws a Lucide icon for each), a TOTP secret and
+  custom fields. Plain fields are stored with the credential; protected ones are sealed as `field:<name>`,
+  the TOTP secret as `totp`, with the credential's version. A change of a
   protected field makes a new version, into which the unchanged sealed values are copied. Personal vault
   entries carry the same inside their browser-sealed content, and personal folders are entries of kind
   `folder`.
@@ -163,7 +164,10 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   reveal. Every sealed version of a credential stays, and `reveal` opens an older one by number. Personal
   entries keep up to ten earlier states inside their sealed content, and their files are sealed in the
   browser under an associated data of their own (`…\nfile\n<id>`), so a file never opens as an entry. The
-  browser makes passwords (Web Crypto, no look-alikes) and shows TOTP codes of `otpauth://` fields.
+  browser makes passwords (Web Crypto, no look-alikes).
+- **One-time codes (`api/reveal.rs`, `crates/totp`):** the server makes a shared credential's current TOTP
+  code (`POST /api/credentials/{id}/code`); it takes `reveal` and is audited as `credential.code_shown`.
+  The secret leaves the server only in an export. The browser makes the codes of personal entries.
 - **Reveal (`api/reveal.rs`):** with `reveal`, a vault credential, a login profile or a device's own
   credentials are shown or copied on their page. Each time is audited (`credential.revealed`, with `show` or `copy`) before the
   value leaves the server, and the answer is `no-store`. The UI hides a shown value and clears a copied
@@ -211,6 +215,11 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   from the device folders, and no device uses them (ADR 0015). `/vault` lists them together with the
   personal entries, which need the personal vault unlocked; the shared ones do not
   (`web/src/lib/vault/items.ts`).
+- **The vault page works like KeePass** (ADR 0016): a tree of views and folders, a table sorted by column,
+  the chosen entry below it. A deleted entry goes into its side's recycle bin first (`deleted_at` for a
+  credential, a mark inside the sealed content for a personal entry); a purge (`?purge=true` for a
+  credential) removes it with its sealed versions and files. Moving an entry between personal and shared converts it through KDBX in
+  the browser (`web/src/routes/vault/+page.svelte`).
 - **Organisation recovery key** (ADR 0009, `api/recovery.rs`, `/recovery`): the browser also wraps each
   vault key for the organisation's public key (ECDH P-256, HKDF, AES-KW), as an unlock of kind
   `organisation` the owner cannot remove. An administrator asks for a recovery, a security officer who

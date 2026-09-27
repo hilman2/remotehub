@@ -38,29 +38,32 @@ async function openVault(page: Page) {
 	await expect(page.getByRole('heading', { name: 'Vault', level: 1 })).toBeVisible();
 }
 
-/** A collection at the top of the vault, shown once made. */
+/** A shared folder at the top of the vault, shown once made. */
 async function newCollection(page: Page, name: string) {
 	await openVault(page);
 	const dialog = page.getByRole('dialog');
-	await page.getByRole('button', { name: 'New collection' }).click();
+	await page.getByRole('button', { name: 'New shared folder' }).click();
 	await dialog.getByLabel('Name', { exact: true }).fill(name);
 	await dialog.getByRole('button', { name: 'Create' }).click();
 	await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
 }
 
 /**
- * A shared credential in a collection of its own (#190); `fill` completes
- * the form after the name.
+ * A shared entry in a shared folder of its own (#190, #193); `fill`
+ * completes the form after the title.
  */
 async function newCredential(page: Page, name: string, fill: (dialog: Locator) => Promise<void>) {
 	await newCollection(page, `${name} collection`);
 	const dialog = page.getByRole('dialog');
-	await page.getByRole('button', { name: 'New', exact: true }).click();
-	await dialog.getByLabel('Name', { exact: true }).fill(name);
+	await page.getByRole('button', { name: 'New entry' }).click();
+	await dialog.getByLabel('Title').fill(name);
 	await fill(dialog);
 	await dialog.getByRole('button', { name: 'Create' }).click();
 	await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
 }
+
+/** The chosen entry's details below the table. */
+const details = (page: Page) => page.getByRole('region', { name: 'Entry details' });
 
 /**
  * Sets up the signed-in user's personal vault anew with `passphrase`: an
@@ -200,13 +203,14 @@ test('a stored password is shown and copied, and the audit log knows', async ({
 	});
 	await expect(page.locator('body')).not.toContainText('Shown-Passw0rd!');
 
-	await page.getByRole('button', { name: 'Show', exact: true }).click();
+	const pane = details(page);
+	await pane.getByRole('button', { name: 'Show password' }).click();
 	await expect(page.getByTestId('revealed')).toHaveText('Shown-Passw0rd!');
-	await page.getByRole('button', { name: 'Hide', exact: true }).click();
+	await pane.getByRole('button', { name: 'Hide password' }).click();
 	await expect(page.getByTestId('revealed')).toHaveCount(0);
 
-	await page.getByRole('button', { name: 'Copy', exact: true }).click();
-	await expect(page.getByRole('status').filter({ hasText: 'Copied' })).toBeVisible();
+	await pane.getByRole('button', { name: 'Copy password' }).click();
+	await expect(page.getByRole('status').filter({ hasText: 'copied' })).toBeVisible();
 	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Shown-Passw0rd!');
 
 	// This credential's entries: other tests write to the log meanwhile.
@@ -268,31 +272,35 @@ test('the vault keeps folders, fields and icons, and shows what is shared', asyn
 	await dialog.getByRole('button', { name: 'Create' }).click();
 	await expect(page.getByRole('heading', { name: 'Bank', exact: true })).toBeVisible();
 
-	await page.getByRole('button', { name: 'New', exact: true }).click();
+	// The editor's tabs, as in KeePass: fields under "Advanced", the icon
+	// under "Properties".
+	await page.getByRole('button', { name: 'New entry' }).click();
 	await dialog.getByLabel('Title').fill('Online banking');
 	await dialog.getByLabel('Password').fill('Bank-Pass!');
+	await dialog.getByRole('tab', { name: 'Advanced' }).click();
 	await dialog.getByRole('button', { name: 'Add field' }).click();
 	await dialog.getByLabel('Field name').fill('PIN');
 	await dialog.getByLabel('Value').fill('1234');
 	await dialog.getByLabel('Protected').check();
+	await dialog.getByRole('tab', { name: 'Properties' }).click();
 	await dialog.getByRole('radio', { name: 'Icon 37' }).click();
-	await dialog.getByRole('button', { name: 'Save' }).click();
+	await dialog.getByRole('button', { name: 'Create' }).click();
 	await expect(page.getByRole('heading', { name: 'Online banking' })).toBeVisible();
 	await expect(page.getByText('Personal · Bank')).toBeVisible();
 	await expect(page.getByText('1234')).toHaveCount(0);
-	await page.getByRole('button', { name: 'Show', exact: true }).click();
+	await details(page).getByRole('button', { name: 'Show password' }).click();
 	await expect(page.getByText('1234')).toBeVisible();
 
-	// A collection lists only what is in it.
+	// A shared folder lists only what is in it.
 	await page.getByRole('button', { name: new RegExp(`^${shared} collection`) }).click();
 	const entries = page.getByRole('region', { name: `${shared} collection` });
 	await expect(entries.getByTestId('personal-entry')).toHaveCount(0);
 
 	// The shared credential, with its protected field on request.
 	await entries.getByTestId('shared-entry').filter({ hasText: shared }).click();
-	const detail = page.getByRole('region', { name: 'Entry' });
+	const detail = details(page);
 	await expect(detail).toContainText('https://router.lan');
-	await detail.getByRole('button', { name: 'Show', exact: true }).click();
+	await detail.getByRole('button', { name: 'Show password' }).click();
 	await expect(detail.getByTestId('revealed-field')).toHaveText('8765');
 });
 
@@ -300,67 +308,106 @@ test('a shared credential keeps files and its earlier passwords', async ({ page 
 	await signIn(page);
 	const dialog = page.getByRole('dialog');
 	const credential = `files ${run}`;
-	await newCredential(page, credential, (form) =>
-		form.getByLabel('Password', { exact: true }).fill('Old-Passw0rd!')
-	);
-
-	await page.locator('input[type=file]').setInputFiles({
-		name: 'vpn.ovpn',
-		mimeType: 'text/plain',
-		buffer: Buffer.from('remote vpn.example.com')
+	await newCredential(page, credential, async (form) => {
+		await form.getByLabel('Password', { exact: true }).fill('Old-Passw0rd!');
+		await form.getByRole('tab', { name: 'Advanced' }).click();
+		await form.locator('input[type=file]').setInputFiles({
+			name: 'vpn.ovpn',
+			mimeType: 'text/plain',
+			buffer: Buffer.from('remote vpn.example.com')
+		});
 	});
+
 	const downloading = page.waitForEvent('download');
-	await page.getByRole('link', { name: 'vpn.ovpn' }).click();
+	await details(page)
+		.getByRole('link', { name: /vpn\.ovpn/ })
+		.click();
 	const download = await downloading;
 	expect(download.suggestedFilename()).toBe('vpn.ovpn');
 
-	await page.getByRole('button', { name: 'Edit', exact: true }).click();
+	// A new password; the old one stays as an earlier version.
+	const edit = () => details(page).getByRole('button', { name: 'Edit', exact: true }).click();
+	await edit();
 	await dialog.getByLabel('Password', { exact: true }).fill('New-Passw0rd!');
 	await dialog.getByRole('button', { name: 'Save' }).click();
-	await page.getByRole('button', { name: 'Earlier versions' }).click();
+	await expect(dialog).toBeHidden();
+	await edit();
+	await dialog.getByRole('tab', { name: 'History' }).click();
+	const first = dialog.getByRole('listitem').last();
+	await first.getByRole('button', { name: 'Show' }).click();
+	await expect(first.getByTestId('earlier-password')).toHaveText('Old-Passw0rd!');
+});
+
+test('a shared entry shows one-time codes and waits in the recycle bin', async ({ page }) => {
+	await signIn(page);
+	const credential = `totp ${run}`;
+	await newCredential(page, credential, async (form) => {
+		await form.getByRole('tab', { name: 'Advanced' }).click();
+		await form
+			.getByLabel('One-time code')
+			.fill('otpauth://totp/Shop:alice?secret=JBSWY3DPEHPK3PXP&issuer=Shop');
+	});
+	const pane = details(page);
+	await pane.getByRole('button', { name: 'Show one-time code' }).click();
+	await expect(pane.getByTestId('totp-code')).toHaveText(/^\d{6}$/);
+
+	// Deleted once, it leaves its folder for the recycle bin and comes back from there.
+	await page.getByRole('button', { name: 'Move to recycle bin' }).click();
+	const folder = page.getByRole('region', { name: `${credential} collection` });
+	await expect(folder.getByTestId('shared-entry')).toHaveCount(0);
 	await page
-		.getByRole('listitem')
-		.filter({ hasText: 'Version 1' })
-		.getByRole('button', { name: 'Show' })
+		.getByRole('region', { name: 'Shared', exact: true })
+		.getByRole('button', { name: /^Recycle bin/ })
 		.click();
-	await expect(page.getByTestId('earlier-password')).toHaveText('Old-Passw0rd!');
+	await page
+		.getByRole('region', { name: 'Shared recycle bin' })
+		.getByTestId('shared-entry')
+		.filter({ hasText: credential })
+		.click();
+	await details(page).getByRole('button', { name: 'Restore' }).click();
+	await page.getByRole('button', { name: new RegExp(`^${credential} collection`) }).click();
+	await expect(folder.getByTestId('shared-entry').filter({ hasText: credential })).toBeVisible();
 });
 
 test('vault entries keep files, earlier passwords and show TOTP codes', async ({ page }) => {
 	await signIn(page);
 	await freshVault(page, 'long enough passphrase');
 	const dialog = page.getByRole('dialog');
-	await page.getByRole('button', { name: 'New', exact: true }).click();
+	await page.getByRole('button', { name: 'New entry' }).click();
 	await dialog.getByLabel('Title').fill('Mail');
 	await dialog.getByLabel('Password').fill('First-Pass!');
-	await dialog.getByRole('button', { name: 'Add field' }).click();
-	await dialog.getByLabel('Field name').fill('otp');
+	await dialog.getByRole('tab', { name: 'Advanced' }).click();
 	await dialog
-		.getByLabel('Value')
+		.getByLabel('One-time code')
 		.fill('otpauth://totp/mail?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
 	await dialog.locator('input[type=file]').setInputFiles({
 		name: 'backup-codes.txt',
 		mimeType: 'text/plain',
 		buffer: Buffer.from('11111 22222')
 	});
-	await dialog.getByRole('button', { name: 'Save' }).click();
+	await dialog.getByRole('button', { name: 'Create' }).click();
 	await expect(page.getByRole('heading', { name: 'Mail', exact: true })).toBeVisible();
 
 	// A new password from the generator; the first one goes into the history.
-	await page.getByRole('button', { name: 'Edit', exact: true }).click();
+	const pane = details(page);
+	await pane.getByRole('button', { name: 'Edit', exact: true }).click();
 	await dialog.getByRole('button', { name: 'Generate a password' }).click();
 	const generated = await dialog.getByLabel('Password').inputValue();
 	expect(generated).toHaveLength(20);
 	await dialog.getByRole('button', { name: 'Save' }).click();
-	await page.getByRole('button', { name: 'Show', exact: true }).click();
+	await expect(dialog).toBeHidden();
+	await pane.getByRole('button', { name: 'Show password' }).click();
 	await expect(page.getByText(generated)).toBeVisible();
+	await pane.getByRole('button', { name: 'Show one-time code' }).click();
 	await expect(page.getByTestId('totp-code')).toHaveText(/^\d{6}$/);
-	await page.getByText('Earlier versions').click();
-	await expect(page.getByTestId('earlier-password')).toHaveText('First-Pass!');
+	await pane.getByRole('button', { name: 'Edit', exact: true }).click();
+	await dialog.getByRole('tab', { name: 'History' }).click();
+	await expect(dialog.getByTestId('earlier-password')).toHaveText('First-Pass!');
+	await page.keyboard.press('Escape');
 
 	// The file comes back as it went in, opened in the browser.
 	const downloading = page.waitForEvent('download');
-	await page.getByRole('button', { name: /backup-codes\.txt/ }).click();
+	await pane.getByRole('button', { name: /backup-codes\.txt/ }).click();
 	const download = await downloading;
 	const chunks: Buffer[] = [];
 	for await (const chunk of await download.createReadStream()) chunks.push(chunk as Buffer);
@@ -759,16 +806,16 @@ test('the personal vault opens only in the browser, with passphrase, passkey or 
 	const unlockHeading = page.getByRole('heading', { name: 'Unlock your vault' });
 
 	const secret = `Router-Pw-${run}`;
-	await page.getByRole('button', { name: 'New', exact: true }).click();
+	await page.getByRole('button', { name: 'New entry' }).click();
 	const dialog = page.getByRole('dialog');
 	await dialog.getByLabel('Title').fill('Office router');
 	await dialog.getByLabel('User name').fill('admin');
 	await dialog.getByLabel('Password').fill(secret);
-	await dialog.getByRole('button', { name: 'Save' }).click();
+	await dialog.getByRole('button', { name: 'Create' }).click();
 	const router = page.getByTestId('personal-entry').filter({ hasText: 'Office router' });
 	await expect(router).toBeVisible();
 	await expect(page.getByText(secret)).toHaveCount(0);
-	await page.getByRole('button', { name: 'Show', exact: true }).click();
+	await details(page).getByRole('button', { name: 'Show password' }).click();
 	await expect(page.getByText(secret)).toBeVisible();
 
 	// The server holds nothing readable of it.
@@ -820,11 +867,11 @@ test('a device that asks for credentials takes them from the unlocked vault', as
 	await signIn(page);
 	await freshVault(page, 'long enough passphrase');
 	const dialog = page.getByRole('dialog');
-	await page.getByRole('button', { name: 'New', exact: true }).click();
+	await page.getByRole('button', { name: 'New entry' }).click();
 	await dialog.getByLabel('Title').fill(`Lab tester ${run}`);
 	await dialog.getByLabel('User name').fill('tester');
 	await dialog.getByLabel('Password').fill('Tester-Passw0rd!');
-	await dialog.getByRole('button', { name: 'Save' }).click();
+	await dialog.getByRole('button', { name: 'Create' }).click();
 	await expect(page.getByRole('heading', { name: `Lab tester ${run}` })).toBeVisible();
 
 	// The vault stays open on the way to the devices.
@@ -1058,7 +1105,7 @@ test('the vault takes in a KeePass file and gives one back', async ({ page }) =>
 		.getByRole('region', { name: 'Personal', exact: true })
 		.getByRole('button', { name: /^Servers/ })
 		.click();
-	await expect(page.getByTestId('personal-entry')).toContainText('admin · https://router.lan');
+	await expect(page.getByTestId('personal-entry')).toContainText('router.lan');
 
 	await settings.click();
 	await page.getByRole('menuitem', { name: 'Export as a KeePass file' }).click();
@@ -1162,10 +1209,10 @@ test('a vault is recovered with the organisation key once someone else approved'
 	const bob = await bobs.newPage();
 	await signIn(bob, 'bob', 'Bob-Passw0rd!');
 	await freshVault(bob, 'bobs long passphrase');
-	await bob.getByRole('button', { name: 'New', exact: true }).click();
+	await bob.getByRole('button', { name: 'New entry' }).click();
 	await bob.getByRole('dialog').getByLabel('Title').fill('Bob mail');
 	await bob.getByRole('dialog').getByLabel('Password').fill('Bob-Mail-Pass!');
-	await bob.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
+	await bob.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
 	const bobMail = bob.getByTestId('personal-entry').filter({ hasText: 'Bob mail' });
 	await expect(bobMail).toBeVisible();
 	await bob.getByRole('button', { name: 'Personal vault settings' }).click();
@@ -1231,7 +1278,7 @@ test('a vault is recovered with the organisation key once someone else approved'
 	await approved(/Hand-over/);
 	await dialog.getByLabel('Key file', { exact: true }).setInputFiles(keyFile);
 	await dialog.getByLabel('Passphrase of the key file').fill('key file passphrase');
-	await dialog.getByLabel('Shared collection for the entries').selectOption({ label: target });
+	await dialog.getByLabel('Shared folder for the entries').selectOption({ label: target });
 	await dialog.getByRole('button', { name: 'Carry out' }).click();
 	await expect(dialog.getByRole('status')).toHaveText('Entries imported: 1.');
 	await page.keyboard.press('Escape');
@@ -1243,8 +1290,13 @@ test('a vault is recovered with the organisation key once someone else approved'
 	).toContainText('Carried out');
 
 	await openVault(page);
-	await page.getByRole('searchbox').fill('Bob mail');
-	await expect(page.getByTestId('shared-entry').filter({ hasText: target })).toBeVisible();
+	await page.getByRole('button', { name: new RegExp(`^${target}`) }).click();
+	await expect(
+		page
+			.getByRole('region', { name: target })
+			.getByTestId('shared-entry')
+			.filter({ hasText: 'Bob mail' })
+	).toBeVisible();
 	await bobs.close();
 });
 

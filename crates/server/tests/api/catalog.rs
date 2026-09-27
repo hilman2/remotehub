@@ -482,7 +482,7 @@ async fn passwords_are_sealed_versioned_and_never_returned(pool: PgPool) {
 
     let change = |password: Option<&str>| {
         let mut body = json!({
-            "collection_id": f.linux_keys, "name": "root", "username": "root", "domain": "",
+            "collection_id": f.linux_keys, "name": "root", "username": "root",
         });
         if let Some(p) = password {
             body["password"] = json!(p);
@@ -527,18 +527,29 @@ async fn passwords_are_sealed_versioned_and_never_returned(pool: PgPool) {
     assert!(log.contains("credential.updated") && log.contains("\"secret_changed\":true"));
     assert!(!log.contains("T0p-Secret!") && !log.contains("N3w!"));
 
-    // Deleting the credential deletes every sealed version of it.
-    assert_eq!(
-        call(&f.app, &f.alice, "DELETE", &uri, None).await.status,
-        StatusCode::NO_CONTENT
-    );
-    let left: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM secret_fields WHERE owner_id = $1::uuid")
-            .bind(&f.root_pw)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(left, 0);
+    // Deleting the credential moves it into the recycle bin (#193), which
+    // keeps every sealed version, also when the request comes twice; only
+    // a purge deletes them all.
+    let left = || {
+        let (pool, id) = (&pool, &f.root_pw);
+        async move {
+            let left: i64 =
+                sqlx::query_scalar("SELECT count(*) FROM secret_fields WHERE owner_id = $1::uuid")
+                    .bind(id)
+                    .fetch_one(pool)
+                    .await
+                    .unwrap();
+            left
+        }
+    };
+    let purge = format!("{uri}?purge=true");
+    for (target, kept) in [(&uri, 2), (&uri, 2), (&purge, 0)] {
+        assert_eq!(
+            call(&f.app, &f.alice, "DELETE", target, None).await.status,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(left().await, kept);
+    }
 }
 
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
@@ -929,7 +940,8 @@ async fn credentials_keep_keepass_fields_and_seal_the_protected_ones(pool: PgPoo
     };
     let mut first = body(
         json!([
-            { "name": "PIN", "protected": true, "value": "1234" },
+            // Not hex digits: a UUID in the tree cannot contain it.
+            { "name": "PIN", "protected": true, "value": "pin-xyz" },
             { "name": "Serial", "value": "SN-42" },
         ]),
         3,
@@ -960,7 +972,7 @@ async fn credentials_keep_keepass_fields_and_seal_the_protected_ones(pool: PgPoo
             &json!([{ "name": "PIN", "protected": true }, { "name": "Serial", "value": "SN-42" }])
         )
     );
-    assert!(!tree(&f.app, &f.alice).await.to_string().contains("1234"));
+    assert!(!tree(&f.app, &f.alice).await.to_string().contains("pin-xyz"));
     let reveal = format!("/api/credentials/{id}/reveal");
     let revealed = |app: Router, token: String| {
         let reveal = reveal.clone();
@@ -977,7 +989,10 @@ async fn credentials_keep_keepass_fields_and_seal_the_protected_ones(pool: PgPoo
         }
     };
     let seen = revealed(f.app.clone(), f.alice.clone()).await;
-    assert_eq!(seen["fields"], json!([{ "name": "PIN", "value": "1234" }]));
+    assert_eq!(
+        seen["fields"],
+        json!([{ "name": "PIN", "value": "pin-xyz" }])
+    );
 
     let uri = format!("/api/credentials/{id}");
     let change = |fields: Value| call(&f.app, &f.alice, "PUT", &uri, Some(body(fields, 3)));
@@ -1127,21 +1142,22 @@ async fn files_are_sealed_with_a_credential_and_downloaded_with_reveal(pool: PgP
         call(&f.app, &f.alice, "GET", &uri, None).await.status,
         StatusCode::NOT_FOUND
     );
-    // Deleting the credential takes the sealed files along. Only the login
-    // profile web01 signs in with keeps its password.
+    // Deleting the credential for good (#193) takes the sealed files along.
+    // Only the login profile web01 signs in with keeps its password.
     send(
         &f.app,
         upload(&id, "again.pem", b"again".to_vec(), &f.alice),
     )
     .await;
-    call(
+    let deleted = call(
         &f.app,
         &f.alice,
         "DELETE",
-        &format!("/api/credentials/{id}"),
+        &format!("/api/credentials/{id}?purge=true"),
         None,
     )
     .await;
+    assert_eq!(deleted.status, StatusCode::NO_CONTENT);
     let left: i64 =
         sqlx::query_scalar("SELECT count(*) FROM secret_fields WHERE owner_id <> $1::uuid")
             .bind(&f.root)

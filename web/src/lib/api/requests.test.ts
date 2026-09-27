@@ -9,5 +9,8 @@ describe('access requests', () => {
 		expect(requestableRoles('manage')).toEqual([]);
 		// A folder seen only on the way to something inside grants nothing to ask from.
 		expect(requestableRoles(null)).toEqual([]);
+		// A vault entry is shown, never connected with (#192).
+		expect(requestableRoles('list', 'credential')).toEqual(['reveal']);
+		expect(requestableRoles('reveal', 'credential')).toEqual([]);
 	});
 });

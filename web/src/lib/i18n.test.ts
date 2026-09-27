@@ -23,7 +23,6 @@ const IDENTICAL_IN_GERMAN = new Set<string>([
 	'field_port',
 	'protocol_ssh',
 	'protocol_vnc',
-	'credential_version',
 	'field_passphrase',
 	'vault_kind_passkey',
 	'account_passkeys',
