@@ -71,6 +71,16 @@ export interface EntryContent {
 	attachments?: FileRef[];
 	/** Earlier states of the entry, newest first (#100). */
 	history?: EarlierContent[];
+	/** Words to find it by (#193). */
+	tags?: string[];
+	/** `YYYY-MM-DD`: when its password runs out; none: never. */
+	expires?: string | null;
+	/** Its one-time password: an `otpauth://` link or a base32 secret. */
+	totp?: string;
+	/** RFC 3339: when it was last saved. */
+	changed?: string;
+	/** RFC 3339: in the recycle bin since; none: in its folder. */
+	deleted?: string | null;
 }
 
 export interface FileRef {
@@ -104,7 +114,10 @@ export function withHistory(before: EntryContent, next: EntryContent): EntryCont
 		notes: content.notes,
 		fields: content.fields,
 		icon: content.icon,
-		parent: content.parent
+		parent: content.parent,
+		totp: content.totp,
+		tags: content.tags,
+		expires: content.expires
 	});
 	if (JSON.stringify(state(before)) === JSON.stringify(state(next))) {
 		return { ...next, history: before.history };
@@ -431,7 +444,8 @@ export async function asKdbx(
 	const out: KdbxEntry[] = [];
 	for (const entry of entries) {
 		const content = entry.content;
-		if (!content || content.kind === 'folder') continue;
+		// The recycle bin stays behind, as in KeePass' own exports of a group.
+		if (!content || content.kind === 'folder' || content.deleted) continue;
 		const files: KdbxEntry['files'] = [];
 		for (const ref of content.attachments ?? []) {
 			const blob = await file(ref);
@@ -446,7 +460,10 @@ export async function asKdbx(
 			notes: content.notes,
 			icon: content.icon ?? 0,
 			fields: content.fields ?? [],
-			files
+			files,
+			tags: content.tags ?? [],
+			expires: content.expires ?? null,
+			totp: content.totp ?? ''
 		});
 	}
 	return out;

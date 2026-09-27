@@ -38,3 +38,4 @@ mod session;
 mod setup;
 mod terminal;
 mod users;
+mod vault;

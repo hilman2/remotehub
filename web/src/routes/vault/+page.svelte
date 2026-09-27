@@ -1,81 +1,99 @@
 <script lang="ts">
 	/**
-	 * The vault (#190): the personal vault and the shared collections side
-	 * by side. The sidebar chooses where to look, the list shows what is
-	 * there, the pane beside it the entry chosen. Shared collections work
-	 * without the personal vault; it opens in this browser only.
+	 * The vault (#190, #193), laid out as KeePass' main window: a toolbar, the
+	 * folder tree with the personal and the shared vault and their recycle
+	 * bins, the entries as a table, the chosen entry below it and a status
+	 * bar. Shortcuts, a context menu and dragging onto a folder do what the
+	 * toolbar does. Shared collections work without the personal vault; that
+	 * one opens in this browser only.
 	 */
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import Clock from '@lucide/svelte/icons/clock';
+	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import FileDown from '@lucide/svelte/icons/file-down';
 	import FileUp from '@lucide/svelte/icons/file-up';
 	import Fingerprint from '@lucide/svelte/icons/fingerprint';
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
-	import Library from '@lucide/svelte/icons/library';
+	import KeyRound from '@lucide/svelte/icons/key-round';
+	import Layers from '@lucide/svelte/icons/layers';
 	import Lock from '@lucide/svelte/icons/lock';
-	import Paperclip from '@lucide/svelte/icons/paperclip';
+	import LockOpen from '@lucide/svelte/icons/lock-open';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Search from '@lucide/svelte/icons/search';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
-	import Timer from '@lucide/svelte/icons/timer';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import { page } from '$app/state';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import User from '@lucide/svelte/icons/user';
+	import Users from '@lucide/svelte/icons/users';
 	import {
 		allows,
 		createCredential,
 		deleteCollection,
 		deleteCredential,
 		loadTree,
+		restoreCredential,
 		updateCredential,
 		type Collection,
 		type Credential,
-		type CredentialInput,
 		type Role,
 		type Tree
 	} from '$lib/api/catalog';
 	import { errorMessage, problemMessage } from '$lib/api/errors';
 	import { createRequest } from '$lib/api/requests';
+	import { credentialCode, deleteAttachment, reveal, uploadAttachment } from '$lib/api/reveal';
 	import { loadPicks, savePick } from '$lib/api/search';
-	import CredentialForm from '$lib/catalog/CredentialForm.svelte';
 	import Grants from '$lib/catalog/Grants.svelte';
 	import RequestForm from '$lib/catalog/RequestForm.svelte';
-	import { collectionPlaces, collectionPath } from '$lib/catalog/tree';
+	import { collectionPath } from '$lib/catalog/tree';
+	import ContextMenu, { type ContextItem } from '$lib/components/ContextMenu.svelte';
 	import Dialog from '$lib/components/Dialog.svelte';
 	import SettingsMenu, { type MenuItem } from '$lib/components/SettingsMenu.svelte';
-	import { formatLocale, getLocale } from '$lib/i18n';
+	import { getLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
 	import { pickKey } from '$lib/search/catalog';
 	import { queryKey, remember, type Pick } from '$lib/search/rank';
 	import { session } from '$lib/session.svelte';
+	import {
+		contentOf,
+		draftOf,
+		inputFromCredential,
+		inputOf,
+		newDraft,
+		personalAsKdbx,
+		placeOf,
+		purgePersonal,
+		savePersonalKdbx,
+		targetOf,
+		type Target
+	} from '$lib/vault/actions';
 	import CollectionForm from '$lib/vault/CollectionForm.svelte';
-	import FieldsEditor, { type EditedField } from '$lib/vault/FieldsEditor.svelte';
-	import IconPicker from '$lib/vault/IconPicker.svelte';
-	import { FOLDER_ICON, icon } from '$lib/vault/icons';
+	import EntryEditor, { type Draft, type Place } from '$lib/vault/EntryEditor.svelte';
+	import EntryPane from '$lib/vault/EntryPane.svelte';
+	import EntryTable from '$lib/vault/EntryTable.svelte';
+	import { FOLDER_ICON } from '$lib/vault/icons';
 	import {
 		counter,
 		listed,
 		outline,
 		personalFolders,
 		personalItems,
+		personalTotp,
 		sharedItems,
 		type Item,
-		type Kind,
 		type Scope,
 		type Sort
 	} from '$lib/vault/items';
 	import KdbxForm from '$lib/vault/KdbxForm.svelte';
 	import { writeKdbx, type KdbxEntry } from '$lib/vault/kdbx';
-	import PasswordInput from '$lib/vault/PasswordInput.svelte';
-	import PersonalDetail from '$lib/vault/PersonalDetail.svelte';
-	import SharedDetail from '$lib/vault/SharedDetail.svelte';
-	import { exportCollection, importInto } from '$lib/vault/shared-kdbx';
+	import { credentialAsKdbx, exportCollection, importInto } from '$lib/vault/shared-kdbx';
+	import { totpCode, totpOf } from '$lib/vault/totp';
 	import { unlocked } from '$lib/vault/unlocked.svelte';
 	import {
 		addPasskey,
 		asKdbx,
 		coverForOrganisation,
-		deleteEntry,
 		deleteFile,
 		loadVault,
 		MAX_FILE,
@@ -106,18 +124,17 @@
 	type Stage = 'loading' | 'setup' | 'recovery' | 'locked' | 'open';
 
 	const MIN_PASSPHRASE = 12;
+	/** How long a copied secret stays in the clipboard, in seconds. */
+	const CLIPBOARD_SECONDS = 30;
 	const KIND_LABELS: Record<UnlockKind, () => string> = {
 		passkey: m.vault_kind_passkey,
 		passphrase: m.vault_kind_passphrase,
 		recovery: m.vault_kind_recovery,
 		organisation: m.vault_kind_organisation
 	};
-	const FILTERS: { kind: Kind; label: () => string }[] = [
-		{ kind: 'totp', label: m.vault_kind_totp },
-		{ kind: 'files', label: m.vault_kind_files }
-	];
 	const EMPTY: EntryContent = { title: '', username: '', password: '', url: '', notes: '' };
 	const SORT_KEY = 'remotehub.vault.sort';
+	const DRAG_TYPE = 'text/x-remotehub-entry';
 
 	// ---- The personal vault ----
 
@@ -151,24 +168,31 @@
 	// ---- What is shown ----
 
 	let query = $state('');
+	let search = $state<HTMLInputElement>();
 	let scope = $state<Scope>({ kind: 'all' });
 	let sort = $state<Sort>(readSort());
 	/** The key of the item chosen (Item.key). */
 	let chosen = $state<string | null>(null);
+	/** A line in the status bar, and how long a copied secret still stays. */
+	let status = $state<string | null>(null);
+	let clearing = $state<{ left: number; value: string } | null>(null);
+	let menu = $state<{ item: Item; at: { x: number; y: number } } | null>(null);
+	/** The folder a dragged entry is over, as its place. */
+	let dropOver = $state<string | null>(null);
 
 	function readSort(): Sort {
 		try {
-			const stored = localStorage.getItem(SORT_KEY);
-			if (stored === 'name' || stored === 'used' || stored === 'place') return stored;
+			const stored = JSON.parse(localStorage.getItem(SORT_KEY) ?? 'null');
+			if (stored && typeof stored.column === 'string') return stored as Sort;
 		} catch {
 			// Without storage, the default is fine.
 		}
-		return 'name';
+		return { column: 'title', descending: false };
 	}
 
 	$effect(() => {
 		try {
-			localStorage.setItem(SORT_KEY, sort);
+			localStorage.setItem(SORT_KEY, JSON.stringify(sort));
 		} catch {
 			// A preference only.
 		}
@@ -201,7 +225,6 @@
 	/** Entries that do not open with this key; they can only be deleted. */
 	const unreadable = $derived(entries.filter((entry) => !entry.content));
 
-	/** The collection or personal folder shown, if the scope is one. */
 	const scopeCollection = $derived.by(() => {
 		const here = scope;
 		return here.kind === 'collection' ? tree?.collections.find((c) => c.id === here.id) : undefined;
@@ -212,11 +235,45 @@
 			? folders.find((f) => f.id === here.folder)
 			: undefined;
 	});
-	const personalScope = $derived(scope.kind === 'personal');
-	/** The personal vault is shown but not open: its setup or unlock form takes the list's place. */
-	const staging = $derived(personalScope && !searching && stage !== 'open');
-	/** The collections new shared credentials may go into. */
-	const places = $derived(tree ? collectionPlaces(tree, getLocale()) : []);
+	/** The personal vault is shown but not open: its setup or unlock form takes the table's place. */
+	const staging = $derived(
+		!searching &&
+			stage !== 'open' &&
+			(scope.kind === 'personal' || (scope.kind === 'bin' && scope.side === 'personal'))
+	);
+
+	/** Where entries may go, for the editor: the personal folders and the collections one may edit. */
+	const places = $derived.by((): Place[] => {
+		const personal: Place[] =
+			stage === 'open'
+				? [
+						{
+							value: placeOf({ side: 'personal', folder: null }),
+							label: m.vault_personal_top(),
+							group: 'personal'
+						},
+						...personalOutline.map((node) => ({
+							value: placeOf({ side: 'personal', folder: node.id }),
+							label: `${'  '.repeat(node.depth)}${node.name}`,
+							group: 'personal' as const
+						}))
+					]
+				: [];
+		const shared: Place[] = tree
+			? collectionOutline
+					.filter((node) =>
+						allows(tree!.collections.find((c) => c.id === node.id)?.role ?? null, 'edit')
+					)
+					.map((node) => ({
+						value: placeOf({ side: 'shared', id: node.id }),
+						label: collectionPath(tree!, node.id)
+							.map((c) => c.name)
+							.join(' / '),
+						group: 'shared' as const
+					}))
+			: [];
+		return [...personal, ...shared];
+	});
 
 	const sameScope = (a: Scope, b: Scope) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -227,24 +284,15 @@
 				return m.vault_all();
 			case 'recent':
 				return m.vault_recent();
-			case 'filter':
-				return FILTERS.find((f) => f.kind === (scope as { filter: Kind }).filter)?.label() ?? '';
+			case 'expiring':
+				return m.vault_expiring();
 			case 'personal':
 				return scopeFolder?.name ?? m.vault_personal();
 			case 'collection':
 				return scopeCollection?.name ?? '';
+			case 'bin':
+				return scope.side === 'personal' ? m.vault_bin_personal() : m.vault_bin_shared();
 		}
-	});
-	const scopeNote = $derived.by(() => {
-		if (searching) return m.vault_search_note();
-		if (scope.kind === 'personal') return m.vault_scope_personal_note();
-		if (scope.kind === 'collection' && tree) {
-			const above = collectionPath(tree, scope.id).slice(0, -1);
-			return above.length > 0
-				? m.vault_in_collection({ path: above.map((c) => c.name).join(' / ') })
-				: m.vault_scope_shared_note();
-		}
-		return m.vault_scope_mixed_note();
 	});
 
 	// ---- Loading ----
@@ -273,17 +321,10 @@
 		if (picked.ok) sharedPicks = picked.data.filter((pick) => pick.key.startsWith('credential:'));
 	}
 
+	const reload = () => Promise.all([loadPersonal(), loadShared()]);
+
 	$effect(() => {
-		loadPersonal();
-		loadShared().then(() => {
-			// A link from a device names the credential to show.
-			const linked = page.url.searchParams.get('credential');
-			const credential = tree?.credentials.find((c) => c.id === linked);
-			if (credential) {
-				scope = { kind: 'collection', id: credential.collection_id };
-				chosen = sharedItems(tree!).find((item) => item.id === credential.id)?.key ?? null;
-			}
-		});
+		reload();
 	});
 
 	// ---- Choosing ----
@@ -295,6 +336,7 @@
 
 	/** Chooses an item and remembers the pick for the current query. */
 	function choose(item: Item) {
+		if (chosen === item.key) return;
 		chosen = item.key;
 		used(item);
 	}
@@ -309,6 +351,89 @@
 			sharedPicks = remember(sharedPicks, item.key, query, Date.now());
 			savePick(item.key, queryKey(query));
 		}
+	}
+
+	const mayEdit = (item: Item) =>
+		item.source === 'personal' || allows(item.credential.role, 'edit');
+	const mayReveal = (item: Item) =>
+		item.source === 'personal' || allows(item.credential.role, 'reveal');
+
+	// ---- Clipboard ----
+
+	$effect(() => {
+		if (!clearing) return;
+		const timer = setInterval(async () => {
+			if (!clearing) return;
+			if (clearing.left > 1) {
+				clearing = { ...clearing, left: clearing.left - 1 };
+				return;
+			}
+			const copied = clearing.value;
+			clearing = null;
+			status = m.vault_clipboard_cleared();
+			// Only what is still the copied value goes. A browser that does not
+			// let the page read the clipboard gets it cleared all the same.
+			let now: string;
+			try {
+				now = await navigator.clipboard.readText();
+			} catch {
+				now = copied;
+			}
+			if (now === copied) await navigator.clipboard.writeText('').catch(() => {});
+		}, 1000);
+		return () => clearInterval(timer);
+	});
+
+	/** Copies what an entry holds; secrets leave the clipboard after a while. */
+	async function copy(item: Item, what: 'username' | 'password' | 'totp') {
+		let value: string | null;
+		if (what === 'username') value = item.username;
+		else if (!mayReveal(item)) return;
+		else if (item.source === 'personal') {
+			if (what === 'password') value = item.entry.content?.password ?? '';
+			else {
+				const params = totpOf('otp', personalTotp(item.entry));
+				value = params ? await totpCode(params, Date.now() / 1000) : null;
+			}
+		} else if (what === 'password') {
+			const result = await reveal('credentials', item.id, 'copy');
+			if (!result.ok) return fail(result.code);
+			value = result.data.password ?? '';
+		} else {
+			const result = await credentialCode(item.id, 'copy');
+			if (!result.ok) return fail(result.code);
+			value = result.data.code;
+		}
+		if (value === null) return;
+		try {
+			await navigator.clipboard.writeText(value);
+		} catch {
+			status = m.reveal_copy_failed();
+			return;
+		}
+		used(item);
+		const what_ = {
+			username: m.field_username,
+			password: m.field_password,
+			totp: m.vault_totp
+		}[what]();
+		if (what === 'username') {
+			clearing = null;
+			status = m.vault_copied_what({ what: what_, title: item.title });
+		} else {
+			clearing = { left: CLIPBOARD_SECONDS, value };
+			status = m.vault_copied_what({ what: what_, title: item.title });
+		}
+	}
+
+	function fail(code: string) {
+		status = errorMessage(code);
+	}
+
+	function openUrl(item: Item) {
+		if (!/^https?:\/\//i.test(item.url)) return;
+		window.open(item.url, '_blank', 'noopener,noreferrer');
+		used(item);
 	}
 
 	// ---- Setting up and unlocking the personal vault ----
@@ -379,11 +504,13 @@
 	}
 
 	function lock() {
+		if (stage !== 'open') return;
 		key = unlocked.key = null;
 		entries = [];
 		picks = [];
 		if (current?.source === 'personal') chosen = null;
 		stage = 'locked';
+		status = m.vault_locked_status();
 	}
 
 	async function afterRecovery() {
@@ -399,11 +526,11 @@
 	// ---- Dialogs ----
 
 	type Open =
-		| { type: 'entry'; id: string | null; content: EntryContent }
+		| { type: 'entry'; item: Item | null; draft: Draft }
 		| { type: 'folder' }
-		| { type: 'credential'; credential: Credential | null; collection: string }
 		| { type: 'collection'; collection: Collection | null; parent: string | null }
-		| { type: 'delete'; credential: Credential }
+		| { type: 'purge'; item: Item }
+		| { type: 'empty'; side: 'personal' | 'shared' }
 		| { type: 'request'; credential: Credential; role: Role }
 		| { type: 'kdbx'; mode: 'import' | 'export'; collection: Collection | null }
 		| { type: 'unlocks' }
@@ -413,11 +540,12 @@
 	let open = $state<Open | null>(null);
 	let dialogOpen = $state(false);
 	let kdbxResult = $state<string | null>(null);
-	let requested = $state<string | null>(null);
+	let folderName = $state('');
 
 	function show(next: Open) {
 		error = null;
 		kdbxResult = null;
+		menu = null;
 		open = next;
 		dialogOpen = true;
 	}
@@ -430,15 +558,15 @@
 	const dialogTitle = $derived.by(() => {
 		switch (open?.type) {
 			case 'entry':
-				return open.id ? m.catalog_edit() : m.vault_new_entry();
+				return open.item ? m.vault_edit_entry() : m.vault_new_entry();
 			case 'folder':
 				return m.vault_new_folder();
-			case 'credential':
-				return open.credential ? m.catalog_edit() : m.catalog_new_credential();
 			case 'collection':
 				return open.collection ? m.vault_manage_collection() : m.vault_new_collection();
-			case 'delete':
-				return m.catalog_delete();
+			case 'purge':
+				return m.vault_purge();
+			case 'empty':
+				return m.vault_empty_bin();
 			case 'request':
 				return m.request_title({ name: open.credential.name });
 			case 'kdbx':
@@ -454,122 +582,365 @@
 		}
 	});
 
-	/** "New" makes what the place shown holds: a personal entry, or a shared one. */
+	// ---- Entries: new, edit, save ----
+
+	/** Where "new" puts an entry: the folder shown, or else a place one may write to. */
+	function newPlace(): string | null {
+		if (scope.kind === 'personal' && stage === 'open') {
+			return placeOf({ side: 'personal', folder: scope.folder });
+		}
+		if (scope.kind === 'collection') {
+			const here = placeOf({ side: 'shared', id: scope.id });
+			if (places.some((p) => p.value === here)) return here;
+		}
+		return places[0]?.value ?? null;
+	}
+
 	function newEntry() {
-		const shared = scope.kind === 'collection' || (scope.kind !== 'personal' && stage !== 'open');
-		if (shared) {
-			const here = scopeCollection && places.some((p) => p.id === scopeCollection.id);
-			show({
-				type: 'credential',
-				credential: null,
-				collection: (here ? scopeCollection?.id : places[0]?.id) ?? ''
-			});
-		} else editEntry(null);
-	}
-	const mayCreate = $derived(
-		scope.kind === 'collection'
-			? allows(scopeCollection?.role ?? null, 'edit')
-			: scope.kind === 'personal'
-				? stage === 'open'
-				: stage === 'open' || places.length > 0
-	);
-
-	// ---- Personal entries ----
-
-	/** The custom fields of the entry being edited. */
-	let editedFields = $state<EditedField[]>([]);
-	/** Files chosen in the editor, sealed and stored on save. */
-	let pendingFiles = $state<File[]>([]);
-	/** Files removed in the editor, deleted once the entry is saved. */
-	let removedFiles = $state<string[]>([]);
-	let folderName = $state('');
-
-	/** Personal folders with their path, for choosing where an entry goes. */
-	const folderPlaces = $derived(
-		personalOutline.map((node) => {
-			const names: string[] = [];
-			let at = folders.find((f) => f.id === node.id);
-			while (at && names.length < 20) {
-				names.unshift(at.name);
-				at = folders.find((f) => f.id === at?.parent_id);
-			}
-			return { id: node.id, path: names.join(' / ') };
-		})
-	);
-
-	function editEntry(entry: Entry | null) {
-		// Entries from before #98 have neither folder nor icon.
-		const here = scope.kind === 'personal' ? scope.folder : null;
-		const content = { ...(entry?.content ?? { ...EMPTY, parent: here }) };
-		content.parent ??= null;
-		content.icon ??= 0;
-		editedFields = (entry?.content?.fields ?? []).map((field) => ({ ...field }));
-		pendingFiles = [];
-		removedFiles = [];
-		show({ type: 'entry', id: entry?.id ?? null, content });
+		const place = newPlace();
+		if (place) show({ type: 'entry', item: null, draft: newDraft(place) });
 	}
 
-	function addFiles(event: Event) {
-		const input = event.currentTarget as HTMLInputElement;
-		const picked = [...(input.files ?? [])];
-		input.value = '';
-		if (picked.some((file) => file.size > MAX_FILE)) {
+	function edit(item: Item) {
+		if (item.deleted || !mayEdit(item)) return;
+		used(item);
+		show({ type: 'entry', item, draft: draftOf(item) });
+	}
+
+	async function saveDraft(draft: Draft) {
+		if (open?.type !== 'entry') return;
+		const original = open.item;
+		const target = targetOf(draft.place);
+		if (draft.newFiles.some((file) => file.size > MAX_FILE)) {
 			error = m.vault_file_too_large({ megabytes: MAX_FILE / 1024 / 1024 });
 			return;
 		}
-		pendingFiles = [...pendingFiles, ...picked];
+		busy = true;
+		error = null;
+		// Saved where it is first; a move to the other side follows.
+		const here: Target = original
+			? original.source === 'personal'
+				? target.side === 'personal'
+					? target
+					: { side: 'personal', folder: original.folder }
+				: target.side === 'shared'
+					? target
+					: { side: 'shared', id: original.collection }
+			: target;
+		const saved = await saveHere(draft, original, here);
+		if (saved && here.side !== target.side) {
+			await reload();
+			const moved = items.find((item) => item.key === saved);
+			if (moved) await move(moved, target);
+		}
+		busy = false;
+		if (saved) {
+			close();
+			await reload();
+			if (here.side === target.side) chosen = saved;
+		}
 	}
 
-	async function saveEditedEntry(event: SubmitEvent) {
-		event.preventDefault();
-		if (!key || open?.type !== 'entry') return;
-		const editing = open;
-		busy = true;
-		const added: FileRef[] = [];
-		for (const file of pendingFiles) {
-			const saved = await saveFile(key, file);
-			if (!saved) {
-				busy = false;
-				error = errorMessage('internal');
-				return;
+	/** Saves a draft on its side; the key of the saved item, or null. */
+	async function saveHere(
+		draft: Draft,
+		original: Item | null,
+		here: Target
+	): Promise<string | null> {
+		if (here.side === 'personal') {
+			if (!key) return null;
+			const added: FileRef[] = [];
+			for (const file of draft.newFiles) {
+				const stored = await saveFile(key, file);
+				if (!stored) {
+					error = errorMessage('internal');
+					return null;
+				}
+				added.push(stored);
 			}
-			added.push(saved);
+			const before = original?.source === 'personal' ? original.entry.content : null;
+			let content = contentOf(draft, here.folder, before, added);
+			if (before) content = withHistory(before, content);
+			const result = await saveEntry(key, original?.id ?? null, content);
+			if (!result.ok) {
+				error = errorMessage(result.code);
+				return null;
+			}
+			for (const id of draft.removedFiles) await deleteFile(id);
+			return result.id;
 		}
-		let content: EntryContent = {
-			...editing.content,
-			fields: editedFields.map(({ name, value, protected: hidden }) => ({
-				name: name.trim(),
-				value,
-				protected: hidden
-			})),
-			attachments: [
-				...(editing.content.attachments ?? []).filter((f) => !removedFiles.includes(f.id)),
-				...added
-			]
-		};
-		const before = entries.find((entry) => entry.id === editing.id)?.content;
-		if (before) content = withHistory(before, content);
-		const result = await saveEntry(key, editing.id, content);
-		busy = false;
+		const input = inputOf(draft, here.id, !original);
+		const result = original
+			? await updateCredential(original.id, input)
+			: await createCredential(input);
 		if (!result.ok) {
-			error = errorMessage(result.code);
+			error = problemMessage(result);
+			return null;
+		}
+		const id = original?.id ?? (result.data as { id: string }).id;
+		for (const file of draft.newFiles) await uploadAttachment(id, file);
+		for (const file of draft.removedFiles) await deleteAttachment(id, file);
+		return pickKey('credential', id);
+	}
+
+	// ---- Moving, copying, deleting ----
+
+	/**
+	 * Moves an entry to another folder. Across the personal and the shared
+	 * side it is written anew there and deleted here, as KeePass would move it
+	 * between two files.
+	 */
+	async function move(item: Item, target: Target): Promise<boolean> {
+		if (!mayEdit(item)) return false;
+		if (item.source === 'personal' && target.side === 'personal') {
+			if (!key || !item.entry.content || item.folder === target.folder) return false;
+			const result = await saveEntry(key, item.id, {
+				...item.entry.content,
+				parent: target.folder
+			});
+			return result.ok || (fail(result.code), false);
+		}
+		if (item.source === 'shared' && target.side === 'shared') {
+			if (item.collection === target.id) return false;
+			const result = await updateCredential(
+				item.id,
+				inputFromCredential(item.credential, target.id)
+			);
+			return result.ok || (fail(result.code), false);
+		}
+		if (item.source === 'personal' && target.side === 'shared') {
+			if (!key) return false;
+			const entry = await personalAsKdbx(key, item.entry);
+			if (!tree || !entry) return false;
+			const made = await importInto(tree, target.id, [entry]);
+			if (made.created !== 1) return ((status = m.vault_move_failed({ title: item.title })), false);
+			await purgePersonal(item.entry);
+			chosen = pickKey('credential', made.ids[0]);
+			return true;
+		}
+		if (item.source === 'shared' && target.side === 'personal') {
+			if (!key || !tree || !mayReveal(item)) return false;
+			const entry = await credentialAsKdbx(tree, item.credential);
+			if (!entry) return ((status = m.vault_move_failed({ title: item.title })), false);
+			const id = await savePersonalKdbx(key, { ...entry, path: [] }, target.folder);
+			if (!id) return ((status = m.vault_move_failed({ title: item.title })), false);
+			// Moved, not copied.
+			await deleteCredential(item.id, true);
+			chosen = id;
+			return true;
+		}
+		return false;
+	}
+
+	async function moveTo(item: Item, target: Target) {
+		busy = true;
+		const moved = await move(item, target);
+		busy = false;
+		if (moved) {
+			status = m.vault_moved({ title: item.title });
+			await reload();
+		}
+	}
+
+	/** A copy next to the entry, named as KeePass names one. */
+	async function duplicate(item: Item) {
+		if (!mayEdit(item) || item.deleted) return;
+		busy = true;
+		const title = m.vault_copy_of({ title: item.title });
+		if (item.source === 'personal' && key && item.entry.content) {
+			const entry = await personalAsKdbx(key, item.entry);
+			const id = entry && (await savePersonalKdbx(key, { ...entry, title }, item.folder));
+			if (id) chosen = id;
+		} else if (item.source === 'shared' && tree && mayReveal(item)) {
+			const entry = await credentialAsKdbx(tree, item.credential);
+			const made =
+				entry && (await importInto(tree, item.collection, [{ ...entry, path: [], title }]));
+			if (made && made.ids[0]) chosen = pickKey('credential', made.ids[0]);
+		}
+		busy = false;
+		status = m.vault_duplicated({ title: item.title });
+		await reload();
+	}
+
+	/** Into the recycle bin; from the bin, for good after asking. */
+	async function remove(item: Item) {
+		if (!mayEdit(item)) return;
+		if (item.deleted) {
+			show({ type: 'purge', item });
 			return;
 		}
-		for (const id of removedFiles) await deleteFile(id);
-		close();
-		await loadPersonal();
-		chosen = result.id ?? editing.id;
+		if (item.source === 'personal') {
+			if (!key || !item.entry.content) return;
+			const result = await saveEntry(key, item.id, {
+				...item.entry.content,
+				deleted: new Date().toISOString()
+			});
+			if (!result.ok) return fail(result.code);
+		} else {
+			const result = await deleteCredential(item.id);
+			if (!result.ok) return fail(result.code);
+		}
+		if (chosen === item.key) chosen = null;
+		status = m.vault_binned({ title: item.title });
+		await reload();
 	}
 
-	async function removeEntry(id: string) {
-		const result = await deleteEntry(id);
-		if (!result.ok) error = errorMessage(result.code);
-		else {
-			close();
-			if (chosen === id) chosen = null;
+	async function restore(item: Item) {
+		if (item.source === 'personal') {
+			if (!key || !item.entry.content) return;
+			const result = await saveEntry(key, item.id, { ...item.entry.content, deleted: null });
+			if (!result.ok) return fail(result.code);
+		} else {
+			const result = await restoreCredential(item.id);
+			if (!result.ok) return fail(result.code);
 		}
-		await loadPersonal();
+		status = m.vault_restored({ title: item.title });
+		await reload();
 	}
+
+	async function purge(item: Item) {
+		busy = true;
+		const done =
+			item.source === 'personal'
+				? await purgePersonal(item.entry)
+				: (await deleteCredential(item.id, true)).ok;
+		busy = false;
+		if (!done) {
+			error = errorMessage('internal');
+			return;
+		}
+		close();
+		if (chosen === item.key) chosen = null;
+		await reload();
+	}
+
+	async function emptyBin(side: 'personal' | 'shared') {
+		busy = true;
+		for (const item of items.filter((i) => i.deleted && i.source === side && mayEdit(i))) {
+			if (item.source === 'personal') await purgePersonal(item.entry);
+			else await deleteCredential(item.id, true);
+		}
+		busy = false;
+		close();
+		chosen = null;
+		await reload();
+	}
+
+	/** Drops an entry dragged from the table onto a folder of the tree. */
+	function dropOn(event: DragEvent, target: Target) {
+		event.preventDefault();
+		dropOver = null;
+		const dragged = event.dataTransfer?.getData(DRAG_TYPE);
+		const item = items.find((i) => i.key === dragged);
+		if (item && !item.deleted) moveTo(item, target);
+	}
+
+	function dragOver(event: DragEvent, place: string) {
+		if (!event.dataTransfer?.types.includes(DRAG_TYPE)) return;
+		event.preventDefault();
+		event.dataTransfer.dropEffect = 'move';
+		dropOver = place;
+	}
+
+	// ---- Context menu and shortcuts ----
+
+	const ctrl = (letter: string) => `${m.key_ctrl()}+${letter}`;
+
+	const menuItems = (item: Item): ContextItem[] =>
+		item.deleted
+			? [
+					{ label: m.vault_restore(), disabled: !mayEdit(item), onselect: () => restore(item) },
+					{
+						label: m.vault_purge(),
+						keys: m.key_delete(),
+						danger: true,
+						disabled: !mayEdit(item),
+						onselect: () => remove(item)
+					}
+				]
+			: [
+					{
+						label: m.vault_copy_username(),
+						keys: ctrl('B'),
+						onselect: () => copy(item, 'username')
+					},
+					{
+						label: m.vault_copy_password(),
+						keys: ctrl('C'),
+						disabled: !mayReveal(item),
+						onselect: () => copy(item, 'password')
+					},
+					{
+						label: m.vault_copy_totp(),
+						keys: ctrl('T'),
+						disabled: !item.hasTotp || !mayReveal(item),
+						onselect: () => copy(item, 'totp')
+					},
+					{
+						label: m.vault_open_url(),
+						keys: ctrl('U'),
+						disabled: !/^https?:\/\//i.test(item.url),
+						onselect: () => openUrl(item)
+					},
+					{
+						label: m.vault_edit_entry(),
+						keys: m.key_enter(),
+						separated: true,
+						disabled: !mayEdit(item),
+						onselect: () => edit(item)
+					},
+					{
+						label: m.vault_duplicate(),
+						keys: ctrl('K'),
+						disabled: !mayEdit(item) || !mayReveal(item),
+						onselect: () => duplicate(item)
+					},
+					{
+						label: m.vault_to_bin(),
+						keys: m.key_delete(),
+						separated: true,
+						danger: true,
+						disabled: !mayEdit(item),
+						onselect: () => remove(item)
+					}
+				];
+
+	function onkeydown(event: KeyboardEvent) {
+		if (dialogOpen || menu) return;
+		const mod = event.ctrlKey || event.metaKey;
+		const letter = event.key.toLowerCase();
+		if (mod && letter === 'f') {
+			event.preventDefault();
+			search?.focus();
+			return;
+		}
+		const target = event.target as HTMLElement | null;
+		if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+		if (mod && letter === 'l') {
+			event.preventDefault();
+			lock();
+			return;
+		}
+		if (mod && letter === 'i') {
+			event.preventDefault();
+			newEntry();
+			return;
+		}
+		const item = current;
+		if (!item) return;
+		if (mod && letter === 'b') copy(item, 'username');
+		// A text selection keeps the browser's own copy.
+		else if (mod && letter === 'c' && !window.getSelection()?.toString()) copy(item, 'password');
+		else if (mod && letter === 't') copy(item, 'totp');
+		else if (mod && letter === 'u') openUrl(item);
+		else if (mod && letter === 'k') duplicate(item);
+		else if (!mod && event.key === 'Enter' && target?.getAttribute('role') === 'row') edit(item);
+		else if (!mod && event.key === 'Delete') remove(item);
+		else return;
+		event.preventDefault();
+	}
+
+	// ---- Folders and collections ----
 
 	async function addFolder(event: SubmitEvent) {
 		event.preventDefault();
@@ -592,74 +963,20 @@
 		if (result.id) pick({ kind: 'personal', folder: result.id });
 	}
 
-	/** Only an empty folder goes. */
-	const emptyFolder = (id: string) => !entries.some((entry) => entry.content?.parent === id);
+	/** Only an empty folder goes, the recycle bin not counted. */
+	const emptyFolder = (id: string) =>
+		!entries.some((entry) => entry.content?.parent === id && !entry.content?.deleted);
 
 	async function removeFolder(id: string) {
-		const parent = folders.find((f) => f.id === id)?.parent_id ?? null;
-		await removeEntry(id);
+		const folder = entries.find((entry) => entry.id === id);
+		const parent = folder?.content?.parent ?? null;
+		// What lies in its bin goes back to the top, still in the bin.
+		for (const entry of entries.filter((e) => e.content?.parent === id && e.content?.deleted)) {
+			if (key && entry.content) await saveEntry(key, entry.id, { ...entry.content, parent: null });
+		}
+		if (folder) await purgePersonal(folder);
 		pick({ kind: 'personal', folder: parent });
-	}
-
-	/** Opens a file in the browser and hands it over as a download. */
-	async function download(ref: FileRef) {
-		if (!key) return;
-		const blob = await readFile(key, ref);
-		if (!blob) {
-			error = errorMessage('not_found');
-			return;
-		}
-		hand(blob, ref.name);
-	}
-
-	function hand(blob: Blob, name: string) {
-		const url = URL.createObjectURL(blob);
-		const link = document.createElement('a');
-		link.href = url;
-		link.download = name;
-		link.click();
-		setTimeout(() => URL.revokeObjectURL(url), 10_000);
-	}
-
-	// ---- Shared credentials and collections ----
-
-	async function run<T>(
-		change: Promise<
-			{ ok: true; data: T } | { ok: false; code: string; params?: Record<string, unknown> }
-		>,
-		after?: (data: T) => void
-	) {
-		const result = await change;
-		if (!result.ok) {
-			error = problemMessage(result);
-			return;
-		}
-		close();
-		after?.(result.data);
-		await loadShared();
-	}
-
-	function saveCredential(input: CredentialInput) {
-		if (open?.type !== 'credential') return;
-		const target = open.credential;
-		run(target ? updateCredential(target.id, input) : createCredential(input), (data) => {
-			const id = target?.id ?? (data as { id?: string } | undefined)?.id;
-			if (id) chosen = pickKey('credential', id);
-		});
-	}
-
-	function removeCredential() {
-		if (open?.type !== 'delete') return;
-		const id = open.credential.id;
-		run(deleteCredential(id), () => {
-			if (current?.id === id) chosen = null;
-		});
-	}
-
-	function sendRequest(role: Role, minutes: number, reason: string) {
-		if (open?.type !== 'request') return;
-		const id = open.credential.id;
-		run(createRequest({ kind: 'credential', id }, role, minutes, reason), () => (requested = id));
+		await loadPersonal();
 	}
 
 	async function collectionSaved(id: string) {
@@ -668,8 +985,15 @@
 		if (id) pick({ kind: 'collection', id });
 	}
 
-	function removeCollection(collection: Collection) {
-		run(deleteCollection(collection.id), () => pick({ kind: 'all' }));
+	async function removeCollection(collection: Collection) {
+		const result = await deleteCollection(collection.id);
+		if (!result.ok) {
+			error = problemMessage(result);
+			return;
+		}
+		close();
+		pick({ kind: 'all' });
+		await loadShared();
 	}
 
 	/** Behind the gear of a collection: managing it, and KeePass files. */
@@ -684,7 +1008,7 @@
 						},
 						{
 							label: m.vault_new_subcollection(),
-							icon: Plus,
+							icon: FolderPlus,
 							onselect: () => show({ type: 'collection', collection: null, parent: collection.id })
 						}
 					]
@@ -790,23 +1114,7 @@
 		};
 		let created = 0;
 		for (const item of imported) {
-			const attachments: FileRef[] = [];
-			for (const file of item.files) {
-				const saved = await saveFile(opened, new File([file.data], file.name));
-				if (saved) attachments.push(saved);
-			}
-			const saved = await saveEntry(opened, null, {
-				title: item.title,
-				username: item.username,
-				password: item.password,
-				url: item.url,
-				notes: item.notes,
-				icon: item.icon,
-				fields: item.fields,
-				attachments,
-				parent: await folderOf(item.path)
-			});
-			if (saved.ok) created += 1;
+			if (await savePersonalKdbx(opened, item, await folderOf(item.path))) created += 1;
 		}
 		return created;
 	}
@@ -835,6 +1143,26 @@
 			kdbxResult = m.kdbx_exported({ count: out.length });
 		}
 		busy = false;
+	}
+
+	/** Opens a personal file in the browser and hands it over as a download. */
+	async function download(ref: FileRef) {
+		if (!key) return;
+		const blob = await readFile(key, ref);
+		if (!blob) {
+			error = errorMessage('not_found');
+			return;
+		}
+		hand(blob, ref.name);
+	}
+
+	function hand(blob: Blob, name: string) {
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = name;
+		link.click();
+		setTimeout(() => URL.revokeObjectURL(url), 10_000);
 	}
 
 	// ---- Ways to unlock ----
@@ -904,17 +1232,34 @@
 		await loadPersonal();
 	}
 
+	function sendRequest(role: Role, minutes: number, reason: string) {
+		if (open?.type !== 'request') return;
+		const id = open.credential.id;
+		createRequest({ kind: 'credential', id }, role, minutes, reason).then((result) => {
+			if (!result.ok) {
+				error = problemMessage(result);
+				return;
+			}
+			close();
+			status = m.request_sent();
+		});
+	}
+
 	const field = 'mt-1 w-full rounded-lg border border-line bg-page px-3 py-2';
 	const label = 'mt-3 block text-sm font-medium';
 	const button =
 		'inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm hover:bg-surface-2';
 	const primary =
 		'inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink disabled:opacity-50';
+	const tool =
+		'inline-flex h-9 items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-2.5 text-sm hover:bg-surface-2 disabled:opacity-40';
+	const iconTool =
+		'inline-flex size-9 items-center justify-center rounded-lg border border-line-strong bg-surface hover:bg-surface-2 disabled:opacity-40';
 	const navItem =
-		'flex w-full min-w-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-surface-2 aria-[current=true]:bg-surface-2 aria-[current=true]:font-semibold';
-	const kilobytes = new Intl.NumberFormat(formatLocale(), { style: 'unit', unit: 'kilobyte' });
-	const size = (bytes: number) => kilobytes.format(Math.max(1, Math.round(bytes / 1024)));
+		'flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-2 aria-[current=true]:bg-accent/15 aria-[current=true]:font-semibold data-[drop=true]:ring-2 data-[drop=true]:ring-accent';
 </script>
+
+<svelte:window {onkeydown} />
 
 {#snippet passphraseFields()}
 	<label class={label} for="vault-passphrase">{m.field_passphrase()}</label>
@@ -946,25 +1291,36 @@
 	{/if}
 {/snippet}
 
-{#snippet scopeButton(target: Scope, text: string, depth: number, glyph: typeof Lock | null)}
+{#snippet node(
+	target: Scope,
+	text: string,
+	depth: number,
+	glyph: typeof Lock | null,
+	drop: Target | null
+)}
 	{@const Glyph = glyph}
+	{@const place = drop ? placeOf(drop) : null}
 	<button
 		type="button"
 		class={navItem}
-		style:padding-left="{0.625 + depth * 1.1}rem"
+		style:padding-left="{0.5 + depth * 1}rem"
 		aria-current={!searching && sameScope(scope, target)}
+		data-drop={place !== null && dropOver === place}
 		onclick={() => pick(target)}
+		ondragover={(event) => drop && place && dragOver(event, place)}
+		ondragleave={() => (dropOver = null)}
+		ondrop={(event) => drop && dropOn(event, drop)}
 	>
 		{#if Glyph}<Glyph size={15} class="shrink-0 text-ink-3" aria-hidden="true" />{/if}
 		<span class="flex-1 truncate">{text}</span>
-		<span class="text-xs text-ink-3 tabular-nums">{count(target)}</span>
+		<span class="text-xs text-ink-3 tabular-nums">{count(target) || ''}</span>
 	</button>
 {/snippet}
 
 <!-- The personal vault's own stages, where its entries would be. -->
 {#snippet personalStage()}
 	{#if stage === 'setup'}
-		<form class="m-4 rounded-card border border-line bg-surface p-5" onsubmit={create}>
+		<form class="m-4 max-w-lg rounded-card border border-line bg-surface p-5" onsubmit={create}>
 			<h2 class="text-lg font-semibold">{m.vault_setup_title()}</h2>
 			<p class="mt-1 text-sm text-ink-2">{m.vault_setup_hint()}</p>
 			{@render passphraseFields()}
@@ -972,7 +1328,7 @@
 			{@render problem()}
 		</form>
 	{:else if stage === 'locked'}
-		<form class="m-4 rounded-card border border-line bg-surface p-5" onsubmit={unlock}>
+		<form class="m-4 max-w-lg rounded-card border border-line bg-surface p-5" onsubmit={unlock}>
 			<h2 class="text-lg font-semibold">{m.vault_unlock_title()}</h2>
 			<p class="mt-1 text-sm text-ink-2">{m.vault_locked_hint()}</p>
 			{#if useRecovery}
@@ -1020,71 +1376,122 @@
 	{/if}
 {/snippet}
 
-{#snippet row(item: Item)}
-	{@const Icon = icon(item.icon)}
-	<li>
+<div class="flex min-h-0 flex-1 flex-col">
+	<div
+		role="toolbar"
+		aria-label={m.vault_toolbar()}
+		class="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-line bg-surface px-3 py-2"
+	>
+		<h1 class="mr-2 px-1 eyebrow">{m.nav_vault()}</h1>
 		<button
 			type="button"
-			class="flex w-full min-w-0 items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 text-left hover:bg-surface aria-[current=true]:border-accent aria-[current=true]:bg-surface"
-			aria-current={chosen === item.key}
-			data-testid={item.source === 'shared' ? 'shared-entry' : 'personal-entry'}
-			onclick={() => choose(item)}
+			class={primary}
+			disabled={!newPlace() || stage === 'recovery'}
+			title={`${m.vault_new_entry()} (${ctrl('I')})`}
+			onclick={newEntry}
 		>
-			<span
-				class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-warning"
-				aria-hidden="true"
-			>
-				<Icon size={17} />
-			</span>
-			<span class="min-w-0 flex-1">
-				<span class="block truncate font-medium">{item.title}</span>
-				<span class="block truncate text-xs text-ink-2">
-					{item.username}{item.url ? ` · ${item.url}` : ''}
-				</span>
-			</span>
-			<span class="flex shrink-0 flex-col items-end gap-1">
-				<span class="flex max-w-36 items-center gap-1 truncate text-xs text-ink-3">
-					{#if item.source === 'personal'}
-						<Lock size={11} aria-hidden="true" />
-						<span class="truncate">{item.where || m.vault_personal()}</span>
-					{:else}
-						<Library size={11} aria-hidden="true" />
-						<span class="truncate">{item.where}</span>
-					{/if}
-				</span>
-				<span class="flex gap-1 text-ink-3">
-					{#if item.kinds.includes('totp')}
-						<Timer size={13} aria-label={m.vault_kind_totp()} />
-					{/if}
-					{#if item.kinds.includes('files')}
-						<Paperclip size={13} aria-label={m.vault_kind_files()} />
-					{/if}
-				</span>
-			</span>
+			<Plus size={16} aria-hidden="true" />
+			{m.vault_new_entry()}
 		</button>
-	</li>
-{/snippet}
-
-<div class="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
-	<aside
-		class="flex shrink-0 flex-col gap-5 border-b border-line bg-sunken px-3 py-5 lg:w-72 lg:overflow-y-auto lg:border-r lg:border-b-0"
-	>
-		<h1 class="px-2 eyebrow">{m.nav_vault()}</h1>
-		<label class="relative block">
+		<span class="mx-1 h-6 w-px bg-line" aria-hidden="true"></span>
+		<button
+			type="button"
+			class={tool}
+			disabled={!current || current.deleted}
+			title={`${m.vault_copy_username()} (${ctrl('B')})`}
+			onclick={() => current && copy(current, 'username')}
+		>
+			<User size={15} aria-hidden="true" />
+			<span class="hidden xl:inline">{m.vault_copy_username()}</span>
+			<span class="sr-only xl:hidden">{m.vault_copy_username()}</span>
+		</button>
+		<button
+			type="button"
+			class={tool}
+			disabled={!current || current.deleted || !mayReveal(current)}
+			title={`${m.vault_copy_password()} (${ctrl('C')})`}
+			onclick={() => current && copy(current, 'password')}
+		>
+			<KeyRound size={15} aria-hidden="true" />
+			<span class="hidden xl:inline">{m.vault_copy_password()}</span>
+			<span class="sr-only xl:hidden">{m.vault_copy_password()}</span>
+		</button>
+		<button
+			type="button"
+			class={tool}
+			disabled={!current || !current.hasTotp || current.deleted || !mayReveal(current)}
+			title={`${m.vault_copy_totp()} (${ctrl('T')})`}
+			onclick={() => current && copy(current, 'totp')}
+		>
+			<Clock size={15} aria-hidden="true" />
+			<span class="hidden xl:inline">{m.vault_copy_totp()}</span>
+			<span class="sr-only xl:hidden">{m.vault_copy_totp()}</span>
+		</button>
+		<button
+			type="button"
+			class={tool}
+			disabled={!current || !/^https?:\/\//i.test(current.url)}
+			title={`${m.vault_open_url()} (${ctrl('U')})`}
+			onclick={() => current && openUrl(current)}
+		>
+			<ExternalLink size={15} aria-hidden="true" />
+			<span class="hidden xl:inline">{m.vault_open_url()}</span>
+			<span class="sr-only xl:hidden">{m.vault_open_url()}</span>
+		</button>
+		<span class="mx-1 h-6 w-px bg-line" aria-hidden="true"></span>
+		<button
+			type="button"
+			class={iconTool}
+			disabled={!current || current.deleted || !mayEdit(current)}
+			title={`${m.vault_edit_entry()} (${m.key_enter()})`}
+			onclick={() => current && edit(current)}
+		>
+			<Pencil size={15} aria-hidden="true" />
+			<span class="sr-only">{m.vault_edit_entry()}</span>
+		</button>
+		<button
+			type="button"
+			class="{iconTool} text-critical"
+			disabled={!current || !mayEdit(current)}
+			title={`${current?.deleted ? m.vault_purge() : m.vault_to_bin()} (${m.key_delete()})`}
+			onclick={() => current && remove(current)}
+		>
+			<Trash2 size={15} aria-hidden="true" />
+			<span class="sr-only">{current?.deleted ? m.vault_purge() : m.vault_to_bin()}</span>
+		</button>
+		<label class="relative ml-auto block w-full max-w-xs">
 			<span class="sr-only">{m.vault_search()}</span>
-			<Search size={16} class="absolute top-3 left-3 text-ink-3" aria-hidden="true" />
+			<Search size={15} class="absolute top-2.5 left-2.5 text-ink-3" aria-hidden="true" />
 			<input
+				bind:this={search}
 				type="search"
-				class="h-10 w-full rounded-xl border border-line-strong bg-page pr-3 pl-9 text-sm"
-				placeholder={m.vault_search()}
+				class="h-9 w-full rounded-lg border border-line-strong bg-page pr-3 pl-8 text-sm"
+				placeholder={`${m.vault_search()} (${ctrl('F')})`}
 				bind:value={query}
 			/>
 		</label>
+		{#if stage === 'open'}
+			<button
+				type="button"
+				class={iconTool}
+				title={`${m.vault_lock()} (${ctrl('L')})`}
+				onclick={lock}
+			>
+				<Lock size={15} aria-hidden="true" />
+				<span class="sr-only">{m.vault_lock()}</span>
+			</button>
+		{/if}
+	</div>
 
-		<nav aria-label={m.nav_vault()} class="flex flex-col gap-5">
+	<div class="flex min-h-0 flex-1 flex-col lg:flex-row">
+		<nav
+			aria-label={m.vault_folders_title()}
+			class="flex shrink-0 flex-col gap-4 border-b border-line bg-sunken px-2 py-3 lg:w-64 lg:overflow-y-auto lg:border-r lg:border-b-0"
+		>
 			<div class="flex flex-col gap-0.5">
-				{@render scopeButton({ kind: 'all' }, m.vault_all(), 0, null)}
-				{@render scopeButton({ kind: 'recent' }, m.vault_recent(), 0, null)}
+				{@render node({ kind: 'all' }, m.vault_all(), 0, Layers, null)}
+				{@render node({ kind: 'recent' }, m.vault_recent(), 0, Clock, null)}
+				{@render node({ kind: 'expiring' }, m.vault_expiring(), 0, TriangleAlert, null)}
 			</div>
 
 			<section class="flex flex-col gap-0.5" aria-labelledby="vault-personal">
@@ -1100,25 +1507,30 @@
 						<SettingsMenu label={m.vault_personal_settings()} items={personalMenu} />
 					</span>
 				</div>
-				{@render scopeButton(
+				{@render node(
 					{ kind: 'personal', folder: null },
 					m.vault_personal_all(),
 					0,
-					stage === 'open' ? FolderIcon : Lock
+					stage === 'open' ? LockOpen : Lock,
+					stage === 'open' ? { side: 'personal', folder: null } : null
 				)}
-				{#each personalOutline as node (node.id)}
-					{@render scopeButton(
-						{ kind: 'personal', folder: node.id },
-						node.name,
-						node.depth + 1,
-						FolderIcon
+				{#each personalOutline as folder (folder.id)}
+					{@render node(
+						{ kind: 'personal', folder: folder.id },
+						folder.name,
+						folder.depth + 1,
+						FolderIcon,
+						{ side: 'personal', folder: folder.id }
 					)}
 				{/each}
+				{#if stage === 'open'}
+					{@render node({ kind: 'bin', side: 'personal' }, m.vault_bin(), 1, Trash2, null)}
+				{/if}
 			</section>
 
-			<section class="flex flex-col gap-0.5" aria-labelledby="vault-collections">
+			<section class="flex flex-col gap-0.5" aria-labelledby="vault-shared">
 				<div class="flex items-center gap-2 px-2 pb-1">
-					<h2 id="vault-collections" class="eyebrow">{m.vault_collections()}</h2>
+					<h2 id="vault-shared" class="eyebrow">{m.vault_shared()}</h2>
 					{#if tree?.may_create_top_level}
 						<button
 							type="button"
@@ -1131,23 +1543,24 @@
 						</button>
 					{/if}
 				</div>
-				{#each collectionOutline as node (node.id)}
-					{@const collection = tree?.collections.find((c) => c.id === node.id)}
+				{#each collectionOutline as folder (folder.id)}
+					{@const collection = tree?.collections.find((c) => c.id === folder.id)}
 					<div class="group flex items-center">
-						{@render scopeButton(
-							{ kind: 'collection', id: node.id },
-							node.name,
-							node.depth,
-							Library
+						{@render node(
+							{ kind: 'collection', id: folder.id },
+							folder.name,
+							folder.depth,
+							Users,
+							allows(collection?.role ?? null, 'edit') ? { side: 'shared', id: folder.id } : null
 						)}
 						{#if collection}
-							<!-- Only where the pointer or focus is, and on the collection shown. -->
+							<!-- Only where the pointer or focus is, and on the folder shown. -->
 							<span
 								class="shrink-0 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 data-[shown=true]:opacity-100"
-								data-shown={scope.kind === 'collection' && scope.id === node.id}
+								data-shown={scope.kind === 'collection' && scope.id === folder.id}
 							>
 								<SettingsMenu
-									label={m.vault_collection_settings({ name: node.name })}
+									label={m.vault_collection_settings({ name: folder.name })}
 									items={collectionMenu(collection)}
 								/>
 							</span>
@@ -1156,248 +1569,165 @@
 				{:else}
 					<p class="px-2.5 text-sm text-ink-3">{m.vault_no_collections()}</p>
 				{/each}
-			</section>
-
-			<section class="flex flex-col gap-0.5" aria-labelledby="vault-kinds">
-				<h2 id="vault-kinds" class="px-2 pb-1 eyebrow">{m.vault_kinds()}</h2>
-				{#each FILTERS as filter (filter.kind)}
-					{@render scopeButton({ kind: 'filter', filter: filter.kind }, filter.label(), 0, null)}
-				{/each}
+				{#if (tree?.collections.length ?? 0) > 0}
+					{@render node({ kind: 'bin', side: 'shared' }, m.vault_bin(), 0, Trash2, null)}
+				{/if}
 			</section>
 		</nav>
-	</aside>
 
-	{#if stage === 'recovery'}
-		<section class="flex-1 p-6 lg:overflow-y-auto">
-			<div class="max-w-md rounded-card border border-line bg-surface p-6">
-				<h2 class="text-lg font-semibold">{m.vault_recovery_title()}</h2>
-				{#if mustRenew}
-					<p class="mt-1 text-sm" role="status">{m.vault_recovered_hint()}</p>
-				{/if}
-				<p class="mt-1 text-sm text-ink-2">{m.vault_recovery_hint()}</p>
-				<p
-					class="mt-4 rounded-lg bg-surface-2 p-3 font-mono text-lg break-all"
-					data-testid="recovery-key"
-				>
-					{shownRecovery}
-				</p>
-				<button type="button" class="{primary} mt-5" onclick={afterRecovery}>
-					{m.vault_recovery_saved()}
-				</button>
-			</div>
-		</section>
-	{:else}
-		<section
-			class="flex shrink-0 flex-col border-b border-line bg-page lg:w-[26rem] lg:border-r lg:border-b-0"
-			aria-labelledby="vault-scope"
-		>
-			<div class="flex flex-col gap-3 border-b border-line px-4 pt-5 pb-3">
-				<div class="flex items-start gap-3">
-					<div class="min-w-0 flex-1">
-						<h2 id="vault-scope" class="truncate text-xl font-semibold">{scopeTitle}</h2>
-						<p class="truncate text-sm text-ink-2">{scopeNote}</p>
-					</div>
-					{#if mayCreate && !(personalScope && stage !== 'open')}
-						<button type="button" class={primary} onclick={newEntry}>
-							<Plus size={16} aria-hidden="true" />
-							{m.vault_new()}
+		{#if stage === 'recovery'}
+			<section class="flex-1 p-6 lg:overflow-y-auto">
+				<div class="max-w-md rounded-card border border-line bg-surface p-6">
+					<h2 class="text-lg font-semibold">{m.vault_recovery_title()}</h2>
+					{#if mustRenew}
+						<p class="mt-1 text-sm" role="status">{m.vault_recovered_hint()}</p>
+					{/if}
+					<p class="mt-1 text-sm text-ink-2">{m.vault_recovery_hint()}</p>
+					<p
+						class="mt-4 rounded-lg bg-surface-2 p-3 font-mono text-lg break-all"
+						data-testid="recovery-key"
+					>
+						{shownRecovery}
+					</p>
+					<button type="button" class="{primary} mt-5" onclick={afterRecovery}>
+						{m.vault_recovery_saved()}
+					</button>
+				</div>
+			</section>
+		{:else}
+			<section
+				class="flex min-h-[24rem] min-w-0 flex-1 flex-col lg:min-h-0"
+				aria-labelledby="vault-scope"
+			>
+				<div class="flex shrink-0 items-center gap-3 border-b border-line px-4 py-2">
+					<h2 id="vault-scope" class="truncate font-semibold">{scopeTitle}</h2>
+					{#if scope.kind === 'bin' && !searching && count(scope) > 0}
+						<button
+							type="button"
+							class="{button} ml-auto text-critical"
+							onclick={() =>
+								show({ type: 'empty', side: scope.kind === 'bin' ? scope.side : 'shared' })}
+						>
+							<Trash2 size={14} aria-hidden="true" />
+							{m.vault_empty_bin()}
 						</button>
 					{/if}
 				</div>
-				<div class="flex items-center gap-2 text-sm text-ink-2">
-					{#if !searching && scope.kind !== 'recent'}
-						<label class="flex items-center gap-2">
-							{m.vault_sort()}
-							<select
-								class="rounded-md border border-line bg-surface px-2 py-1 text-ink"
-								bind:value={sort}
-							>
-								<option value="name">{m.field_name()}</option>
-								<option value="used">{m.vault_recent()}</option>
-								<option value="place">{m.vault_sort_place()}</option>
-							</select>
-						</label>
-					{/if}
-					<span class="ml-auto tabular-nums">{m.vault_count({ count: shown.length })}</span>
-				</div>
-			</div>
-			<!-- The setup and unlock forms show their own. -->
-			{#if !dialogOpen && !staging}{@render problem()}{/if}
-			<div class="flex-1 lg:overflow-y-auto">
+				<!-- The setup and unlock forms show their own. -->
+				{#if !dialogOpen && !staging}{@render problem()}{/if}
 				{#if staging}
-					{@render personalStage()}
-				{:else if (stage === 'locked' || stage === 'setup') && !searching && scope.kind === 'all'}
-					<button
-						type="button"
-						class="mx-4 mt-3 flex w-[calc(100%-2rem)] items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-left text-sm text-ink-2 hover:bg-surface-2"
-						onclick={() => pick({ kind: 'personal', folder: null })}
-					>
-						<Lock size={15} class="shrink-0 text-warning" aria-hidden="true" />
-						{stage === 'locked' ? m.vault_locked_notice() : m.vault_setup_notice()}
-					</button>
+					<div class="flex-1 lg:overflow-y-auto">{@render personalStage()}</div>
+				{:else}
+					{#if (stage === 'locked' || stage === 'setup') && !searching && scope.kind === 'all'}
+						<button
+							type="button"
+							class="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-left text-sm text-ink-2 hover:bg-surface-2"
+							onclick={() => pick({ kind: 'personal', folder: null })}
+						>
+							<Lock size={15} class="shrink-0 text-warning" aria-hidden="true" />
+							{stage === 'locked' ? m.vault_locked_notice() : m.vault_setup_notice()}
+						</button>
+					{/if}
+					<EntryTable
+						items={shown}
+						{sort}
+						{chosen}
+						label={scopeTitle}
+						onsort={(next) => (sort = next)}
+						onchoose={choose}
+						onedit={edit}
+						oncopy={copy}
+						onopenurl={openUrl}
+						oncontext={(item, at) => (menu = { item, at })}
+					/>
+					{#if scope.kind === 'personal' && scope.folder === null && !searching && unreadable.length > 0}
+						<ul class="flex shrink-0 flex-col gap-1 border-t border-line p-2">
+							{#each unreadable as entry (entry.id)}
+								<li class="flex items-center gap-3 px-3 py-1.5 text-sm">
+									<CircleAlert size={16} class="shrink-0 text-critical" aria-hidden="true" />
+									<span class="flex-1 text-ink-2">{m.vault_unreadable()}</span>
+									<button
+										type="button"
+										class={button}
+										onclick={() => purgePersonal(entry).then(loadPersonal)}
+									>
+										{m.catalog_delete()}
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
 				{/if}
-				{#if shown.length > 0}
-					<ul class="flex flex-col gap-1 p-2">
-						{#each shown as item (item.key)}
-							{@render row(item)}
-						{/each}
-					</ul>
-				{:else if !(personalScope && stage !== 'open')}
-					<p class="px-4 py-6 text-sm text-ink-3">
-						{searching ? m.catalog_no_match() : m.vault_empty()}
-					</p>
-				{/if}
-				{#if personalScope && !searching && scope.kind === 'personal' && scope.folder === null && unreadable.length > 0}
-					<ul class="flex flex-col gap-1 p-2">
-						{#each unreadable as entry (entry.id)}
-							<li class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm">
-								<CircleAlert size={16} class="shrink-0 text-critical" aria-hidden="true" />
-								<span class="flex-1 text-ink-2">{m.vault_unreadable()}</span>
-								<button type="button" class={button} onclick={() => removeEntry(entry.id)}>
-									{m.catalog_delete()}
-								</button>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</div>
-		</section>
-
-		<section
-			class="flex min-w-0 flex-1 flex-col px-5 py-7 sm:px-8 lg:overflow-y-auto"
-			aria-label={m.vault_entry()}
-			aria-live="polite"
-		>
-			{#if current?.source === 'personal' && current.entry.content}
-				{@const entry = current.entry}
-				{#key current.key}
-					<PersonalDetail
-						content={current.entry.content}
-						where={current.where}
-						onedit={() => editEntry(entry)}
-						onused={() => used(current)}
+				{#if current && !staging}
+					<EntryPane
+						item={current}
+						oncopy={copy}
+						onedit={() => edit(current)}
+						onrestore={() => restore(current)}
+						onrequest={() =>
+							current.source === 'shared' &&
+							show({
+								type: 'request',
+								credential: current.credential,
+								role: current.credential.role
+							})}
 						ondownload={download}
 					/>
-				{/key}
-			{:else if current?.source === 'shared' && tree}
-				{@const credential = current.credential}
-				<SharedDetail
-					{tree}
-					{credential}
-					onedit={() =>
-						show({ type: 'credential', credential, collection: credential.collection_id })}
-					ondelete={() => show({ type: 'delete', credential })}
-					onrequest={() => show({ type: 'request', credential, role: credential.role })}
-					onchange={loadShared}
-				/>
-				{#if requested === credential.id}
-					<p class="mt-4 text-sm" role="status">{m.request_sent()}</p>
 				{/if}
-			{:else}
-				<p class="m-auto text-sm text-ink-3">{m.vault_choose()}</p>
-			{/if}
-		</section>
-	{/if}
+				<footer
+					class="flex shrink-0 items-center gap-4 border-t border-line bg-surface px-4 py-1 text-xs text-ink-2"
+				>
+					<span class="tabular-nums">{m.vault_count({ count: shown.length })}</span>
+					<span role="status" class="truncate">
+						{status ?? ''}
+						{#if clearing}
+							{m.vault_clipboard_clears({ seconds: clearing.left })}
+						{/if}
+					</span>
+					<span class="ml-auto hidden truncate text-ink-3 xl:inline"
+						>{m.vault_shortcuts_hint()}</span
+					>
+				</footer>
+			</section>
+		{/if}
+	</div>
 </div>
+
+{#if menu}
+	<ContextMenu
+		label={m.vault_entry_menu({ title: menu.item.title })}
+		items={menuItems(menu.item)}
+		at={menu.at}
+		onclose={() => (menu = null)}
+	/>
+{/if}
 
 <Dialog
 	bind:open={dialogOpen}
 	title={dialogTitle}
-	wide={open?.type === 'collection' && !!open.collection}
+	wide={open?.type === 'entry' || (open?.type === 'collection' && !!open.collection)}
 >
 	{#if dialogOpen && open?.type === 'entry'}
-		{@const editing = open}
-		<form onsubmit={saveEditedEntry}>
-			<label class="block text-sm font-medium" for="entry-title">{m.field_title()}</label>
-			<input
-				id="entry-title"
-				class={field}
-				required
-				maxlength="200"
-				bind:value={editing.content.title}
-			/>
-			<label class={label} for="entry-username">{m.field_username()}</label>
-			<input
-				id="entry-username"
-				class={field}
-				autocomplete="off"
-				bind:value={editing.content.username}
-			/>
-			<label class={label} for="entry-password">{m.field_password()}</label>
-			<PasswordInput id="entry-password" bind:value={editing.content.password} />
-			<label class={label} for="entry-url">{m.field_url()}</label>
-			<input id="entry-url" class={field} bind:value={editing.content.url} />
-			<label class={label} for="entry-notes">{m.field_notes()}</label>
-			<textarea id="entry-notes" class={field} rows="3" bind:value={editing.content.notes}
-			></textarea>
-			<FieldsEditor id="entry" bind:fields={editedFields} />
-			<fieldset class="mt-3">
-				<legend class="text-sm font-medium">{m.vault_files()}</legend>
-				<ul class="mt-1 text-sm">
-					{#each (editing.content.attachments ?? []).filter((f) => !removedFiles.includes(f.id)) as file (file.id)}
-						<li class="flex items-center gap-2">
-							<span class="truncate">{file.name}</span>
-							<span class="text-xs text-ink-3">{size(file.size)}</span>
-							<button
-								type="button"
-								class="ml-auto rounded-md px-2 py-0.5 text-xs text-ink-3 hover:text-critical"
-								onclick={() => (removedFiles = [...removedFiles, file.id])}
-							>
-								{m.vault_remove()}
-							</button>
-						</li>
-					{/each}
-					{#each pendingFiles as file, index (index)}
-						<li class="flex items-center gap-2">
-							<span class="truncate">{file.name}</span>
-							<span class="text-xs text-ink-3">{size(file.size)}</span>
-							<button
-								type="button"
-								class="ml-auto rounded-md px-2 py-0.5 text-xs text-ink-3 hover:text-critical"
-								onclick={() => (pendingFiles = pendingFiles.filter((_, i) => i !== index))}
-							>
-								{m.vault_remove()}
-							</button>
-						</li>
-					{/each}
-				</ul>
-				<label
-					class="mt-1 inline-block cursor-pointer rounded-md px-2 py-1 text-sm text-ink-2 underline hover:text-ink"
-				>
-					{m.vault_add_file()}
-					<input type="file" class="sr-only" multiple onchange={addFiles} />
-				</label>
-			</fieldset>
-			<label class={label} for="entry-folder">{m.vault_folder()}</label>
-			<select id="entry-folder" class={field} bind:value={editing.content.parent}>
-				<option value={null}>{m.vault_personal()}</option>
-				{#each folderPlaces as place (place.id)}
-					<option value={place.id}>{place.path}</option>
-				{/each}
-			</select>
-			<label class={label} for="entry-icon">{m.vault_icon()}</label>
-			<IconPicker id="entry-icon" bind:value={editing.content.icon} />
-			<div class="mt-5 flex justify-end gap-2">
-				{#if editing.id}
-					<button
-						type="button"
-						class="mr-auto rounded-lg px-3 py-1.5 text-sm text-critical hover:bg-surface-2"
-						onclick={() => editing.id && removeEntry(editing.id)}
-					>
-						{m.catalog_delete()}
-					</button>
-				{/if}
-				<button
-					type="button"
-					class="rounded-lg px-3 py-1.5 text-sm hover:bg-surface-2"
-					onclick={close}
-				>
-					{m.action_cancel()}
-				</button>
-				<button type="submit" class={primary} disabled={busy}>{m.action_save()}</button>
-			</div>
-			{@render problem()}
-		</form>
+		{@const item = open.item}
+		<EntryEditor
+			draft={open.draft}
+			shared={item ? item.source === 'shared' : open.draft.place.startsWith('s:')}
+			isNew={!item}
+			{places}
+			files={item?.source === 'personal'
+				? (item.entry.content?.attachments ?? [])
+				: item?.source === 'shared'
+					? item.credential.attachments
+					: []}
+			hasTotp={item?.source === 'shared' && item.hasTotp}
+			history={item?.source === 'personal' ? (item.entry.content?.history ?? []) : []}
+			credentialId={item?.source === 'shared' ? item.id : null}
+			mayReveal={item ? mayReveal(item) : false}
+			{busy}
+			{error}
+			onsubmit={saveDraft}
+			oncancel={close}
+		/>
 	{:else if dialogOpen && open?.type === 'folder'}
 		<form onsubmit={addFolder}>
 			<label class="block text-sm font-medium" for="vault-folder-name">{m.field_name()}</label>
@@ -1411,15 +1741,6 @@
 			<button type="submit" class="{primary} mt-5">{m.action_create()}</button>
 			{@render problem()}
 		</form>
-	{:else if dialogOpen && open?.type === 'credential'}
-		<CredentialForm
-			collectionId={open.collection}
-			{places}
-			credential={open.credential}
-			onsubmit={saveCredential}
-			oncancel={close}
-		/>
-		{@render problem()}
 	{:else if dialogOpen && open?.type === 'collection' && tree}
 		{@const target = open}
 		<CollectionForm
@@ -1450,8 +1771,9 @@
 			</div>
 			{@render problem()}
 		{/if}
-	{:else if dialogOpen && open?.type === 'delete'}
-		<p class="text-sm">{m.catalog_delete_confirm({ name: open.credential.name })}</p>
+	{:else if dialogOpen && open?.type === 'purge'}
+		{@const item = open.item}
+		<p class="text-sm">{m.vault_purge_confirm({ title: item.title })}</p>
 		<div class="mt-5 flex justify-end gap-2">
 			<button
 				type="button"
@@ -1462,15 +1784,36 @@
 			</button>
 			<button
 				type="button"
-				class="rounded-lg bg-critical px-3 py-1.5 text-sm font-medium text-white"
-				onclick={removeCredential}
+				class="rounded-lg bg-critical px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+				disabled={busy}
+				onclick={() => purge(item)}
 			>
-				{m.catalog_delete()}
+				{m.vault_purge()}
 			</button>
 		</div>
 		{@render problem()}
+	{:else if dialogOpen && open?.type === 'empty'}
+		{@const side = open.side}
+		<p class="text-sm">{m.vault_empty_bin_confirm({ count: count({ kind: 'bin', side }) })}</p>
+		<div class="mt-5 flex justify-end gap-2">
+			<button
+				type="button"
+				class="rounded-lg px-3 py-1.5 text-sm hover:bg-surface-2"
+				onclick={close}
+			>
+				{m.action_cancel()}
+			</button>
+			<button
+				type="button"
+				class="rounded-lg bg-critical px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+				disabled={busy}
+				onclick={() => emptyBin(side)}
+			>
+				{m.vault_empty_bin()}
+			</button>
+		</div>
 	{:else if dialogOpen && open?.type === 'request'}
-		<RequestForm held={open.role} onsubmit={sendRequest} oncancel={close} />
+		<RequestForm held={open.role} kind="credential" onsubmit={sendRequest} oncancel={close} />
 		{@render problem()}
 	{:else if dialogOpen && open?.type === 'kdbx'}
 		<KdbxForm mode={open.mode} {busy} onimport={importKdbx} onexport={exportKdbx} />

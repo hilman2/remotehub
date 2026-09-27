@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { readKdbx, writeKdbx, type KdbxEntry } from './kdbx';
+import { readKdbx, takeTotp, writeKdbx, type KdbxEntry } from './kdbx';
 
 /**
  * Made by KeePassXC 2 (keepassxc-cli, KDBX 4 with Argon2d): the group
@@ -41,7 +41,10 @@ describe('KeePass files', () => {
 				notes: 'line 1\nline 2',
 				icon: 0,
 				fields: [],
-				files: []
+				files: [],
+				tags: [],
+				expires: null,
+				totp: ''
 			},
 			{
 				path: ['Bank', 'Cards'],
@@ -55,11 +58,26 @@ describe('KeePass files', () => {
 					{ name: 'PIN', value: '1234', protected: true },
 					{ name: 'Branch', value: 'Main street', protected: false }
 				],
-				files: [{ name: 'card.txt', data: new TextEncoder().encode('front and back') }]
+				files: [{ name: 'card.txt', data: new TextEncoder().encode('front and back') }],
+				// What #193 adds: tags, the day it runs out and a one-time password.
+				tags: ['bank', 'cards'],
+				expires: '2027-03-31',
+				totp: 'otpauth://totp/Bank?secret=JBSWY3DPEHPK3PXP'
 			}
 		];
 		const file = await writeKdbx(entries, 'Export-Passw0rd', 'remotehub');
 		const back = await readKdbx(file, 'Export-Passw0rd');
 		expect(back).toEqual(entries);
+	});
+
+	it('reads the one-time password of KeePass 2 as a link', () => {
+		const { totp, fields } = takeTotp([
+			{ name: 'TimeOtp-Secret-Base32', value: 'JBSWY3DPEHPK3PXP', protected: true },
+			{ name: 'TimeOtp-Algorithm', value: 'HMAC-SHA-256', protected: false },
+			{ name: 'TimeOtp-Length', value: '8', protected: false },
+			{ name: 'PIN', value: '1234', protected: true }
+		]);
+		expect(totp).toBe('otpauth://totp/entry?secret=JBSWY3DPEHPK3PXP&algorithm=SHA256&digits=8');
+		expect(fields.map((f) => f.name)).toEqual(['PIN']);
 	});
 });

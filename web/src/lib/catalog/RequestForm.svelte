@@ -1,23 +1,26 @@
 <script lang="ts">
-	import type { Role } from '$lib/api/catalog';
+	import type { ObjectKind, Role } from '$lib/api/catalog';
 	import { DURATIONS, requestableRoles } from '$lib/api/requests';
 	import { m } from '$lib/paraglide/messages';
 	import { ROLE_LABELS, durationLabel } from './labels';
 
 	let {
 		held,
+		kind,
 		onsubmit,
 		oncancel
 	}: {
 		/** The role the user holds now. */
 		held: Role;
+		/** What is asked for; a vault entry offers only `reveal`. */
+		kind?: ObjectKind;
 		onsubmit: (role: Role, minutes: number, reason: string) => void;
 		oncancel: () => void;
 	} = $props();
 
-	const roles = $derived(requestableRoles(held));
+	const roles = $derived(requestableRoles(held, kind));
 	// svelte-ignore state_referenced_locally
-	let role = $state<Role>(requestableRoles(held)[0] ?? 'connect');
+	let role = $state<Role>(requestableRoles(held, kind)[0] ?? 'connect');
 	let minutes = $state(DURATIONS[0]);
 	let reason = $state('');
 

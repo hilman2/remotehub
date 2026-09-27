@@ -81,14 +81,18 @@ const tree: Tree = {
 			id: 'c',
 			collection_id: 'kw',
 			name: 'domain admin',
-			username: 'administrator',
-			domain: 'EXAMPLE',
+			username: 'EXAMPLE\\administrator',
 			version: 1,
 			url: '',
 			notes: '',
 			icon: 0,
 			fields: [],
 			attachments: [],
+			tags: [],
+			expires_on: null,
+			has_totp: false,
+			updated_at: '2026-09-27T00:00:00Z',
+			deleted_at: null,
 			role: 'connect'
 		}
 	]

@@ -21,13 +21,17 @@
 	let { kind, id }: { kind: ObjectKind; id: string } = $props();
 
 	const time = new Intl.DateTimeFormat(formatLocale(), { dateStyle: 'short', timeStyle: 'short' });
+	// The vault's entries are shown, never connected with (#192).
+	const vault = $derived(kind === 'collection' || kind === 'credential');
+	const offered = $derived(vault ? ROLES.filter((r) => r !== 'connect') : ROLES);
 
 	let direct = $state<GrantRow[]>([]);
 	let inherited = $state<GrantRow[]>([]);
 	let chosen = $state<Principal | null>(null);
 	/** Counts the grants added here: a new picker for each. */
 	let added = $state(0);
-	let role = $state<Role>('connect');
+	// svelte-ignore state_referenced_locally
+	let role = $state<Role>(vault ? 'reveal' : 'connect');
 	let error = $state<string | null>(null);
 
 	async function load() {
@@ -116,7 +120,7 @@
 
 	<div class="mt-3 flex items-center gap-2">
 		<select class="flex-1 rounded-lg border border-line bg-page px-3 py-2" bind:value={role}>
-			{#each ROLES as r (r)}
+			{#each offered as r (r)}
 				<option value={r}>{ROLE_LABELS[r]()}</option>
 			{/each}
 		</select>

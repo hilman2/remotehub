@@ -159,6 +159,11 @@ pub fn router(state: AppState) -> Router<AppState> {
         )
         .route("/credentials", post(catalog::create_credential))
         .route("/credentials/{id}/reveal", post(reveal::credential))
+        .route("/credentials/{id}/code", post(reveal::code))
+        .route(
+            "/credentials/{id}/restore",
+            post(catalog::restore_credential),
+        )
         .route("/credentials/{id}/versions", get(reveal::versions))
         .route(
             "/credentials/{id}/attachments",

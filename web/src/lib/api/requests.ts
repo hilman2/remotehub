@@ -30,9 +30,11 @@ export interface Requests {
 export const DURATIONS: readonly number[] = [60, 240, 480, 1440];
 
 /** The roles someone holding `held` may ask for: only connect and reveal, and only more than they have. */
-export function requestableRoles(held: Role | null): Role[] {
+export function requestableRoles(held: Role | null, kind?: ObjectKind): Role[] {
 	if (held === null) return [];
-	return (['connect', 'reveal'] as const).filter((role) => !allows(held, role));
+	// A vault entry is for showing, not for connecting with (#192).
+	const roles = kind === 'credential' ? (['reveal'] as const) : (['connect', 'reveal'] as const);
+	return roles.filter((role) => !allows(held, role));
 }
 
 export const loadRequests = () => api<Requests>('GET', '/api/access-requests');

@@ -18,7 +18,9 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
-use super::catalog::{Created, body, context, database, entry, invalid, name, nullable, require};
+use super::catalog::{
+    Created, body, context, database, entry, invalid, name, nullable, purge_credentials, require,
+};
 use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
 use crate::AppState;
@@ -141,7 +143,8 @@ pub async fn update(
 }
 
 /// Only an empty collection goes: credentials and collections inside keep
-/// it, as `folder_not_empty`.
+/// it, as `folder_not_empty`. What lies in its recycle bin goes with it, as
+/// the recycle bin empties (#193); the audit entry names how many.
 pub async fn delete(
     State(state): State<AppState>,
     session: Session,
@@ -151,6 +154,13 @@ pub async fn delete(
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Manage, ObjectId::Collection(id))?;
     let mut tx = state.db.begin().await?;
+    let binned: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM credentials WHERE collection_id = $1 AND deleted_at IS NOT NULL",
+    )
+    .bind(id)
+    .fetch_all(&mut *tx)
+    .await?;
+    purge_credentials(&mut tx, &binned).await?;
     sqlx::query("DELETE FROM collections WHERE id = $1")
         .bind(id)
         .execute(&mut *tx)
@@ -162,7 +172,7 @@ pub async fn delete(
             &session,
             Action::CollectionDeleted,
             ObjectId::Collection(id),
-            json!({}),
+            json!({ "purged": binned.len() }),
             &address,
         ),
     )
