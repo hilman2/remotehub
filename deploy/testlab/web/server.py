@@ -6,7 +6,8 @@ GET  /        the sign-in form (user name, password, submit); it also loads
 POST /login   checks tester / Tester-Passw0rd!, then shows who signed in
 GET  /last    for the tests, as JSON, never the password:
               {"username": ..., "ok": ..., "count": <sign-ins so far>,
-               "escapes": <requests that reached port 8443>}
+               "escapes": <requests that reached port 8443>,
+               "language": <Accept-Language of the last form>}
               also over plain HTTP on port 8080
 """
 
@@ -32,7 +33,7 @@ FORM = b"""<!doctype html>
 </body></html>
 """
 
-last = {"username": None, "ok": None, "count": 0, "escapes": 0}
+last = {"username": None, "ok": None, "count": 0, "escapes": 0, "language": None}
 lock = threading.Lock()
 
 
@@ -42,6 +43,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/":
+            with lock:
+                last["language"] = self.headers.get("Accept-Language")
             self.reply(200, "text/html", FORM)
         elif self.path == "/last":
             with lock:

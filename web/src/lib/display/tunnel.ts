@@ -16,6 +16,8 @@ export interface Start {
 	height: number;
 	dpi: number;
 	timezone?: string;
+	/** Most wanted first; web interfaces open in them (#211). */
+	languages?: string[];
 }
 
 export type ServerEvent =

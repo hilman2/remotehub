@@ -40,7 +40,12 @@
 		});
 		const tunnel = createTunnel(
 			deviceId,
-			() => ({ ...size(), dpi: 96, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+			() => ({
+				...size(),
+				dpi: 96,
+				timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+				languages: [...navigator.languages]
+			}),
 			credentials,
 			purpose,
 			onevent

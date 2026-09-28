@@ -24,9 +24,11 @@ LABEL org.opencontainers.image.title="remotehub-browser" \
       org.opencontainers.image.source="https://github.com/hilman2/remotehub" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \
       org.opencontainers.image.version="${VERSION}"
+# chromium-l10n: Chromium's own texts in the admin's language (#211).
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-       chromium fonts-dejavu-core fonts-liberation procps tigervnc-standalone-server tigervnc-tools tini \
+       chromium chromium-l10n fonts-dejavu-core fonts-liberation procps tigervnc-standalone-server \
+       tigervnc-tools tini \
   && rm -rf /var/lib/apt/lists/*
 # No password manager, downloads, printing, extensions or local files. The
 # developer tools are not turned off here: DeveloperToolsAvailability would
