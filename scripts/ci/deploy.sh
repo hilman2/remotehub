@@ -26,19 +26,22 @@ if [ ! -f .env ] || [ ! -f compose.yml ]; then
   exit 1
 fi
 
+# This script reaches bash on stdin: docker compose reads stdin too, and
+# would take the rest of the script with it (#229).
 # There is no way back to an older release but a backup (docs/install.md#upgrade).
 stamp="$(date +%Y%m%d-%H%M%S)"
 mkdir -p backups
 chmod 700 backups
 for database in remotehub kratos; do
-  docker compose exec -T db pg_dump -U remotehub -Fc "$database" >"backups/${database}-${stamp}.dump"
+  docker compose exec -T db pg_dump -U remotehub -Fc "$database" </dev/null \
+    >"backups/${database}-${stamp}.dump"
 done
 echo "backup: ${dir}/backups/{remotehub,kratos}-${stamp}.dump"
 
 before="$(sed -n 's/^REMOTEHUB_VERSION=//p' .env | tail -n 1)"
 sed -i "s/^REMOTEHUB_VERSION=.*/REMOTEHUB_VERSION=${version}/" .env
-docker compose pull -q
-docker compose up -d --wait --wait-timeout 300
+docker compose pull -q </dev/null
+docker compose up -d --wait --wait-timeout 300 </dev/null
 
 port="$(sed -n 's/^REMOTEHUB_PORT=//p' .env | tail -n 1)"
 health="$(curl -fsS "http://127.0.0.1:${port:-8080}/api/health")"
