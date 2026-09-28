@@ -31,7 +31,7 @@
 	const isSelected = (kind: ObjectKind, id: string) =>
 		selected?.kind === kind && selected.id === id;
 	const row =
-		'flex w-full min-w-0 items-center gap-2.5 rounded-lg py-1.5 pl-1.5 pr-2.5 text-left text-sm text-ink-2 hover:bg-surface-2 hover:text-ink data-[selected=true]:bg-surface-2 data-[selected=true]:text-ink data-[selected=true]:ring-1 data-[selected=true]:ring-line-strong';
+		'flex w-full min-w-0 items-center gap-2.5 rounded-lg pl-1.5 pr-2.5 text-left text-sm text-ink-2 hover:bg-surface-2 hover:text-ink data-[selected=true]:bg-surface-2 data-[selected=true]:text-ink data-[selected=true]:ring-1 data-[selected=true]:ring-line-strong';
 	const indent = (level: number) => `padding-left: ${0.5 + level * 1.1}rem`;
 </script>
 
@@ -52,7 +52,7 @@
 		</button>
 		<button
 			type="button"
-			class={row}
+			class="{row} py-1.5"
 			data-selected={isSelected('folder', node.folder.id)}
 			onclick={() => onselect('folder', node.folder.id)}
 			ondblclick={() => ontoggle(node.folder.id)}
@@ -83,15 +83,20 @@
 				<li role="treeitem" aria-selected={isSelected('device', device.id)}>
 					<button
 						type="button"
-						class={row}
+						class="{row} py-1"
 						style={indent(depth + 1.4)}
 						data-selected={isSelected('device', device.id)}
 						onclick={() => onselect('device', device.id)}
 						ondblclick={() => onopen(device.id)}
 					>
 						<ProtocolChip protocol={device.protocol} />
-						<span class="truncate">{device.name}</span>
-						<span class="ml-auto truncate font-mono text-xs text-ink-3">{device.host}</span>
+						<!-- The name gets the whole line, the host goes small below it (#209). -->
+						<span class="flex min-w-0 flex-col">
+							<span class="truncate">{device.name}</span>
+							<span class="truncate font-mono text-[11px] leading-tight text-ink-3">
+								{device.host}
+							</span>
+						</span>
 					</button>
 				</li>
 			{/each}
