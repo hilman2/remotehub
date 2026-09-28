@@ -9,8 +9,9 @@
 //!
 //! Browser → server:
 //! - first text frame: `{"type":"start","width":…,"height":…,"dpi":…,
-//!   "timezone":…}`, plus `"username"` and `"password"` when the device asks
-//!   for credentials, and `"purpose"` when the user must state one (#90)
+//!   "timezone":…,"languages":[…]}`, plus `"username"` and `"password"` when
+//!   the device asks for credentials, and `"purpose"` when the user must
+//!   state one (#90); the languages are only for web interfaces (#211)
 //! - then text frames with Guacamole instructions; only input, display size,
 //!   clipboard and stream acknowledgements reach guacd
 //!
@@ -62,6 +63,9 @@ enum ClientMessage {
         height: u32,
         dpi: Option<u32>,
         timezone: Option<String>,
+        /// The browser's languages, for web interfaces (#211).
+        #[serde(default)]
+        languages: Vec<String>,
         username: Option<String>,
         password: Option<SecretString>,
         purpose: Option<String>,
@@ -176,6 +180,7 @@ async fn run(
         height,
         dpi,
         timezone: zone,
+        languages,
         username,
         password,
         purpose,
@@ -281,6 +286,8 @@ async fn run(
         Login::Key(_) => "",
     };
     let zone = timezone(zone);
+    // Checked again by the browser service; tags only, a few of them.
+    let languages = remotehub_browser::protocol::languages(&languages);
 
     // 4. Where the engine reaches the device: guacd for RDP and VNC, the
     // browser service for HTTPS.
@@ -310,6 +317,7 @@ async fn run(
                 width,
                 height,
                 timezone: zone.as_deref(),
+                languages: &languages,
                 login: Some((&credentials.username, password)),
             };
             match browser::open(&state.settings.browser, &request, BROWSER_TIMEOUT).await {

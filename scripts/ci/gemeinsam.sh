@@ -333,10 +333,13 @@ ci_main() {
 
   echo "▶ ${CI_REPO_KURZ} ${CI_SHA_KURZ} — $(git -C "$CI_WURZEL" log -1 --format=%s "$CI_SHA")"
   echo "  Protokolle: ${CI_PROTOKOLLE}"
+  # Der Rechnername steht nur hier, nicht im Status auf GitHub: der ist
+  # öffentlich (#226).
+  echo "  Rechner: $(hostname)"
 
   if [ "$CI_STATUS" = 1 ]; then
     if ci_auf_github; then
-      ci_status_setzen pending "Läuft lokal auf $(hostname)"
+      ci_status_setzen pending "Läuft lokal"
       CI_PENDING=1
     else
       echo "  Commit ist noch nicht auf GitHub — Status danach mit --melden nachtragen."
@@ -375,7 +378,7 @@ ci_main() {
   local dauer beschreibung
   dauer="$(ci_dauer $((SECONDS - start)))"
   if [ "${#rot[@]}" -eq 0 ]; then
-    beschreibung="${gruen[*]} grün · ${dauer} · $(hostname)"
+    beschreibung="${gruen[*]} grün · ${dauer}"
     if [ -z "$CI_NUR" ]; then
       printf 'ok\n%s\n' "$beschreibung" >"${CI_ABLAGE}/${CI_SHA}"
       printf '%s\n%s\n' "$CI_SHA" "$beschreibung" >"${CI_ABLAGE}/baum-$(ci_baum)"
@@ -390,7 +393,7 @@ ci_main() {
     return 0
   fi
 
-  beschreibung="rot: ${rot[*]} · ${dauer} · $(hostname)"
+  beschreibung="rot: ${rot[*]} · ${dauer}"
   printf 'fehler\n%s\n' "$beschreibung" >"${CI_ABLAGE}/${CI_SHA}"
   if [ "$CI_PENDING" = 1 ]; then
     ci_status_setzen failure "$beschreibung"

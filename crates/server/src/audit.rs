@@ -56,6 +56,8 @@ audit_actions! {
     DeviceCreated = "device.created",
     DeviceUpdated = "device.updated",
     DeviceDeleted = "device.deleted",
+    DeviceKeywordsChanged = "device.keywords_changed",
+    DeviceMoved = "device.moved",
     CredentialCreated = "credential.created",
     CredentialUpdated = "credential.updated",
     CredentialDeleted = "credential.deleted",

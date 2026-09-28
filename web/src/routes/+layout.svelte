@@ -48,6 +48,9 @@
 			? tabs.list.find((tab) => tab.key === tabs.active)
 			: undefined
 	);
+	/** The header while a session is shown: folded away unless asked for (#220). */
+	let headerInSession = $state(false);
+	const headerShown = $derived(!showing || headerInSession);
 	// The devices page, the vault and sessions fill the window and scroll
 	// inside; the other pages sit in a column and scroll as a whole.
 	const fullBleed = $derived(
@@ -149,7 +152,11 @@
 	</a>
 
 	<div class="flex flex-col {fullBleed ? 'h-dvh' : 'min-h-dvh'}">
-		<header class="sticky top-0 z-10 border-b border-line bg-sunken/90 backdrop-blur">
+		<!-- A session gets the height: only the strip of sessions stays (#220). -->
+		<header
+			class="sticky top-0 z-10 border-b border-line bg-sunken/90 backdrop-blur"
+			hidden={!headerShown}
+		>
 			<div class="flex h-15 items-center gap-7 px-4 sm:px-6">
 				<a href={resolve('/')} class="flex items-center gap-2.5">
 					<Logo />
@@ -210,7 +217,10 @@
 		{/if}
 
 		{#if tabs.list.length > 0}
-			<SessionTabs />
+			<SessionTabs
+				header={showing ? headerInSession : null}
+				onheader={() => (headerInSession = !headerInSession)}
+			/>
 		{/if}
 
 		<div class="flex flex-1 {fullBleed ? 'min-h-0' : ''}">
@@ -241,7 +251,8 @@
 		</div>
 
 		<footer class="border-t border-line bg-sunken">
-			<div class="flex items-center gap-4 px-4 py-2.5 sm:px-6">
+			<!-- Half as high while a session is shown (#220). -->
+			<div class="flex items-center gap-4 px-4 sm:px-6 {showing ? 'py-1' : 'py-2.5'}">
 				<div class="shrink-0"><ServerStatus /></div>
 				<SessionStatus />
 			</div>

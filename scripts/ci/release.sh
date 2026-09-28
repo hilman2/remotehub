@@ -7,14 +7,16 @@
 # 1. The head of origin/main is checked out and clean, Cargo.toml and
 #    deploy/ops/.env.example name the version, and vVERSION is new.
 # 2. The commit has the status `lokal`: success (bash scripts/ci/lokal.sh).
-# 3. The images are built from the commit and tried with the ops package
-#    in a fresh compose project (scripts/ci/image-check.sh).
+# 3. The images the job `image` of the local CI built and tried for the
+#    commit's tree, with the maintainer's key, are taken as they are (#225).
+#    Without them, the images are built from the commit and tried with the
+#    ops package in a fresh compose project (scripts/ci/image-check.sh).
 # 4. The images go to GHCR, and a GitHub release vVERSION gets generated
 #    notes and the ops package as remotehub-ops-VERSION.tar.gz.
 #
 # Needs git, docker, gh (signed in) and `docker login ghcr.io` with a token
-# that may write packages. The version is bumped in its own pull request
-# beforehand.
+# that may write packages. The version is bumped beforehand, in a pull
+# request of its own or as a commit of the last one (#225).
 #
 # The browser extension (#201) is signed with the maintainer's key, a PEM
 # file outside the repository: REMOTEHUB_EXTENSION_KEY_FILE, by default
@@ -94,11 +96,36 @@ trap 'exit 130' INT TERM
 ci_sperren
 ci_umgebung
 
-echo "── Build and try the images"
-tools="$(ci_image scripts/ci/tools.Dockerfile)"
-# --pull: the base images as they are today, not as the build cache has them.
-ci_docker_run "${key_mount[@]}" "$tools" bash scripts/ci/image-check.sh "$version" "$IMAGE" "$GUACD_IMAGE" \
-  "$BROWSER_IMAGE" "$CONNECTOR_IMAGE" "$version" --pull "${extension_build[@]}"
+# The images the local CI built and tried for this very tree (lokal.sh, job
+# `image`), if they carry an extension signed with another key than the
+# development one: the maintainer's, on this machine (#225).
+ci_tree="$(git rev-parse "${CI_SHA}^{tree}")"
+ci_images=(remotehub-ci-image remotehub-ci-guacd remotehub-ci-browser-image remotehub-ci-connector)
+tried_by_ci() {
+  local image built id
+  for image in "${ci_images[@]}"; do
+    docker image inspect "${image}:tree-${ci_tree:0:12}" >/dev/null 2>&1 || return 1
+  done
+  built="$(docker create "remotehub-ci-image:tree-${ci_tree:0:12}")"
+  id="$(docker cp -q "${built}:/usr/share/remotehub/downloads/remotehub-extension.json" - 2>/dev/null |
+    tar -xO 2>/dev/null | sed -n 's/.*"id":"\([a-p]*\)".*/\1/p' || true)"
+  docker rm -f "$built" >/dev/null
+  [ -n "$id" ] && [ "$id" != obnekonmlefgdhgodgbjapgoophnhlao ]
+}
+
+if tried_by_ci; then
+  echo "── Take the images the CI built and tried for tree ${ci_tree:0:12}"
+  targets=("$IMAGE" "$GUACD_IMAGE" "$BROWSER_IMAGE" "$CONNECTOR_IMAGE")
+  for i in "${!ci_images[@]}"; do
+    docker tag "${ci_images[$i]}:tree-${ci_tree:0:12}" "${targets[$i]}:${version}"
+  done
+else
+  echo "── Build and try the images"
+  tools="$(ci_image scripts/ci/tools.Dockerfile)"
+  # --pull: the base images as they are today, not as the build cache has them.
+  ci_docker_run "${key_mount[@]}" "$tools" bash scripts/ci/image-check.sh "$version" "$IMAGE" "$GUACD_IMAGE" \
+    "$BROWSER_IMAGE" "$CONNECTOR_IMAGE" "$version" --pull "${extension_build[@]}"
+fi
 
 echo "── Take the site connector for Windows from the image"
 # The very file remotehub serves under /downloads (#188), so the release's

@@ -122,19 +122,39 @@ job_base() {
 # The production images (deploy/Dockerfile, deploy/guacd, deploy/browser, deploy/connector) with the ops
 # package (deploy/ops), tried the way an installation uses them: see
 # scripts/ci/image-check.sh, which the release script runs alike.
+#
+# With the maintainer's key on this machine, the browser extension is signed
+# as in a release, and the images keep a tag for the tree they were built
+# from: release.sh takes them instead of building and trying them again
+# (#225).
+CI_IMAGES=(remotehub-ci-image remotehub-ci-guacd remotehub-ci-browser-image remotehub-ci-connector)
 job_image() {
   if ! needed "${IMAGE_INPUTS[@]}"; then
     echo "skipped: nothing under ${IMAGE_INPUTS[*]} changed"
     return 0
   fi
-  local tools version
+  local tools version key key_mount=() signing=() tree image
   tools="$(ci_image scripts/ci/tools.Dockerfile)"
   version="$(git -C "$CI_WURZEL" show "${CI_SHA}:Cargo.toml" | sed -n 's/^version = "\(.*\)"/\1/p' | head -n 1)"
-  ci_docker_run "$tools" bash scripts/ci/image-check.sh "$version" remotehub-ci-image remotehub-ci-guacd \
-    remotehub-ci-browser-image remotehub-ci-connector ci
+  key="${REMOTEHUB_EXTENSION_KEY_FILE:-${HOME}/.config/remotehub/extension-key.pem}"
+  if [ -s "$key" ]; then
+    key_mount=(-v "$(cygpath -m "$key" 2>/dev/null || echo "$key"):/run/extension-key.pem:ro")
+    signing=(--secret "id=extension_key,src=/run/extension-key.pem")
+  fi
+  ci_docker_run "${key_mount[@]}" "$tools" bash scripts/ci/image-check.sh "$version" "${CI_IMAGES[@]}" ci \
+    "${signing[@]}"
   # The installer (#142) with the images just built, on three kinds of host.
   ci_docker_run "$tools" bash scripts/ci/install-check.sh remotehub-ci-image remotehub-ci-guacd \
     remotehub-ci-browser-image ci
+  tree="$(ci_baum)"
+  for image in "${CI_IMAGES[@]}"; do
+    docker tag "${image}:ci" "${image}:tree-${tree:0:12}"
+    # This tree and the two newest before it keep their images; they share
+    # most layers.
+    { docker images --format '{{.Repository}}:{{.Tag}}' "$image" | grep ':tree-' |
+      grep -v ":tree-${tree:0:12}\$" | tail -n +3 | xargs -r docker rmi >/dev/null; } || true
+  done
+  echo "images for tree ${tree:0:12}: ${CI_IMAGES[*]}"
 }
 
 # Runs a script in the Rust tools container with the cargo caches, a fresh

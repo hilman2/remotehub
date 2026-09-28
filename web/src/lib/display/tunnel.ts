@@ -16,11 +16,18 @@ export interface Start {
 	height: number;
 	dpi: number;
 	timezone?: string;
+	/** Most wanted first; web interfaces open in them (#211). */
+	languages?: string[];
 }
 
 export type ServerEvent =
 	| { type: 'connected'; certificate_fingerprint: string | null; pinned: boolean }
-	| { type: 'error'; code: string; params: Record<string, unknown> };
+	| { type: 'error'; code: string; params: Record<string, unknown> }
+	/**
+	 * Not a frame of the server's: guacd ended the session without an error,
+	 * e.g. the user signed out on the device (#221).
+	 */
+	| { type: 'ended' };
 
 export function displayUrl(deviceId: string, location: Location = window.location): string {
 	const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -57,7 +64,12 @@ export function createTunnel(
 	tunnel.connect = () => {
 		tunnel.setState(State.CONNECTING);
 		const parser = new Guacamole.Parser();
-		parser.oninstruction = (opcode, args) => tunnel.oninstruction?.(opcode, args);
+		parser.oninstruction = (opcode, args) => {
+			// guacd says goodbye when the session ends as it should; a connection
+			// that is lost just closes (#221).
+			if (opcode === 'disconnect') onevent({ type: 'ended' });
+			tunnel.oninstruction?.(opcode, args);
+		};
 
 		socket = new WebSocket(displayUrl(deviceId));
 		socket.onopen = () => {
@@ -97,6 +109,12 @@ export function createTunnel(
 
 	return tunnel;
 }
+
+/**
+ * Status 0x0000 (success): guacd reports a session that ended as it should,
+ * e.g. signed out on the device (#221), not a failure.
+ */
+export const endsRegularly = (code: number) => code === 0x0000;
 
 /** What went wrong, by Guacamole status code, in the words of the messages. */
 export type Failure = 'target' | 'auth' | 'ended' | 'failed';

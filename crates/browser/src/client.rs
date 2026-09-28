@@ -32,6 +32,8 @@ pub struct Request<'a> {
     pub width: u32,
     pub height: u32,
     pub timezone: Option<&'a str>,
+    /// The admin's languages, most wanted first (#211).
+    pub languages: &'a [&'a str],
     /// User name and password to sign in with.
     pub login: Option<(&'a str, &'a str)>,
 }
@@ -69,7 +71,7 @@ async fn start(agent: &str, request: &Request<'_>) -> Result<Session, BrowserErr
         json!({
             "host": request.host, "port": request.port, "via": request.via, "spki": request.spki,
             "width": request.width, "height": request.height,
-            "timezone": request.timezone, "login": login,
+            "timezone": request.timezone, "languages": request.languages, "login": login,
         })
         .to_string(),
     );
@@ -160,6 +162,7 @@ mod tests {
                 width: 1280,
                 height: 800,
                 timezone: Some("Europe/Berlin"),
+                languages: &["de-DE", "de"],
                 login: Some(("tester", "secret")),
             },
             Duration::from_secs(5),
@@ -176,6 +179,7 @@ mod tests {
         assert_eq!(open.via.as_deref(), Some("10.0.0.9:40000"));
         assert_eq!(open.spki, "c3BraQ==");
         assert_eq!(open.timezone.as_deref(), Some("Europe/Berlin"));
+        assert_eq!(open.languages, ["de-DE", "de"]);
         let login = open.login.unwrap();
         assert_eq!(login.username, "tester");
         assert_eq!(login.password.expose_secret(), "secret");

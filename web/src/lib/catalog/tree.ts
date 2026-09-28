@@ -14,6 +14,68 @@ export interface FolderNode {
 	devices: Device[];
 }
 
+/** What is dragged in the device tree, or moved with *Move to …* (#214). */
+export interface Dragged {
+	kind: 'device' | 'folder';
+	id: string;
+}
+
+/** Drag and drop in the device tree (#214), run by the page. */
+export interface Mover {
+	/** Whether the folder `target` takes what is dragged now. */
+	takes: (target: string) => boolean;
+	start: (item: Dragged) => void;
+	end: () => void;
+	drop: (target: string) => void;
+}
+
+/**
+ * Whether `item` may go into the folder `target`, or to the top level with
+ * null, by the server's rules (#214): a device needs `edit` on it and on the
+ * target, a folder `manage`, and never goes into itself or below itself.
+ * Only what the server takes lights up; it still decides.
+ */
+export function takes(tree: Tree, item: Dragged, target: string | null): boolean {
+	const into = tree.folders.find((f) => f.id === target);
+	if (item.kind === 'device') {
+		const device = tree.devices.find((d) => d.id === item.id);
+		return (
+			!!device &&
+			!!into &&
+			device.folder_id !== target &&
+			allows(device.role, 'edit') &&
+			allows(into.role, 'edit')
+		);
+	}
+	const folder = tree.folders.find((f) => f.id === item.id);
+	if (!folder || !allows(folder.role, 'manage') || folder.parent_id === target) return false;
+	if (target === null) return tree.may_create_top_level;
+	return (
+		!!into && allows(into.role, 'manage') && !pathTo(tree, target).some((f) => f.id === item.id)
+	);
+}
+
+/**
+ * Where `item` may go, each with its path written out ("Servers / Linux"),
+ * sorted by it; the top level first, as null, if it may go there.
+ */
+export function movePlaces(
+	tree: Tree,
+	item: Dragged,
+	locale?: string
+): { id: string | null; path: string }[] {
+	const places = tree.folders
+		.filter((f) => takes(tree, item, f.id))
+		.map((f) => ({
+			id: f.id as string | null,
+			path: pathTo(tree, f.id)
+				.map((p) => p.name)
+				.join(' / ')
+		}))
+		.sort((a, b) => a.path.localeCompare(b.path, locale, { sensitivity: 'base' }));
+	return takes(tree, item, null) ? [{ id: null, path: '' }, ...places] : places;
+}
+
 /** Nests folders and devices; siblings are sorted by name. */
 export function nest(tree: Tree, locale?: string): FolderNode[] {
 	const byName = (a: { name: string }, b: { name: string }) =>

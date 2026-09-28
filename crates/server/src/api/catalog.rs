@@ -169,6 +169,11 @@ struct DeviceRow {
     /// Sign-in mode `profile`: the login profile it uses (#192).
     profile_id: Option<Uuid>,
     description: String,
+    /// Words everyone who sees the device may change, for everyone's search
+    /// (#215); who changed them last, by name, and when.
+    keywords: String,
+    keywords_changed_by: Option<String>,
+    keywords_changed_at: Option<String>,
     /// RDP only; `None` uses the instance's default.
     keyboard_layout: Option<String>,
     /// RDP and HTTPS: SHA-256 fingerprint of the pinned certificate, if one
@@ -281,6 +286,9 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
     .await?;
     let devices: Vec<DeviceRow> = sqlx::query_as(
         "SELECT id, folder_id, name, protocol, host, port, auth_mode, profile_id, description,
+                keywords, keywords_changed_by,
+                to_char(keywords_changed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
+                    AS keywords_changed_at,
                 keyboard_layout, certificate_fingerprint, connector_mode, connector_id,
                 device_connector(connector_mode, connector_id, folder_id) AS reached_through,
                 username, domain, secret_kind, key_algorithm, key_fingerprint, has_certificate,
@@ -1161,6 +1169,99 @@ pub async fn update_device(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+pub struct DeviceMove {
+    folder_id: Uuid,
+}
+
+/// `PUT /api/devices/{id}/folder`: moves a device into another folder, by
+/// dragging it there (#214). Only the folder changes, with the rules
+/// `update_device` applies to a new folder: `edit` on the device and on the
+/// target, the login profile still in reach, and a new site connector
+/// treated as a new target.
+pub async fn move_device(
+    State(state): State<AppState>,
+    session: Session,
+    ClientAddress(address): ClientAddress,
+    Path(id): Path<Uuid>,
+    input: Result<Json<DeviceMove>, JsonRejection>,
+) -> Result<StatusCode, Problem> {
+    let folder_id = body(input)?.folder_id;
+    let (subject, catalog) = context(&state, &session).await?;
+    require(&catalog, &subject, Role::Edit, ObjectId::Device(id))?;
+    require(&catalog, &subject, Role::Edit, ObjectId::Folder(folder_id))?;
+    let from = catalog.parent(ObjectId::Device(id));
+    if from == Some(folder_id) {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    let (profile_id, reached_before, reached_after, own_secret): (
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<Uuid>,
+        bool,
+    ) = sqlx::query_as(
+        "SELECT profile_id,
+                device_connector(connector_mode, connector_id, folder_id),
+                device_connector(connector_mode, connector_id, $2),
+                auth_mode = 'device' AND secret_version > 0
+         FROM devices WHERE id = $1",
+    )
+    .bind(id)
+    .bind(folder_id)
+    .fetch_one(&state.db)
+    .await?;
+    // Behind another connector, the same address may be another machine
+    // (#176): the pins go, and what signs in goes along only with someone
+    // who may use it (see update_device).
+    let target_changed = reached_before != reached_after;
+    if let Some(profile) = profile_id {
+        in_reach(&catalog, profile, folder_id)?;
+        if target_changed {
+            require(
+                &catalog,
+                &subject,
+                Role::Connect,
+                ObjectId::Profile(profile),
+            )?;
+        }
+    }
+    if target_changed && own_secret {
+        require(&catalog, &subject, Role::Reveal, ObjectId::Device(id))?;
+    }
+
+    let mut tx = state.db.begin().await?;
+    sqlx::query(
+        "UPDATE devices SET folder_id = $2, updated_at = now(),
+             host_key = CASE WHEN $3 THEN NULL ELSE host_key END,
+             host_key_pinned_at = CASE WHEN $3 THEN NULL ELSE host_key_pinned_at END,
+             certificate_fingerprint = CASE WHEN $3 THEN NULL ELSE certificate_fingerprint END,
+             certificate_pinned_at = CASE WHEN $3 THEN NULL ELSE certificate_pinned_at END
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(folder_id)
+    .bind(target_changed)
+    .execute(&mut *tx)
+    .await
+    .map_err(database)?;
+    audit::record(
+        &mut *tx,
+        entry(
+            &session,
+            Action::DeviceMoved,
+            ObjectId::Device(id),
+            json!({
+                "from": from, "folder_id": folder_id,
+                "reached_through": reached_after, "secret_kept": target_changed && own_secret,
+            }),
+            &address,
+        ),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn delete_device(
     State(state): State<AppState>,
     session: Session,
@@ -1230,6 +1331,56 @@ pub async fn reset_host_key(
     audit::record(
         &mut *tx,
         entry(&session, action, ObjectId::Device(id), details, &address),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Characters of search words at most; the column checks it too.
+const MAX_KEYWORDS: usize = 500;
+
+#[derive(Deserialize)]
+pub struct KeywordsInput {
+    keywords: String,
+}
+
+/// `PUT /api/devices/{id}/keywords`: the device's search words (#215).
+/// Everyone who sees the device may change them, not only its editors: the
+/// people who connect know the words they look for it by.
+pub async fn set_keywords(
+    State(state): State<AppState>,
+    session: Session,
+    ClientAddress(address): ClientAddress,
+    Path(id): Path<Uuid>,
+    input: Result<Json<KeywordsInput>, JsonRejection>,
+) -> Result<StatusCode, Problem> {
+    let input = body(input)?;
+    let keywords = input.keywords.trim();
+    if keywords.chars().count() > MAX_KEYWORDS || keywords.chars().any(char::is_control) {
+        return Err(invalid("keywords"));
+    }
+    let (subject, catalog) = context(&state, &session).await?;
+    require(&catalog, &subject, Role::List, ObjectId::Device(id))?;
+    let mut tx = state.db.begin().await?;
+    sqlx::query(
+        "UPDATE devices SET keywords = $2, keywords_changed_by = $3, keywords_changed_at = now()
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(keywords)
+    .bind(&session.display_name)
+    .execute(&mut *tx)
+    .await?;
+    audit::record(
+        &mut *tx,
+        entry(
+            &session,
+            Action::DeviceKeywordsChanged,
+            ObjectId::Device(id),
+            json!({ "keywords": keywords }),
+            &address,
+        ),
     )
     .await?;
     tx.commit().await?;

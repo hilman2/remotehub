@@ -344,6 +344,7 @@ fn start_chromium(
             "--ignore-certificate-errors-spki-list={}",
             open.spki
         ))
+        .args(language_args(open))
         .arg(open.url())
         .env_clear()
         .env("DISPLAY", format!(":{number}"))
@@ -360,7 +361,31 @@ fn start_chromium(
     if let Some(zone) = protocol::timezone(open.timezone.as_deref()) {
         command.env("TZ", zone);
     }
+    if let Some(language) = language_env(open) {
+        command.env("LANGUAGE", language);
+    }
     command.spawn().map_err(|_| "chromium")
+}
+
+/// The admin's languages for what the device is asked for, and the first for
+/// Chromium's own texts (#211). Without any, Chromium's English.
+fn language_args(open: &Open) -> Vec<String> {
+    let languages = protocol::languages(&open.languages);
+    let Some(first) = languages.first() else {
+        return Vec::new();
+    };
+    vec![
+        format!("--lang={first}"),
+        format!("--accept-lang={}", languages.join(",")),
+    ]
+}
+
+/// On Linux, Chromium takes the language of its own texts from `LANGUAGE`
+/// rather than from `--lang`: the same list, as glibc writes it
+/// (`de_DE:de`).
+fn language_env(open: &Open) -> Option<String> {
+    let languages = protocol::languages(&open.languages);
+    (!languages.is_empty()).then(|| languages.join(":").replace('-', "_"))
 }
 
 struct AbortOnDrop(tokio::task::JoinHandle<()>);

@@ -27,12 +27,14 @@ Everything goes through the GitHub workflow of the public repository `hilman2/re
    - Decisions are recorded in the issue.
 2. **One branch per issue, changes via pull request.**
    - Branches are named `<nr>-<short-name>`. No commits directly on `main` (ruleset). The PR references the issue ("Closes #12").
+   - Several issues that go out together may share one PR, with a commit per issue and "Closes #N" for each, so that they take one CI run (#225).
    - Commit titles are plain English sentences without a prefix.
    - Checks run **locally, not on GitHub Actions**: commit, push, then `bash scripts/ci/lokal.sh --pr N` in Git Bash. The script checks the commit in Docker and reports the status `lokal`, which the ruleset requires to be green.
    - There are no Actions workflows; self-hosted runners were rejected (tenderhub #106).
    - **PRs from forks:** read the diff before running `lokal.sh --pr N` — the CI mounts the Docker socket.
 3. **Close the issue after merging** ("Closes #N" does it; otherwise `gh issue close N --comment "Done in #PR."`).
-4. **Delivery only as a release.** The version lives in the workspace `Cargo.toml` and in `deploy/ops/.env.example` (`REMOTEHUB_VERSION`); both are bumped in their own PR. Then, on the merged `main` with a green `lokal`: `bash scripts/ci/release.sh X.Y.Z` (`--dry-run` builds and tries without publishing). It pushes the images to GHCR and creates the GitHub release with the ops package, `install.sh` and `SHA256SUMS`; it needs `docker login ghcr.io` with a token that may write packages.
+4. **Delivery only as a release.** The version lives in the workspace `Cargo.toml` (and `Cargo.lock`) and in `deploy/ops/.env.example` (`REMOTEHUB_VERSION`); both are bumped in their own PR or as the last commit of the PR that goes out. Then, on the merged `main` with a green `lokal`: `bash scripts/ci/release.sh X.Y.Z` (`--dry-run` builds and tries without publishing). It takes the images the CI job `image` built and tried for that tree, signed with the maintainer's extension key, and builds and tries them itself only without them (#225). It pushes the images to GHCR and creates the GitHub release with the ops package, `install.sh` and `SHA256SUMS`; it needs `docker login ghcr.io` with a token that may write packages (`gh auth token | docker login ghcr.io -u hilman2 --password-stdin`) and the extension key at `~/.config/remotehub/extension-key.pem`.
+5. **Upgrading an installation:** `bash scripts/ci/deploy.sh HOST DIR X.Y.Z` over SSH (backup of both databases, new version, pull, start, health check).
 
 In Git Bash, Claude sessions lack the Unix PATH: `gh` is at `/c/Program Files/GitHub CLI/gh.exe`, and `lokal.sh` needs it on the PATH: `export PATH="$PATH:/c/Program Files/GitHub CLI"`.
 
@@ -113,7 +115,7 @@ The local CI needs Docker, `gh` and Git Bash. Only one run of this repository at
 
 **Ports on the development machine:** other projects already use 5173, 8025, 55432 and 55433. remotehub publishes only `127.0.0.1:5180` (UI) and `127.0.0.1:55440` (database); everything else stays on the compose network.
 
-**Docker and the office network:** Docker's default bridge uses `172.17.0.0/16`, and so does the office LAN (e.g. `172.17.0.90`). With the default, containers — guacd above all — cannot reach LAN hosts in that range: the traffic stays on Docker's own bridge. On such a machine, move Docker's ranges in Docker Desktop → Settings → Docker Engine (`%USERPROFILE%.dockerdaemon.json`):
+**Docker and the local network:** Docker's default bridge uses `172.17.0.0/16`. Where the LAN uses that range too, containers — guacd above all — cannot reach LAN hosts in it: the traffic stays on Docker's own bridge. On such a machine, move Docker's ranges in Docker Desktop → Settings → Docker Engine (`%USERPROFILE%.dockerdaemon.json`):
 
 ```json
 "bip": "10.211.0.1/24",

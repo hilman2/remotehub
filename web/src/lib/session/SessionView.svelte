@@ -12,7 +12,12 @@
 	import { allows, isGraphical, resetHostKey, type Device } from '$lib/api/catalog';
 	import { errorMessage } from '$lib/api/errors';
 	import DisplayView from '$lib/display/DisplayView.svelte';
-	import { failureOf, type Failure, type ServerEvent as DisplayEvent } from '$lib/display/tunnel';
+	import {
+		endsRegularly,
+		failureOf,
+		type Failure,
+		type ServerEvent as DisplayEvent
+	} from '$lib/display/tunnel';
 	import { m } from '$lib/paraglide/messages';
 	import TerminalView from '$lib/terminal/TerminalView.svelte';
 	import type { Credentials, ServerEvent } from '$lib/terminal/connection';
@@ -171,13 +176,21 @@
 						};
 		} else if (event.type === 'closed') {
 			status = { kind: 'closed', exitStatus: event.exit_status };
+		} else if (event.type === 'ended') {
+			// Signed out on the device, or closed there (#221); an error before
+			// it has said what went wrong already.
+			if (status.kind === 'connecting' || status.kind === 'connected') {
+				status = { kind: 'closed', exitStatus: null };
+			}
 		} else {
 			status = { kind: 'error', code: event.code, params: event.params };
 		}
 	}
 
 	function onfailure(code: number, detail: string) {
-		status = { kind: 'failed', failure: failureOf(code), detail };
+		status = endsRegularly(code)
+			? { kind: 'closed', exitStatus: null }
+			: { kind: 'failed', failure: failureOf(code), detail };
 	}
 
 	function onend() {

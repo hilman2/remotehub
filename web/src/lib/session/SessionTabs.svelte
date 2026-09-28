@@ -4,6 +4,8 @@
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import CircleMinus from '@lucide/svelte/icons/circle-minus';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import PanelTopClose from '@lucide/svelte/icons/panel-top-close';
+	import PanelTopOpen from '@lucide/svelte/icons/panel-top-open';
 	import X from '@lucide/svelte/icons/x';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -11,6 +13,15 @@
 	import ProtocolChip from '$lib/catalog/ProtocolChip.svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { tabs, type Phase } from './tabs.svelte';
+
+	let {
+		header,
+		onheader
+	}: {
+		/** While a session is shown: whether the page header is out (#220); else null. */
+		header: boolean | null;
+		onheader: () => void;
+	} = $props();
 
 	const PHASES: Record<Phase, () => string> = {
 		connecting: m.session_connecting,
@@ -28,8 +39,8 @@
 	}
 </script>
 
-<nav class="border-b border-line bg-sunken" aria-label={m.session_tabs()}>
-	<ul class="flex gap-1 overflow-x-auto px-3 pt-1.5">
+<nav class="flex items-end border-b border-line bg-sunken" aria-label={m.session_tabs()}>
+	<ul class="flex min-w-0 flex-1 gap-1 overflow-x-auto px-3 pt-1.5">
 		{#each tabs.list as tab (tab.key)}
 			{@const current = onDevices && tabs.active === tab.key}
 			<li
@@ -69,4 +80,21 @@
 			</li>
 		{/each}
 	</ul>
+	{#if header !== null}
+		{@const label = header ? m.session_hide_menu() : m.session_show_menu()}
+		<button
+			type="button"
+			class="mr-3 mb-1 shrink-0 rounded-md p-1.5 text-ink-3 hover:bg-surface-2 hover:text-ink"
+			title={label}
+			aria-expanded={header}
+			onclick={onheader}
+		>
+			{#if header}
+				<PanelTopClose size={16} aria-hidden="true" />
+			{:else}
+				<PanelTopOpen size={16} aria-hidden="true" />
+			{/if}
+			<span class="sr-only">{label}</span>
+		</button>
+	{/if}
 </nav>
