@@ -574,6 +574,7 @@
 					{#if dragged && tree && takes(tree, dragged, null)}
 						<!-- Only while a folder that may go to the top level is dragged (#214). -->
 						<div
+							role="presentation"
 							class="flex items-center gap-2 rounded-lg border border-dashed border-line-strong px-3 py-2 text-sm text-ink-2"
 							class:border-accent={overTop}
 							class:bg-surface-2={overTop}
@@ -936,7 +937,9 @@
 						>
 							<option value="" disabled>{m.catalog_move_choose()}</option>
 							{#each places as place (place.id ?? 'top')}
-								<option value={place.id ?? 'top'}>{place.id ? place.path : m.catalog_move_top()}</option>
+								<option value={place.id ?? 'top'}
+									>{place.id ? place.path : m.catalog_move_top()}</option
+								>
 							{/each}
 						</select>
 						<div class="mt-5 flex justify-end gap-2">

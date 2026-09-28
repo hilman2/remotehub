@@ -1824,13 +1824,22 @@ async fn devices_move_by_their_folder_alone(pool: PgPool) {
     assert_eq!(device_in(&tree(&f.app, &f.alice).await, "web01").1, web);
 
     // `edit` on the device and on the target folder.
-    grant(&f.app, &f.alice, "folder", &f.windows, BOB_SID, "user", "edit").await;
+    grant(
+        &f.app, &f.alice, "folder", &f.windows, BOB_SID, "user", "edit",
+    )
+    .await;
     let moved = call(&f.app, &bob, "PUT", &to(&dc01), into(&f.linux)).await;
     assert_eq!(moved.code(), "not_found");
-    grant(&f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "connect").await;
+    grant(
+        &f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "connect",
+    )
+    .await;
     let moved = call(&f.app, &bob, "PUT", &to(&dc01), into(&f.linux)).await;
     assert_eq!(moved.code(), "forbidden");
-    grant(&f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "edit").await;
+    grant(
+        &f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "edit",
+    )
+    .await;
     let moved = call(&f.app, &bob, "PUT", &to(&dc01), into(&f.linux)).await;
     assert_eq!(moved.status, StatusCode::NO_CONTENT);
 
@@ -1843,7 +1852,13 @@ async fn devices_move_by_their_folder_alone(pool: PgPool) {
     .execute(&pool)
     .await
     .unwrap();
-    let connector = create(&f.app, &f.alice, "/api/connectors", json!({ "name": "Site" })).await;
+    let connector = create(
+        &f.app,
+        &f.alice,
+        "/api/connectors",
+        json!({ "name": "Site" }),
+    )
+    .await;
     let changed = call(
         &f.app,
         &f.alice,

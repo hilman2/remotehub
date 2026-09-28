@@ -71,6 +71,7 @@
 
 <li role="treeitem" aria-expanded={open} aria-selected={isSelected('folder', node.folder.id)}>
 	<div
+		role="presentation"
 		class="flex items-center rounded-lg"
 		class:drop-target={over}
 		style={indent(depth)}
@@ -139,7 +140,8 @@
 						draggable={allows(device.role, 'edit')}
 						onclick={() => onselect('device', device.id)}
 						ondblclick={() => onopen(device.id)}
-						ondragstart={(event) => dragStart(event, { kind: 'device', id: device.id }, device.name)}
+						ondragstart={(event) =>
+							dragStart(event, { kind: 'device', id: device.id }, device.name)}
 						ondragend={mover.end}
 					>
 						<ProtocolChip protocol={device.protocol} />
