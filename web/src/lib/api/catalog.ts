@@ -70,6 +70,11 @@ export interface Device {
 	/** Sign-in mode `profile`: the login profile it uses (#192). */
 	profile_id: string | null;
 	description: string;
+	/** Words everyone who sees it may change, for everyone's search (#215). */
+	keywords: string;
+	/** Who changed them last, by name, and when (ISO 8601); null if nobody has. */
+	keywords_changed_by: string | null;
+	keywords_changed_at: string | null;
 	/** RDP only; null uses the instance's default. */
 	keyboard_layout: KeyboardLayout | null;
 	/** RDP and HTTPS: SHA-256 fingerprint of the pinned certificate, if pinned. */
@@ -279,6 +284,9 @@ export const updateDevice = (id: string, input: DeviceInput) =>
 export const deleteDevice = (id: string) => api('DELETE', `/api/devices/${id}`);
 /** Forgets the pinned host key; the next connection pins the key presented then. */
 export const resetHostKey = (id: string) => api('DELETE', `/api/devices/${id}/host-key`);
+/** Sets the search words of a device (#215); whoever sees it may. */
+export const setKeywords = (id: string, keywords: string) =>
+	api('PUT', `/api/devices/${id}/keywords`, { keywords });
 /** Opens or closes a folder in this user's tree; the server keeps it. */
 export const setFolderOpen = (id: string, open: boolean) =>
 	api('PUT', `/api/folders/${id}/open`, { open }, lasting);

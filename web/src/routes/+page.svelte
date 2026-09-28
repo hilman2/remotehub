@@ -46,6 +46,7 @@
 	import FolderNodeView from '$lib/catalog/FolderNodeView.svelte';
 	import Grants from '$lib/catalog/Grants.svelte';
 	import Journal from '$lib/catalog/Journal.svelte';
+	import Keywords from '$lib/catalog/Keywords.svelte';
 	import ProfilesView from '$lib/catalog/ProfilesView.svelte';
 	import RevealSecret from '$lib/catalog/RevealSecret.svelte';
 	import AskCustomer from '$lib/connectors/AskCustomer.svelte';
@@ -731,6 +732,10 @@
 							{@render pin(device.certificate_fingerprint, device.role)}
 						</section>
 					{/if}
+					<section class="{card} md:col-span-2">
+						<h3 class="eyebrow">{m.device_keywords()}</h3>
+						<Keywords {device} onsaved={load} />
+					</section>
 					{#if allows(device.role, 'connect')}
 						<section class="{card} md:col-span-3">
 							<h3 class="eyebrow">{m.journal_title()}</h3>

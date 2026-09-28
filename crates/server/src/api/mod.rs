@@ -162,6 +162,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/devices/{id}/terminal", get(terminal::terminal))
         .route("/devices/{id}/display", get(display::display))
         .route("/devices/{id}/host-key", delete(catalog::reset_host_key))
+        .route("/devices/{id}/keywords", put(catalog::set_keywords))
         .route(
             "/devices/{id}/connector-access",
             get(connect::connector_access),

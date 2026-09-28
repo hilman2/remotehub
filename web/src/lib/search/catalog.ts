@@ -54,6 +54,8 @@ export function catalogItems(tree: Tree): Searchable<Hit>[] {
 				d.host,
 				[
 					{ text: d.host, weight: 0.8 },
+					// Everyone's words for it (#215).
+					{ text: d.keywords, weight: 0.8 },
 					{ text: d.description, weight: 0.5 }
 				],
 				d.protocol

@@ -169,6 +169,11 @@ struct DeviceRow {
     /// Sign-in mode `profile`: the login profile it uses (#192).
     profile_id: Option<Uuid>,
     description: String,
+    /// Words everyone who sees the device may change, for everyone's search
+    /// (#215); who changed them last, by name, and when.
+    keywords: String,
+    keywords_changed_by: Option<String>,
+    keywords_changed_at: Option<String>,
     /// RDP only; `None` uses the instance's default.
     keyboard_layout: Option<String>,
     /// RDP and HTTPS: SHA-256 fingerprint of the pinned certificate, if one
@@ -281,6 +286,9 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
     .await?;
     let devices: Vec<DeviceRow> = sqlx::query_as(
         "SELECT id, folder_id, name, protocol, host, port, auth_mode, profile_id, description,
+                keywords, keywords_changed_by,
+                to_char(keywords_changed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
+                    AS keywords_changed_at,
                 keyboard_layout, certificate_fingerprint, connector_mode, connector_id,
                 device_connector(connector_mode, connector_id, folder_id) AS reached_through,
                 username, domain, secret_kind, key_algorithm, key_fingerprint, has_certificate,
@@ -1230,6 +1238,56 @@ pub async fn reset_host_key(
     audit::record(
         &mut *tx,
         entry(&session, action, ObjectId::Device(id), details, &address),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Characters of search words at most; the column checks it too.
+const MAX_KEYWORDS: usize = 500;
+
+#[derive(Deserialize)]
+pub struct KeywordsInput {
+    keywords: String,
+}
+
+/// `PUT /api/devices/{id}/keywords`: the device's search words (#215).
+/// Everyone who sees the device may change them, not only its editors: the
+/// people who connect know the words they look for it by.
+pub async fn set_keywords(
+    State(state): State<AppState>,
+    session: Session,
+    ClientAddress(address): ClientAddress,
+    Path(id): Path<Uuid>,
+    input: Result<Json<KeywordsInput>, JsonRejection>,
+) -> Result<StatusCode, Problem> {
+    let input = body(input)?;
+    let keywords = input.keywords.trim();
+    if keywords.chars().count() > MAX_KEYWORDS || keywords.chars().any(char::is_control) {
+        return Err(invalid("keywords"));
+    }
+    let (subject, catalog) = context(&state, &session).await?;
+    require(&catalog, &subject, Role::List, ObjectId::Device(id))?;
+    let mut tx = state.db.begin().await?;
+    sqlx::query(
+        "UPDATE devices SET keywords = $2, keywords_changed_by = $3, keywords_changed_at = now()
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(keywords)
+    .bind(&session.display_name)
+    .execute(&mut *tx)
+    .await?;
+    audit::record(
+        &mut *tx,
+        entry(
+            &session,
+            Action::DeviceKeywordsChanged,
+            ObjectId::Device(id),
+            json!({ "keywords": keywords }),
+            &address,
+        ),
     )
     .await?;
     tx.commit().await?;
