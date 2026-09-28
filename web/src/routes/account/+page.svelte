@@ -48,45 +48,39 @@
 		(id ? loadFlow('settings', id) : startFlow('settings')).then(follow);
 	});
 
-	/** The passkeys or security keys the flow offers to remove (#112). */
-	function keys(name: 'passkey_remove' | 'webauthn_remove') {
-		return (flow?.ui.nodes ?? [])
-			.filter((n) => n.attributes.name === name)
+	/**
+	 * The security keys the flow offers to remove: the second factor, a
+	 * passkey such as Windows Hello included (#112). There is no sign-in
+	 * with a passkey alone (#231).
+	 */
+	const securityKeys = $derived(
+		(flow?.ui.nodes ?? [])
+			.filter((n) => n.attributes.name === 'webauthn_remove')
 			.map((n) => {
 				const context = n.meta?.label?.context ?? {};
 				return { id: String(n.attributes.value), name: String(context.display_name ?? '') };
-			});
-	}
-	const passkeys = $derived(keys('passkey_remove'));
-	const securityKeys = $derived(keys('webauthn_remove'));
+			})
+	);
 	let keyName = $state('');
 
-	/** Creates a passkey or security key with the flow's options and saves it. */
-	async function addKey(kind: 'passkey' | 'webauthn') {
+	/** Creates a security key with the flow's options and saves it. */
+	async function addKey() {
 		if (!flow) return;
 		error = null;
 		let credential: string;
 		try {
-			credential = await createCredential(
-				String(
-					value(flow, kind === 'passkey' ? 'passkey_create_data' : 'webauthn_register_trigger')
-				)
-			);
+			credential = await createCredential(String(value(flow, 'webauthn_register_trigger')));
 		} catch {
 			error = m.passkey_failed();
 			return;
 		}
-		if (kind === 'passkey') {
-			await change({ method: 'passkey', passkey_settings_register: credential });
-		} else {
-			const name = keyName.trim();
-			keyName = '';
-			await change({
-				method: 'webauthn',
-				webauthn_register: credential,
-				webauthn_register_displayname: name
-			});
-		}
+		const name = keyName.trim();
+		keyName = '';
+		await change({
+			method: 'webauthn',
+			webauthn_register: credential,
+			webauthn_register_displayname: name
+		});
 	}
 
 	const linked = $derived(flow ? providers(flow, 'unlink') : []);
@@ -156,7 +150,7 @@
 						disabled={busy}
 						onclick={() =>
 							change({
-								method: remove.startsWith('passkey') ? 'passkey' : 'webauthn',
+								method: 'webauthn',
 								[remove]: key.id
 							})}
 					>
@@ -247,17 +241,6 @@
 			{/if}
 		</section>
 
-		{#if webauthnAvailable() && offers(flow, 'passkey_create_data')}
-			<section class={card} aria-labelledby="account-passkeys">
-				<h2 id="account-passkeys" class="text-lg font-semibold">{m.account_passkeys()}</h2>
-				<p class="text-sm text-ink-2">{m.account_passkeys_hint()}</p>
-				{@render keyList(passkeys, 'passkey_remove')}
-				<button type="button" class={button} disabled={busy} onclick={() => addKey('passkey')}>
-					{m.account_passkey_add()}
-				</button>
-			</section>
-		{/if}
-
 		{#if webauthnAvailable() && offers(flow, 'webauthn_register_trigger')}
 			<section class={card} aria-labelledby="account-keys">
 				<h2 id="account-keys" class="text-lg font-semibold">{m.account_keys()}</h2>
@@ -267,7 +250,7 @@
 					class="flex flex-wrap items-end gap-3"
 					onsubmit={(event) => {
 						event.preventDefault();
-						addKey('webauthn');
+						addKey();
 					}}
 				>
 					<div class="flex flex-col gap-1">

@@ -44,13 +44,16 @@ host() { # name prepare check [install]
   local install="${4:-sh /install.sh --package /install/remotehub-ops.tar.gz}"
   local dind="${project}-${name}" opt="${project}-${name}-opt"
   echo "── Host: ${name}"
-  docker volume create "$opt" >/dev/null
-  docker run -d --privileged --name "$dind" -e DOCKER_TLS_CERTDIR= \
-    -v "${opt}:/opt/remotehub" "$dind_image" >/dev/null
   cleanup() {
     docker rm -f "$dind" >/dev/null 2>&1 || true
     docker volume rm "$opt" >/dev/null 2>&1 || true
   }
+  # What an interrupted run left under these names would decide this one:
+  # an installation in the volume makes install.sh keep it (#228).
+  cleanup
+  docker volume create "$opt" >/dev/null
+  docker run -d --privileged --name "$dind" -e DOCKER_TLS_CERTDIR= \
+    -v "${opt}:/opt/remotehub" "$dind_image" >/dev/null
   for _ in $(seq 1 60); do
     docker exec "$dind" docker info >/dev/null 2>&1 && break
     sleep 1

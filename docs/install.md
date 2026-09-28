@@ -197,9 +197,9 @@ through remotehub. Its settings are in `kratos/kratos.yml`; database and secrets
 - **Second factor:** every local account sets up an authenticator app before its first session, and can
   create recovery codes under *My account*. A lost authenticator app takes a *New sign-in code* too: it
   removes the second factor, and the person sets up a new one with the code.
-- **Passkeys:** under *My account*, a passkey (Touch ID, Face ID, Windows Hello, a security key) signs in
-  instead of the password, and a security key can stand in for the authenticator app's code. Passkeys
-  belong to `REMOTEHUB_HOST` in `.env`: changing it later makes every passkey useless.
+- **Security keys and passkeys:** under *My account*, a security key or a passkey (Windows Hello, Touch ID,
+  Face ID) can stand in for the authenticator app's code, after the password. Nobody signs in with a
+  passkey alone. They belong to `REMOTEHUB_HOST` in `.env`: changing it later makes every key useless.
 - **Backups:** Kratos' database sits next to remotehub's; see [Back up and restore](#back-up-and-restore).
 
 ## Send mail
@@ -585,8 +585,11 @@ Type the printed text, then press Enter and Ctrl+D.
 
 1. Read the release notes on GitHub; they name every step a release needs beyond these.
 2. Back up the database.
-3. Set `REMOTEHUB_VERSION` in `.env` to the new release.
-4. Pull and restart:
+3. Take the ops package's own files of the new release (`remotehub-ops.tar.gz`, checked against the
+   release's `SHA256SUMS`): `compose.yml`, `kratos/`, `caddy/Caddyfile`, `init.sh`, `install.sh` and
+   `.env.example`. Keep `.env`, `secrets/`, `compose.override.yml` and the data directories.
+4. Set `REMOTEHUB_VERSION` in `.env` to the new release.
+5. Pull and restart:
 
    ```bash
    sudo docker compose pull

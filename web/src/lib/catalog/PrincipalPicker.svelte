@@ -49,7 +49,7 @@
 	oninput={() => (chosen = null)}
 />
 {#if found.length > 0 && !chosen}
-	<ul class="mt-1 max-h-48 overflow-y-auto rounded-lg border border-line">
+	<ul class="relative mt-1 max-h-48 overflow-y-auto rounded-lg border border-line">
 		{#each found as p (p.sid)}
 			<li>
 				<button

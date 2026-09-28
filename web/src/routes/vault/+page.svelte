@@ -1487,7 +1487,7 @@
 	<div class="flex min-h-0 flex-1 flex-col lg:flex-row">
 		<nav
 			aria-label={m.vault_folders_title()}
-			class="flex shrink-0 flex-col gap-4 border-b border-line bg-sunken px-2 py-3 lg:w-64 lg:overflow-y-auto lg:border-r lg:border-b-0"
+			class="relative flex shrink-0 flex-col gap-4 border-b border-line bg-sunken px-2 py-3 lg:w-64 lg:overflow-y-auto lg:border-r lg:border-b-0"
 		>
 			<div class="flex flex-col gap-0.5">
 				{@render node({ kind: 'all' }, m.vault_all(), 0, Layers, null)}
@@ -1577,7 +1577,7 @@
 		</nav>
 
 		{#if stage === 'recovery'}
-			<section class="flex-1 p-6 lg:overflow-y-auto">
+			<section class="relative flex-1 p-6 lg:overflow-y-auto">
 				<div class="max-w-md rounded-card border border-line bg-surface p-6">
 					<h2 class="text-lg font-semibold">{m.vault_recovery_title()}</h2>
 					{#if mustRenew}
@@ -1617,7 +1617,7 @@
 				<!-- The setup and unlock forms show their own. -->
 				{#if !dialogOpen && !staging}{@render problem()}{/if}
 				{#if staging}
-					<div class="flex-1 lg:overflow-y-auto">{@render personalStage()}</div>
+					<div class="relative flex-1 lg:overflow-y-auto">{@render personalStage()}</div>
 				{:else}
 					{#if (stage === 'locked' || stage === 'setup') && !searching && scope.kind === 'all'}
 						<button

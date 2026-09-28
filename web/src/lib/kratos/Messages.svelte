@@ -9,14 +9,17 @@
 </script>
 
 {#each texts as text, index (index)}
-	<p class="flex items-start gap-2 text-sm" role={text.type === 'error' ? 'alert' : 'status'}>
-		{#if text.type === 'error'}
-			<CircleAlert size={16} class="mt-0.5 shrink-0 text-critical" aria-hidden="true" />
-		{:else if text.type === 'success'}
-			<CircleCheck size={16} class="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
-		{:else}
-			<Info size={16} class="mt-0.5 shrink-0 text-ink-3" aria-hidden="true" />
-		{/if}
-		{kratosText(text)}
-	</p>
+	{@const shown = kratosText(text)}
+	{#if shown}
+		<p class="flex items-start gap-2 text-sm" role={text.type === 'error' ? 'alert' : 'status'}>
+			{#if text.type === 'error'}
+				<CircleAlert size={16} class="mt-0.5 shrink-0 text-critical" aria-hidden="true" />
+			{:else if text.type === 'success'}
+				<CircleCheck size={16} class="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
+			{:else}
+				<Info size={16} class="mt-0.5 shrink-0 text-ink-3" aria-hidden="true" />
+			{/if}
+			{shown}
+		</p>
+	{/if}
 {/each}

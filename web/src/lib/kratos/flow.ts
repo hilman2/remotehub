@@ -162,25 +162,51 @@ export function messages(flow: Flow): UiText[] {
 export const flowId = (to: URL) => to.searchParams.get('flow');
 
 /**
- * Kratos' text in the UI's language where remotehub knows it
- * (https://www.ory.com/docs/kratos/concepts/ui-messages); Kratos' English
- * text otherwise.
+ * Kratos' messages that sign-in, second factor, settings and recovery can
+ * show, by their ID (https://github.com/ory/kratos/blob/master/text/id.go),
+ * in the UI's language (#232).
  */
-export function kratosText(text: UiText): string {
-	switch (text.id) {
-		// Someone came back from a provider whose account is linked to
-		// nobody: registration is closed (#109).
-		case 4000001:
-			return m.kratos_provider_not_linked();
-		case 4000006:
-			return m.error_invalid_credentials();
-		case 4000008:
-			return m.kratos_code_invalid();
-		case 4060006:
-			return m.kratos_recovery_code_invalid();
-		case 1050001:
-			return m.kratos_saved();
-		default:
-			return text.text;
-	}
+const KRATOS_TEXTS: Record<number, () => string> = {
+	1010003: m.kratos_reauth,
+	1010004: m.kratos_second_factor,
+	1050001: m.kratos_saved,
+	1060001: m.kratos_recovered,
+	1060002: m.kratos_recovery_sent,
+	1060003: m.kratos_recovery_sent,
+	// Someone came back from a provider whose account is linked to nobody:
+	// registration is closed (#109).
+	4000001: m.kratos_provider_not_linked,
+	4000002: m.kratos_required,
+	4000005: m.kratos_password_rejected,
+	4000006: m.error_invalid_credentials,
+	4000007: m.kratos_duplicate,
+	4000008: m.kratos_code_invalid,
+	4000011: m.kratos_no_totp,
+	4000012: m.kratos_lookup_used,
+	4000013: m.kratos_no_security_key,
+	4000014: m.kratos_no_lookup,
+	4000015: m.kratos_no_security_key,
+	4000016: m.kratos_lookup_invalid,
+	4000031: m.kratos_password_similar,
+	4000032: m.kratos_password_short,
+	4000033: m.kratos_password_long,
+	4000034: m.kratos_password_breached,
+	4000039: m.kratos_password_same,
+	4010001: m.kratos_expired,
+	4010011: m.kratos_account_disabled,
+	4050001: m.kratos_expired,
+	4060004: m.kratos_recovery_code_invalid,
+	4060005: m.kratos_expired,
+	4060006: m.kratos_recovery_code_invalid
+};
+
+/**
+ * Kratos' message in the UI's language; never Kratos' English text (ADR
+ * 0002). An error remotehub does not know is named by its number; any
+ * other message it does not know is left out (null).
+ */
+export function kratosText(text: UiText): string | null {
+	const known = KRATOS_TEXTS[text.id];
+	if (known) return known();
+	return text.type === 'error' ? m.kratos_error({ id: String(text.id) }) : null;
 }

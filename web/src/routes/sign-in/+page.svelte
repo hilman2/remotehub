@@ -79,31 +79,6 @@
 		});
 	});
 
-	/**
-	 * Signs in with a passkey instead of the password (#112). The account's
-	 * second factor follows as after the password.
-	 */
-	async function signInWithPasskey() {
-		busy = true;
-		error = null;
-		texts = [];
-		await endSession();
-		const started = await startFlow('login');
-		if (started.kind !== 'flow') {
-			await follow(started);
-			return;
-		}
-		let passkey: string;
-		try {
-			passkey = await getCredential(String(value(started.flow, 'passkey_challenge')));
-		} catch {
-			busy = false;
-			error = m.passkey_failed();
-			return;
-		}
-		await follow(await submitFlow(started.flow, { method: 'passkey', passkey_login: passkey }));
-	}
-
 	/** The second factor with a security key or passkey instead of the app's code. */
 	async function secondWithKey() {
 		if (!second) return;
@@ -511,24 +486,14 @@
 						</a>
 					{/if}
 				</form>
-				{#if methods.local && (methods.providers.length > 0 || webauthnAvailable())}
+				<!-- No sign-in with a passkey alone: passkeys are the second factor (#231). -->
+				{#if methods.local && methods.providers.length > 0}
 					<div class="flex items-center gap-3 text-sm text-ink-3">
 						<span class="h-px flex-1 bg-line"></span>
 						{m.sign_in_or()}
 						<span class="h-px flex-1 bg-line"></span>
 					</div>
 					<div class="flex flex-col gap-2">
-						{#if webauthnAvailable()}
-							<button
-								type="button"
-								disabled={busy}
-								class="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-line-strong bg-surface font-medium hover:bg-surface-2 disabled:opacity-60"
-								onclick={signInWithPasskey}
-							>
-								<Fingerprint size={18} aria-hidden="true" />
-								{m.sign_in_passkey()}
-							</button>
-						{/if}
 						{#each methods.providers as provider (provider.id)}
 							<button
 								type="button"
