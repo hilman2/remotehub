@@ -62,8 +62,8 @@ check_host() {
   # shellcheck disable=SC1091
   . /etc/os-release
   case "${ID:-}:${VERSION_ID:-}" in
-    debian:12 | debian:13 | ubuntu:22.04 | ubuntu:24.04) ;;
-    *) die "remotehub installs on Debian 12 or 13 and Ubuntu 22.04 or 24.04, not on ${PRETTY_NAME:-this system}" ;;
+    debian:12 | debian:13 | ubuntu:22.04 | ubuntu:24.04 | ubuntu:26.04) ;;
+    *) die "remotehub installs on Debian 12 or 13 and Ubuntu 22.04, 24.04 or 26.04, not on ${PRETTY_NAME:-this system}" ;;
   esac
   [ "$(uname -m)" = x86_64 ] || die "remotehub's images exist for x86_64 only, not for $(uname -m)"
   command -v curl >/dev/null 2>&1 || die "curl is missing"
