@@ -356,24 +356,30 @@
 	<li>
 		<button
 			type="button"
-			class="flex w-full min-w-0 flex-col gap-0.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-surface-2 data-[active=true]:bg-surface-2 data-[active=true]:ring-1 data-[active=true]:ring-line-strong"
+			class="flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm hover:bg-surface-2 data-[active=true]:bg-surface-2 data-[active=true]:ring-1 data-[active=true]:ring-line-strong"
 			data-active={highlighted || isSelected}
 			aria-current={isSelected ? 'true' : undefined}
 			onclick={() => choose(hit.kind, hit.id)}
 			ondblclick={() => hit.kind === 'device' && connectTo(hit.id)}
 		>
-			<span class="flex w-full min-w-0 items-center gap-2.5">
-				{#if hit.protocol}
-					<ProtocolChip protocol={hit.protocol} />
-				{:else}
-					<FolderClosed size={15} class="shrink-0 text-ink-3" aria-hidden="true" />
-				{/if}
-				<span class="truncate text-ink">{hit.name}</span>
-				<span class="ml-auto truncate font-mono text-xs text-ink-3">{hit.detail}</span>
-			</span>
-			{#if hit.where}
-				<span class="truncate pl-0.5 text-xs text-ink-3">{hit.where}</span>
+			{#if hit.protocol}
+				<ProtocolChip protocol={hit.protocol} />
+			{:else}
+				<FolderClosed size={15} class="shrink-0 text-ink-3" aria-hidden="true" />
 			{/if}
+			<!-- The name gets the whole line; host and path go small below it (#209). -->
+			<span class="flex min-w-0 flex-col">
+				<span class="truncate text-ink">{hit.name}</span>
+				{#if hit.detail || hit.where}
+					<span class="truncate text-[11px] leading-tight text-ink-3">
+						{#if hit.detail}<span class="font-mono">{hit.detail}</span>{/if}
+						{#if hit.detail && hit.where}
+							·
+						{/if}
+						{hit.where}
+					</span>
+				{/if}
+			</span>
 		</button>
 	</li>
 {/snippet}
