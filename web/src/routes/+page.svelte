@@ -39,7 +39,7 @@
 	import { tabs } from '$lib/session/tabs.svelte';
 	import ProtocolChip from '$lib/catalog/ProtocolChip.svelte';
 	import { catalogItems, pickKey, type Hit } from '$lib/search/catalog';
-	import { frequent, queryKey, rank, remember, type Pick } from '$lib/search/rank';
+	import { queryKey, rank, remember, type Pick } from '$lib/search/rank';
 	import RequestForm from '$lib/catalog/RequestForm.svelte';
 	import { errorMessage, problemMessage } from '$lib/api/errors';
 	import DeviceForm from '$lib/catalog/DeviceForm.svelte';
@@ -61,6 +61,7 @@
 	import SettingsMenu, { type MenuItem } from '$lib/components/SettingsMenu.svelte';
 	import { getLocale } from '$lib/i18n';
 	import { m } from '$lib/paraglide/messages';
+	import { untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 
 	type Selection = { kind: ObjectKind; id: string };
@@ -95,15 +96,12 @@
 	const roots = $derived(tree ? nest(tree, getLocale()) : []);
 	const searching = $derived(queryKey(query).length > 0);
 	const items = $derived(tree ? catalogItems(tree) : []);
-	const results = $derived(
-		searching ? rank(items, query, picks, Date.now(), getLocale()).slice(0, 50) : []
-	);
-	const favourites = $derived.by(() => {
-		const byKey = new Map(items.map((entry) => [entry.key, entry.item]));
-		return frequent(picks, Date.now(), 12)
-			.flatMap((key) => byKey.get(key) ?? [])
-			.filter((hit) => hit.kind === 'device')
-			.slice(0, 5);
+	const results = $derived.by(() => {
+		if (!searching) return [];
+		// A pick counts from the next query on, so the results do not move under
+		// the pointer between the clicks of a double-click (#210).
+		const counted = untrack(() => picks);
+		return rank(items, query, counted, Date.now(), getLocale()).slice(0, 50);
 	});
 
 	$effect(() => {
@@ -495,16 +493,6 @@
 					</ul>
 				{/if}
 			{:else if tree && tree.folders.length > 0}
-				{#if favourites.length > 0}
-					<div class="flex flex-col gap-1">
-						<h2 class="px-2 eyebrow">{m.search_frequent()}</h2>
-						<ul class="flex flex-col gap-0.5">
-							{#each favourites as hit (hit.id)}
-								{@render result(hit, false)}
-							{/each}
-						</ul>
-					</div>
-				{/if}
 				<nav aria-label={m.devices_title()}>
 					<ul role="tree" aria-label={m.devices_title()} class="flex flex-col gap-0.5">
 						{#each roots as node (node.folder.id)}
