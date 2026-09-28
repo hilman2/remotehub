@@ -5,9 +5,9 @@ engine for RDP and VNC, the browser service, which opens web interfaces of devic
 own, Caddy for HTTPS. The ops package in [`deploy/ops`](../deploy/ops) starts them with Docker Compose.
 Every setting is described in the [configuration reference](configuration.md).
 
-You need a host with Debian 12 or 13 or Ubuntu 22.04 or 24.04 on x86_64, with 4 GB of memory and 20 GB of
-disk, and a DNS name for remotehub. To let people sign in with Active Directory, you need a service account
-there that may read users and groups.
+You need a host with Debian 12 or 13 or Ubuntu 22.04, 24.04 or 26.04 on x86_64, with 4 GB of memory and
+20 GB of disk, and a DNS name for remotehub. To let people sign in with Active Directory, you need a service
+account there that may read users and groups.
 
 ## Install
 
