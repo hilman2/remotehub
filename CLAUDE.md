@@ -115,7 +115,7 @@ The local CI needs Docker, `gh` and Git Bash. Only one run of this repository at
 
 **Ports on the development machine:** other projects already use 5173, 8025, 55432 and 55433. remotehub publishes only `127.0.0.1:5180` (UI) and `127.0.0.1:55440` (database); everything else stays on the compose network.
 
-**Docker and the office network:** Docker's default bridge uses `172.17.0.0/16`, and so does the office LAN (e.g. `172.17.0.90`). With the default, containers — guacd above all — cannot reach LAN hosts in that range: the traffic stays on Docker's own bridge. On such a machine, move Docker's ranges in Docker Desktop → Settings → Docker Engine (`%USERPROFILE%.dockerdaemon.json`):
+**Docker and the local network:** Docker's default bridge uses `172.17.0.0/16`. Where the LAN uses that range too, containers — guacd above all — cannot reach LAN hosts in it: the traffic stays on Docker's own bridge. On such a machine, move Docker's ranges in Docker Desktop → Settings → Docker Engine (`%USERPROFILE%.dockerdaemon.json`):
 
 ```json
 "bip": "10.211.0.1/24",
