@@ -30,6 +30,7 @@ export const AUDIT_ACTIONS = [
 	'device.updated',
 	'device.deleted',
 	'device.keywords_changed',
+	'device.moved',
 	'credential.created',
 	'credential.updated',
 	'credential.deleted',

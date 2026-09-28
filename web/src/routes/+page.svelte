@@ -4,6 +4,7 @@
 	import Clock from '@lucide/svelte/icons/clock';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import FolderClosed from '@lucide/svelte/icons/folder-closed';
+	import FolderInput from '@lucide/svelte/icons/folder-input';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
 	import Lock from '@lucide/svelte/icons/lock';
 	import PanelLeftOpen from '@lucide/svelte/icons/panel-left-open';
@@ -21,6 +22,8 @@
 		deleteDevice,
 		deleteFolder,
 		loadTree,
+		moveDevice,
+		moveFolder,
 		resetHostKey,
 		setFolderOpen,
 		updateDevice,
@@ -57,7 +60,16 @@
 		ROLE_LABELS,
 		keyboardLayoutLabel
 	} from '$lib/catalog/labels';
-	import { folderConnector, nest, pathTo, profilesWithin } from '$lib/catalog/tree';
+	import {
+		folderConnector,
+		movePlaces,
+		nest,
+		pathTo,
+		profilesWithin,
+		takes,
+		type Dragged,
+		type Mover
+	} from '$lib/catalog/tree';
 	import Dialog from '$lib/components/Dialog.svelte';
 	import SettingsMenu, { type MenuItem } from '$lib/components/SettingsMenu.svelte';
 	import { getLocale } from '$lib/i18n';
@@ -71,7 +83,8 @@
 		| { type: 'device'; folderId: string; device: Device | null }
 		| { type: 'grants'; kind: ObjectKind; id: string; name: string }
 		| { type: 'delete'; kind: ObjectKind; id: string; name: string }
-		| { type: 'request'; kind: ObjectKind; id: string; name: string; role: Role };
+		| { type: 'request'; kind: ObjectKind; id: string; name: string; role: Role }
+		| { type: 'move'; item: Dragged; name: string };
 
 	let tree = $state<Tree | null>(null);
 	let connectors = $state<Connector[]>([]);
@@ -194,6 +207,7 @@
 			folderName = next.folder?.name ?? '';
 			folderConnectorId = next.folder?.connector_id ?? '';
 		}
+		if (next.type === 'move') moveTarget = '';
 		dialogOpen = true;
 	}
 
@@ -244,6 +258,47 @@
 		run(kind === 'folder' ? deleteFolder(id) : deleteDevice(id), () => (selected = null));
 	}
 
+	/** What is dragged in the tree now (#214). */
+	let dragged = $state<Dragged | null>(null);
+	/** Something is dragged over the top level, which takes it. */
+	let overTop = $state(false);
+	/** The target chosen in *Move to …*: a folder's id, or `top`. */
+	let moveTarget = $state('');
+
+	/** Moves `item` into the folder `target`, or to the top level with null (#214). */
+	function moveTo(item: Dragged, target: string | null) {
+		run(
+			item.kind === 'device' ? moveDevice(item.id, target ?? '') : moveFolder(item.id, target),
+			() => {
+				// Where it went, so that it is still in sight.
+				if (target) setOpen(target, true);
+			}
+		);
+	}
+
+	function dropOn(target: string | null) {
+		const item = dragged;
+		dragged = null;
+		overTop = false;
+		if (item && tree && takes(tree, item, target)) moveTo(item, target);
+	}
+
+	const mover: Mover = {
+		takes: (target) => !!dragged && !!tree && takes(tree, dragged, target),
+		start: (item) => (dragged = item),
+		end: () => {
+			dragged = null;
+			overTop = false;
+		},
+		drop: dropOn
+	};
+
+	function saveMove(event: SubmitEvent) {
+		event.preventDefault();
+		if (open?.type !== 'move' || !moveTarget) return;
+		moveTo(open.item, moveTarget === 'top' ? null : moveTarget);
+	}
+
 	function sendRequest(role: Role, minutes: number, reason: string) {
 		if (open?.type !== 'request') return;
 		const { kind, id } = open;
@@ -288,8 +343,21 @@
 			danger: true,
 			onselect: () => show({ type: 'delete', kind, id, name })
 		};
+		// Moving without a pointer (#214).
+		const movable = kind === 'device' || kind === 'folder' ? kind : null;
+		const move: MenuItem[] =
+			change && movable
+				? [
+						{
+							label: m.catalog_move(),
+							icon: FolderInput,
+							onselect: () => show({ type: 'move', item: { kind: movable, id }, name })
+						}
+					]
+				: [];
 		return [
 			...(change ? [edit] : []),
+			...move,
 			...(allows(role, 'manage') ? [permissions] : []),
 			...(change ? [remove] : [])
 		];
@@ -311,6 +379,8 @@
 				return m.catalog_delete();
 			case 'request':
 				return m.request_title({ name: open.name });
+			case 'move':
+				return m.catalog_move_title({ name: open.name });
 			default:
 				return '';
 		}
@@ -500,7 +570,27 @@
 					</ul>
 				{/if}
 			{:else if tree && tree.folders.length > 0}
-				<nav aria-label={m.devices_title()}>
+				<nav aria-label={m.devices_title()} class="flex flex-col gap-1">
+					{#if dragged && tree && takes(tree, dragged, null)}
+						<!-- Only while a folder that may go to the top level is dragged (#214). -->
+						<div
+							class="flex items-center gap-2 rounded-lg border border-dashed border-line-strong px-3 py-2 text-sm text-ink-2"
+							class:border-accent={overTop}
+							class:bg-surface-2={overTop}
+							ondragover={(event) => {
+								event.preventDefault();
+								overTop = true;
+							}}
+							ondragleave={() => (overTop = false)}
+							ondrop={(event) => {
+								event.preventDefault();
+								dropOn(null);
+							}}
+						>
+							<FolderInput size={15} class="shrink-0" aria-hidden="true" />
+							{m.tree_drop_top_level()}
+						</div>
+					{/if}
 					<ul role="tree" aria-label={m.devices_title()} class="flex flex-col gap-0.5">
 						{#each roots as node (node.folder.id)}
 							<FolderNodeView
@@ -510,6 +600,7 @@
 								onselect={choose}
 								ontoggle={toggle}
 								onopen={connectTo}
+								{mover}
 							/>
 						{/each}
 					</ul>
@@ -819,6 +910,52 @@
 					onsubmit={sendRequest}
 					oncancel={() => (dialogOpen = false)}
 				/>
+			{:else if open?.type === 'move' && tree}
+				{@const places = movePlaces(tree, open.item, getLocale())}
+				{#if places.length === 0}
+					<p class="text-sm">{m.catalog_move_none()}</p>
+					<div class="mt-5 flex justify-end">
+						<button
+							type="button"
+							class="rounded-lg px-3 py-1.5 text-sm hover:bg-surface-2"
+							onclick={() => (dialogOpen = false)}
+						>
+							{m.action_cancel()}
+						</button>
+					</div>
+				{:else}
+					<form onsubmit={saveMove}>
+						<label class="block text-sm font-medium" for="move-target">
+							{m.catalog_move_target()}
+						</label>
+						<select
+							id="move-target"
+							class="mt-1 w-full rounded-lg border border-line bg-page px-3 py-2"
+							required
+							bind:value={moveTarget}
+						>
+							<option value="" disabled>{m.catalog_move_choose()}</option>
+							{#each places as place (place.id ?? 'top')}
+								<option value={place.id ?? 'top'}>{place.id ? place.path : m.catalog_move_top()}</option>
+							{/each}
+						</select>
+						<div class="mt-5 flex justify-end gap-2">
+							<button
+								type="button"
+								class="rounded-lg px-3 py-1.5 text-sm hover:bg-surface-2"
+								onclick={() => (dialogOpen = false)}
+							>
+								{m.action_cancel()}
+							</button>
+							<button
+								type="submit"
+								class="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink"
+							>
+								{m.catalog_move_submit()}
+							</button>
+						</div>
+					</form>
+				{/if}
 			{:else if open?.type === 'delete'}
 				<p class="text-sm">{m.catalog_delete_confirm({ name: open.name })}</p>
 				<div class="mt-5 flex justify-end gap-2">

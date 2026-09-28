@@ -1785,3 +1785,99 @@ async fn everyone_who_sees_a_device_may_set_its_search_words(pool: PgPool) {
         "{log}"
     );
 }
+
+/// The id of the device called `name` in `tree`, and its folder.
+fn device_in(tree: &Value, name: &str) -> (String, String) {
+    let device = tree["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["name"] == name)
+        .unwrap_or_else(|| panic!("no device {name} in {tree}"));
+    (
+        device["id"].as_str().unwrap().to_owned(),
+        device["folder_id"].as_str().unwrap().to_owned(),
+    )
+}
+
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn devices_move_by_their_folder_alone(pool: PgPool) {
+    let f = fixture(pool.clone()).await;
+    let bob = sign_in(&f.app, "bob").await;
+    let (dc01, _) = device_in(&tree(&f.app, &f.alice).await, "dc01");
+    let to = |device: &str| format!("/api/devices/{device}/folder");
+    let into = |folder: &str| Some(json!({ "folder_id": folder }));
+
+    // web01's login profile lives in Linux: Windows is out of its reach, a
+    // folder below Linux is not (#192).
+    let refused = call(&f.app, &f.alice, "PUT", &to(&f.web01), into(&f.windows)).await;
+    assert_eq!(refused.code(), "profile_out_of_reach");
+    let web = create(
+        &f.app,
+        &f.alice,
+        "/api/folders",
+        json!({ "parent_id": f.linux, "name": "Web" }),
+    )
+    .await;
+    let moved = call(&f.app, &f.alice, "PUT", &to(&f.web01), into(&web)).await;
+    assert_eq!(moved.status, StatusCode::NO_CONTENT);
+    assert_eq!(device_in(&tree(&f.app, &f.alice).await, "web01").1, web);
+
+    // `edit` on the device and on the target folder.
+    grant(&f.app, &f.alice, "folder", &f.windows, BOB_SID, "user", "edit").await;
+    let moved = call(&f.app, &bob, "PUT", &to(&dc01), into(&f.linux)).await;
+    assert_eq!(moved.code(), "not_found");
+    grant(&f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "connect").await;
+    let moved = call(&f.app, &bob, "PUT", &to(&dc01), into(&f.linux)).await;
+    assert_eq!(moved.code(), "forbidden");
+    grant(&f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "edit").await;
+    let moved = call(&f.app, &bob, "PUT", &to(&dc01), into(&f.linux)).await;
+    assert_eq!(moved.status, StatusCode::NO_CONTENT);
+
+    // Behind another site connector, the pinned certificate goes (#176).
+    sqlx::query(
+        "UPDATE devices SET certificate_fingerprint = 'AA:BB', certificate_pinned_at = now()
+         WHERE id = $1::uuid",
+    )
+    .bind(&dc01)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let connector = create(&f.app, &f.alice, "/api/connectors", json!({ "name": "Site" })).await;
+    let changed = call(
+        &f.app,
+        &f.alice,
+        "PATCH",
+        &format!("/api/folders/{}", f.windows),
+        Some(json!({ "connector_id": connector })),
+    )
+    .await;
+    assert_eq!(changed.status, StatusCode::NO_CONTENT);
+    let moved = call(&f.app, &f.alice, "PUT", &to(&dc01), into(&f.windows)).await;
+    assert_eq!(moved.status, StatusCode::NO_CONTENT);
+    let pinned: Option<String> =
+        sqlx::query_scalar("SELECT certificate_fingerprint FROM devices WHERE id = $1::uuid")
+            .bind(&dc01)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(pinned, None);
+
+    let log = call(&f.app, &f.alice, "GET", "/api/audit", None)
+        .await
+        .json();
+    let moves: Vec<&Value> = log
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["action"] == "device.moved")
+        .collect();
+    assert_eq!(moves.len(), 3, "{log}");
+    assert!(
+        moves
+            .iter()
+            .any(|e| e["details"]["folder_id"] == f.windows.as_str()
+                && e["details"]["reached_through"] == connector.as_str()),
+        "{log}"
+    );
+}

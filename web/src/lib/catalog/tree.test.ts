@@ -6,9 +6,11 @@ import {
 	collectionPath,
 	collectionsBelow,
 	folderConnector,
+	movePlaces,
 	nest,
 	pathTo,
-	profilesWithin
+	profilesWithin,
+	takes
 } from './tree';
 
 function device(id: string, name: string, host: string): Device {
@@ -171,5 +173,46 @@ describe('allows', () => {
 		expect(allows('edit', 'connect')).toBe(true);
 		expect(allows('connect', 'edit')).toBe(false);
 		expect(allows(null, 'list')).toBe(false);
+	});
+});
+
+describe('moving by drag and drop', () => {
+	// Everything managed, and Linux/Web below Linux.
+	const managed: Tree = {
+		...tree,
+		folders: [
+			...tree.folders.map((folder) => ({ ...folder, role: 'manage' as const })),
+			{ id: 'lw', parent_id: 'l', name: 'Web', role: 'manage', connector_id: null }
+		]
+	};
+	const d1 = { kind: 'device', id: 'd1' } as const;
+	const linux = { kind: 'folder', id: 'l' } as const;
+
+	it('takes a device where it may be edited, and not where it is', () => {
+		expect(takes(managed, d1, 'w')).toBe(true);
+		expect(takes(managed, d1, 'l')).toBe(false);
+		expect(takes(managed, d1, null)).toBe(false);
+		// windows is only `connect` in the plain tree.
+		expect(takes(tree, d1, 'w')).toBe(false);
+	});
+
+	it('never takes a folder into itself or below itself', () => {
+		expect(takes(managed, linux, 'l')).toBe(false);
+		expect(takes(managed, linux, 'lw')).toBe(false);
+		// Its parent already.
+		expect(takes(managed, linux, 's')).toBe(false);
+		expect(takes(managed, linux, 'w')).toBe(true);
+		expect(takes(managed, linux, null)).toBe(true);
+		expect(takes({ ...managed, may_create_top_level: false }, linux, null)).toBe(false);
+		// Linux is only `edit` in the plain tree: not the folder's to move.
+		expect(takes(tree, linux, 'w')).toBe(false);
+	});
+
+	it('lists the places with their paths, the top level first', () => {
+		expect(movePlaces(managed, linux, 'en')).toEqual([
+			{ id: null, path: '' },
+			{ id: 'n', path: 'Network' },
+			{ id: 'w', path: 'Servers / windows' }
+		]);
 	});
 });

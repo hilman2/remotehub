@@ -1169,6 +1169,99 @@ pub async fn update_device(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Deserialize)]
+pub struct DeviceMove {
+    folder_id: Uuid,
+}
+
+/// `PUT /api/devices/{id}/folder`: moves a device into another folder, by
+/// dragging it there (#214). Only the folder changes, with the rules
+/// `update_device` applies to a new folder: `edit` on the device and on the
+/// target, the login profile still in reach, and a new site connector
+/// treated as a new target.
+pub async fn move_device(
+    State(state): State<AppState>,
+    session: Session,
+    ClientAddress(address): ClientAddress,
+    Path(id): Path<Uuid>,
+    input: Result<Json<DeviceMove>, JsonRejection>,
+) -> Result<StatusCode, Problem> {
+    let folder_id = body(input)?.folder_id;
+    let (subject, catalog) = context(&state, &session).await?;
+    require(&catalog, &subject, Role::Edit, ObjectId::Device(id))?;
+    require(&catalog, &subject, Role::Edit, ObjectId::Folder(folder_id))?;
+    let from = catalog.parent(ObjectId::Device(id));
+    if from == Some(folder_id) {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    let (profile_id, reached_before, reached_after, own_secret): (
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<Uuid>,
+        bool,
+    ) = sqlx::query_as(
+        "SELECT profile_id,
+                device_connector(connector_mode, connector_id, folder_id),
+                device_connector(connector_mode, connector_id, $2),
+                auth_mode = 'device' AND secret_version > 0
+         FROM devices WHERE id = $1",
+    )
+    .bind(id)
+    .bind(folder_id)
+    .fetch_one(&state.db)
+    .await?;
+    // Behind another connector, the same address may be another machine
+    // (#176): the pins go, and what signs in goes along only with someone
+    // who may use it (see update_device).
+    let target_changed = reached_before != reached_after;
+    if let Some(profile) = profile_id {
+        in_reach(&catalog, profile, folder_id)?;
+        if target_changed {
+            require(
+                &catalog,
+                &subject,
+                Role::Connect,
+                ObjectId::Profile(profile),
+            )?;
+        }
+    }
+    if target_changed && own_secret {
+        require(&catalog, &subject, Role::Reveal, ObjectId::Device(id))?;
+    }
+
+    let mut tx = state.db.begin().await?;
+    sqlx::query(
+        "UPDATE devices SET folder_id = $2, updated_at = now(),
+             host_key = CASE WHEN $3 THEN NULL ELSE host_key END,
+             host_key_pinned_at = CASE WHEN $3 THEN NULL ELSE host_key_pinned_at END,
+             certificate_fingerprint = CASE WHEN $3 THEN NULL ELSE certificate_fingerprint END,
+             certificate_pinned_at = CASE WHEN $3 THEN NULL ELSE certificate_pinned_at END
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(folder_id)
+    .bind(target_changed)
+    .execute(&mut *tx)
+    .await
+    .map_err(database)?;
+    audit::record(
+        &mut *tx,
+        entry(
+            &session,
+            Action::DeviceMoved,
+            ObjectId::Device(id),
+            json!({
+                "from": from, "folder_id": folder_id,
+                "reached_through": reached_after, "secret_kept": target_changed && own_secret,
+            }),
+            &address,
+        ),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn delete_device(
     State(state): State<AppState>,
     session: Session,
