@@ -47,15 +47,19 @@ describe('personal vault encryption', () => {
 	it('keeps files apart from entries', async () => {
 		const key = await newVaultKey();
 		const bytes = new Uint8Array(200_000).map((_, i) => i % 251);
+		// Compared in a plain loop: toEqual walks 200,000 elements through its
+		// generic equality, seconds on a busy machine (#223).
+		const same = (a: Uint8Array, b: Uint8Array) =>
+			expect(a.length === b.length && a.every((byte, i) => byte === b[i])).toBe(true);
 		const { nonce, ciphertext } = await sealFile(key, ENTRY, bytes);
-		expect(await openFile(key, ENTRY, nonce, ciphertext)).toEqual(bytes);
+		same(await openFile(key, ENTRY, nonce, ciphertext), bytes);
 		await expect(openFile(key, OTHER, nonce, ciphertext)).rejects.toThrow();
 		// A file does not open as an entry of the same ID, nor the other way.
 		await expect(open(key, ENTRY, nonce, ciphertext)).rejects.toThrow();
 		const entry = await seal(key, ENTRY, { title: 'x' });
 		await expect(openFile(key, ENTRY, entry.nonce, entry.ciphertext)).rejects.toThrow();
 		// Large files go through base64 and back.
-		expect(fromBase64(toBase64(ciphertext))).toEqual(ciphertext);
+		same(fromBase64(toBase64(ciphertext)), ciphertext);
 	});
 
 	it('uses a new nonce every time', async () => {
