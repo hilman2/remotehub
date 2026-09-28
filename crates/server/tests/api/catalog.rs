@@ -1713,3 +1713,75 @@ async fn a_folder_connector_needs_the_profiles_below(pool: PgPool) {
     );
     assert_eq!(reached(&f).await["db01"], json!(site));
 }
+
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn everyone_who_sees_a_device_may_set_its_search_words(pool: PgPool) {
+    let f = fixture(pool).await;
+    let bob = sign_in(&f.app, "bob").await;
+    let uri = format!("/api/devices/{}/keywords", f.web01);
+    let set = |token: String, keywords: String| {
+        let (app, uri) = (f.app.clone(), uri.clone());
+        async move {
+            call(
+                &app,
+                &token,
+                "PUT",
+                &uri,
+                Some(json!({ "keywords": keywords })),
+            )
+            .await
+        }
+    };
+
+    // Not for whoever does not see the device.
+    assert_eq!(set(bob.clone(), "x".into()).await.code(), "not_found");
+    // `list` is enough (#215).
+    grant(
+        &f.app, &f.alice, "folder", &f.linux, BOB_SID, "user", "list",
+    )
+    .await;
+    let response = set(bob.clone(), "  Kunde Müller, Raum 4.12 ".into()).await;
+    assert_eq!(response.status, StatusCode::NO_CONTENT);
+    let devices = tree(&f.app, &f.alice).await["devices"].clone();
+    let web01 = devices
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["id"] == f.web01.as_str())
+        .unwrap();
+    assert_eq!(web01["keywords"], "Kunde Müller, Raum 4.12");
+    assert_eq!(web01["keywords_changed_by"], "Bob Helpdesk");
+    assert!(
+        web01["keywords_changed_at"]
+            .as_str()
+            .is_some_and(|at| at.ends_with('Z')),
+        "{web01}"
+    );
+
+    // 500 characters, umlauts counting as one; more, or control characters,
+    // are refused.
+    assert_eq!(
+        set(bob.clone(), "ä".repeat(500)).await.status,
+        StatusCode::NO_CONTENT
+    );
+    for bad in ["x".repeat(501), "a\tb".to_owned()] {
+        assert_eq!(set(bob.clone(), bad).await.code(), "invalid_request");
+    }
+
+    let log = call(&f.app, &f.alice, "GET", "/api/audit", None)
+        .await
+        .json();
+    let changed: Vec<&Value> = log
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["action"] == "device.keywords_changed")
+        .collect();
+    assert_eq!(changed.len(), 2, "{log}");
+    assert!(
+        changed
+            .iter()
+            .any(|e| e["details"]["keywords"] == "Kunde Müller, Raum 4.12"),
+        "{log}"
+    );
+}
