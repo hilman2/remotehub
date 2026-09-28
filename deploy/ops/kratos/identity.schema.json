@@ -16,8 +16,7 @@
             "credentials": {
               "password": { "identifier": true },
               "totp": { "account_name": true },
-              "webauthn": { "identifier": true },
-              "passkey": { "display_name": true }
+              "webauthn": { "identifier": true }
             },
             "recovery": { "via": "email" }
           }

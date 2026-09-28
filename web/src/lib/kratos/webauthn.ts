@@ -1,5 +1,5 @@
 /**
- * The WebAuthn ceremonies for Kratos' `passkey` and `webauthn` methods
+ * The WebAuthn ceremonies for Kratos' `webauthn` method, the second factor
  * (#112), run by remotehub itself instead of Kratos' script. Kratos hands
  * the options as JSON in a node's value, with binary fields in base64url,
  * and takes the credential back in the same form. remotehub's own keys of

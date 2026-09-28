@@ -25,7 +25,6 @@ const IDENTICAL_IN_GERMAN = new Set<string>([
 	'protocol_vnc',
 	'field_passphrase',
 	'vault_kind_passkey',
-	'account_passkeys',
 	'vault_kind_passphrase',
 	'sign_in_code',
 	'users_code_link',
