@@ -521,6 +521,8 @@
 	"vault_choose_entry": "Choose an entry",
 	"vault_unlock_to_use": "Unlock my vault to use its entries",
 	"session_tabs": "Open sessions",
+	"session_show_menu": "Show the menu",
+	"session_hide_menu": "Hide the menu",
 	"session_close": "Close {name}",
 	"session_connecting": "Connecting",
 	"session_connected": "Connected",

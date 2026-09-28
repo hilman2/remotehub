@@ -169,12 +169,16 @@ test('an AD user adds an SSH device and works in its terminal', async ({ page })
 	await page.keyboard.press('Enter');
 	await expect(page.locator('.xterm-rows')).toContainText('e2e says tester');
 
+	// The session gets the height: the menu folds away until asked for (#220).
+	const sessions = page.getByRole('navigation', { name: 'Open sessions' });
+	await expect(page.getByRole('link', { name: 'Audit log' })).toBeHidden();
+	await sessions.getByRole('button', { name: 'Show the menu' }).click();
+
 	// The connection is in the audit log.
 	await page.getByRole('link', { name: 'Audit log' }).click();
 	await expect(page.getByText('Opened a connection').first()).toBeVisible();
 
 	// The session ran on meanwhile: its tab brings back the same terminal.
-	const sessions = page.getByRole('navigation', { name: 'Open sessions' });
 	await sessions
 		.getByRole('button', { name: new RegExp(name) })
 		.first()
