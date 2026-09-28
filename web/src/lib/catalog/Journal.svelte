@@ -87,7 +87,7 @@
 {#if entries?.length === 0}
 	<p class="text-sm text-ink-3">{m.journal_empty()}</p>
 {:else if entries}
-	<ul class="max-h-96 divide-y divide-line overflow-y-auto" aria-label={m.journal_title()}>
+	<ul class="relative max-h-96 divide-y divide-line overflow-y-auto" aria-label={m.journal_title()}>
 		{#each entries as entry (entry.id)}
 			<li class="flex gap-3 py-3">
 				{#if entry.kind === 'connection'}

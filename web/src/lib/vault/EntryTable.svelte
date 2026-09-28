@@ -126,7 +126,7 @@
 			</span>
 		{/each}
 	</div>
-	<ul bind:this={list} role="rowgroup" class="min-h-0 flex-1 overflow-y-auto">
+	<ul bind:this={list} role="rowgroup" class="relative min-h-0 flex-1 overflow-y-auto">
 		{#each items as item (item.key)}
 			{@const Icon = icon(item.icon)}
 			{@const expired = isExpired(item, now)}

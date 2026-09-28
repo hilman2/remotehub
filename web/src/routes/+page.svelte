@@ -518,7 +518,7 @@
 {/snippet}
 
 <div
-	class="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden"
+	class="relative flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden"
 	class:hidden={tabs.active !== null}
 >
 	{#if area === 'profiles' && tree}
@@ -531,7 +531,7 @@
 		/>
 	{:else}
 		<aside
-			class="flex shrink-0 flex-col gap-4 border-b border-line bg-sunken px-3 py-5 lg:w-84 lg:overflow-y-auto lg:border-r lg:border-b-0"
+			class="relative flex shrink-0 flex-col gap-4 border-b border-line bg-sunken px-3 py-5 lg:w-84 lg:overflow-y-auto lg:border-r lg:border-b-0"
 		>
 			{@render areaTabs()}
 			<div class="flex items-center gap-2 px-2">
@@ -610,7 +610,7 @@
 		</aside>
 
 		<section
-			class="flex min-w-0 flex-1 flex-col gap-7 px-5 py-8 sm:px-10 lg:overflow-y-auto lg:py-10"
+			class="relative flex min-w-0 flex-1 flex-col gap-7 px-5 py-8 sm:px-10 lg:overflow-y-auto lg:py-10"
 			aria-live="polite"
 		>
 			{#if error && !dialogOpen}
