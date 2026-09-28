@@ -328,7 +328,9 @@ and for legacy LAPS `Set-AdmPwdReadPasswordPermission` likewise. remotehub reads
 
 A device with the protocol "Web interface (HTTPS)" opens in a Chromium of the browser service, which reaches
 that one device and nothing else. remotehub fills in its sign-in form, so the password never reaches the
-admin's browser. It pins the device's certificate at the first connection, as for RDP.
+admin's browser. It pins the device's certificate at the first connection, as for RDP. Chromium takes the
+admin's time zone and languages from their browser: a device that speaks German shows its interface in
+German to an admin whose browser prefers German.
 
 The browser service runs with `seccomp:unconfined`, which Chromium's sandbox needs; `compose.yml` sets it.
 Each open web interface takes a Chromium: on the lab's simple sign-in page about 170 MB and 105 processes.

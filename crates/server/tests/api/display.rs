@@ -589,7 +589,13 @@ async fn an_https_device_opens_signed_in_with_its_login_profile(pool: PgPool) {
     let mut socket = open(address, &web, &token, "display", ORIGIN)
         .await
         .unwrap();
-    start(&mut socket, json!({})).await;
+    // The admin's languages reach the device; what is no language tag does
+    // not reach Chromium (#211).
+    start(
+        &mut socket,
+        json!({ "languages": ["de-DE", "de", "--lang=x"] }),
+    )
+    .await;
     let connected = connected(&mut socket).await;
     assert_eq!(connected["type"], "connected", "{connected}");
     assert_eq!(connected["pinned"], true, "{connected}");
@@ -598,6 +604,12 @@ async fn an_https_device_opens_signed_in_with_its_login_profile(pool: PgPool) {
     let signed_in = sign_in_after(&before["count"]).await;
     assert_eq!(signed_in["username"], "tester", "{signed_in}");
     assert_eq!(signed_in["ok"], true, "{signed_in}");
+    assert!(
+        signed_in["language"]
+            .as_str()
+            .is_some_and(|language| language.starts_with("de-DE,de")),
+        "{signed_in}"
+    );
     // The sign-in page also loads an image from another port of the target,
     // which counts as another device: the browser's proxy refuses it.
     assert_eq!(signed_in["escapes"], before["escapes"], "{signed_in}");
@@ -718,6 +730,7 @@ async fn the_browser_signs_in_only_where_the_pinned_key_is(_pool: PgPool) {
                 width: 1024,
                 height: 768,
                 timezone: None,
+                languages: &[],
                 login: Some(("tester", "Tester-Passw0rd!")),
             },
             Duration::from_secs(20),

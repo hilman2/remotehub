@@ -30,6 +30,10 @@ pub struct Open {
     pub height: u32,
     /// IANA name for the browser's clock, e.g. `Europe/Berlin`.
     pub timezone: Option<String>,
+    /// The admin's languages, most wanted first, e.g. `["de-DE", "de"]`:
+    /// Chromium's own and the ones the device is asked for (#211).
+    #[serde(default)]
+    pub languages: Vec<String>,
     /// Filled into the page's sign-in form; none opens the page as it is.
     pub login: Option<Login>,
 }
@@ -102,6 +106,33 @@ pub fn timezone(value: Option<&str>) -> Option<&str> {
     })
 }
 
+/// Languages handed to Chromium at most.
+pub const MAX_LANGUAGES: usize = 8;
+
+/// The language tags among `values` as a browser lists them (`de-DE`, `en`,
+/// `zh-Hans-CN`), at most [`MAX_LANGUAGES`]; anything else is dropped rather
+/// than put on Chromium's command line.
+pub fn languages(values: &[String]) -> Vec<&str> {
+    values
+        .iter()
+        .map(String::as_str)
+        .filter(|tag| language_tag(tag))
+        .take(MAX_LANGUAGES)
+        .collect()
+}
+
+/// A BCP 47 tag: a language of two or three letters, then subtags of one to
+/// eight letters or digits, joined by hyphens.
+fn language_tag(tag: &str) -> bool {
+    let mut parts = tag.split('-');
+    let language = parts.next().unwrap_or_default();
+    (2..=3).contains(&language.len())
+        && language.chars().all(|c| c.is_ascii_alphabetic())
+        && parts.all(|part| {
+            (1..=8).contains(&part.len()) && part.chars().all(|c| c.is_ascii_alphanumeric())
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,8 +146,25 @@ mod tests {
             width: 1280,
             height: 800,
             timezone: None,
+            languages: Vec::new(),
             login: None,
         }
+    }
+
+    #[test]
+    fn languages_are_language_tags() {
+        for good in ["de-DE", "de", "gsw", "sr-Latn", "es-419"] {
+            assert!(language_tag(good), "{good}");
+        }
+        for bad in [
+            "", "-de", "de-", "d", "deutsch", "de_DE", "de DE", "--lang=x", "en,de",
+        ] {
+            assert!(!language_tag(bad), "{bad}");
+        }
+        let given = ["de-DE", "--lang=x", "de"].map(String::from);
+        assert_eq!(languages(&given), ["de-DE", "de"]);
+        let many = vec!["de".to_owned(); 20];
+        assert_eq!(languages(&many).len(), MAX_LANGUAGES);
     }
 
     #[test]
