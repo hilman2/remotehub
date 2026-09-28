@@ -585,8 +585,11 @@ Type the printed text, then press Enter and Ctrl+D.
 
 1. Read the release notes on GitHub; they name every step a release needs beyond these.
 2. Back up the database.
-3. Set `REMOTEHUB_VERSION` in `.env` to the new release.
-4. Pull and restart:
+3. Take the ops package's own files of the new release (`remotehub-ops.tar.gz`, checked against the
+   release's `SHA256SUMS`): `compose.yml`, `kratos/`, `caddy/Caddyfile`, `init.sh`, `install.sh` and
+   `.env.example`. Keep `.env`, `secrets/`, `compose.override.yml` and the data directories.
+4. Set `REMOTEHUB_VERSION` in `.env` to the new release.
+5. Pull and restart:
 
    ```bash
    sudo docker compose pull
