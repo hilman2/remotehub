@@ -2419,7 +2419,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "remotehub-browser"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "getrandom 0.4.3",
  "secrecy",
@@ -2434,7 +2434,7 @@ dependencies = [
 
 [[package]]
 name = "remotehub-connector"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2475,7 +2475,7 @@ dependencies = [
 
 [[package]]
 name = "remotehub-directory"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
  "ldap3",
@@ -2496,7 +2496,7 @@ dependencies = [
 
 [[package]]
 name = "remotehub-gateway"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.4.3",
@@ -2514,7 +2514,7 @@ dependencies = [
 
 [[package]]
 name = "remotehub-i18n"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "fluent-bundle",
  "fluent-syntax",
@@ -2523,7 +2523,7 @@ dependencies = [
 
 [[package]]
 name = "remotehub-model"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2532,7 +2532,7 @@ dependencies = [
 
 [[package]]
 name = "remotehub-server"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2584,7 +2584,7 @@ dependencies = [
 
 [[package]]
 name = "remotehub-totp"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "data-encoding",
  "getrandom 0.4.3",
@@ -2596,7 +2596,7 @@ dependencies = [
 
 [[package]]
 name = "remotehub-vault"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
  "chacha20poly1305",
