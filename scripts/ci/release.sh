@@ -76,7 +76,10 @@ key_mount=()
 extension_build=()
 if [ -s "$extension_key" ]; then
   key_mount=(-v "$(cygpath -m "$extension_key" 2>/dev/null || echo "$extension_key"):/run/extension-key.pem:ro")
-  extension_build=(--secret "id=extension_key,src=/run/extension-key.pem")
+  # BuildKit does not look into secrets: without --no-cache-filter, the stage
+  # `web` could come from the cache of a CI run without the key, signed with
+  # the development key (#207). Only deploy/Dockerfile has that stage.
+  extension_build=(--secret "id=extension_key,src=/run/extension-key.pem" --no-cache-filter web)
 else
   precondition "no signing key for the browser extension at ${extension_key}"
 fi
