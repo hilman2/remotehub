@@ -159,6 +159,8 @@ connector_fail() { # message
   connector_gone
   fail "$1"
 }
+# A connector an interrupted run left behind would take the name (#228).
+connector_gone
 docker run -d --name "$connector" --network "$network" --read-only --cap-drop ALL \
   --security-opt no-new-privileges -v "${connector_data}:/var/lib/remotehub-connector" \
   -e REMOTEHUB_URL="http://${remotehub}:8080" -e REMOTEHUB_CONNECTOR_TOKEN=rhc_check \
