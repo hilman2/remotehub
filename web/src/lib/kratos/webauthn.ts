@@ -24,14 +24,19 @@ export const webauthnAvailable = () =>
 type Descriptor = { id: string } & Record<string, unknown>;
 const descriptors = (list?: Descriptor[]) => list?.map((d) => ({ ...d, id: decode(d.id) }));
 
-/** Runs `navigator.credentials.create()` with options in the JSON form. */
-async function create(options: string): Promise<PublicKeyCredential> {
+/**
+ * Runs `navigator.credentials.create()` with options in the JSON form.
+ * `name` is what the passkey is called in the browser's or the phone's list
+ * (#245): the sign-in's passkey apart from the personal vault's.
+ */
+async function create(options: string, name?: string): Promise<PublicKeyCredential> {
 	const { publicKey } = JSON.parse(options);
+	const shown = name ? { name, displayName: name } : {};
 	return (await navigator.credentials.create({
 		publicKey: {
 			...publicKey,
 			challenge: decode(publicKey.challenge),
-			user: { ...publicKey.user, id: decode(publicKey.user.id) },
+			user: { ...publicKey.user, ...shown, id: decode(publicKey.user.id) },
 			excludeCredentials: descriptors(publicKey.excludeCredentials)
 		}
 	})) as PublicKeyCredential;
@@ -42,8 +47,8 @@ async function create(options: string): Promise<PublicKeyCredential> {
  * returns it as Kratos takes it. Throws if the person cancels or the
  * authenticator refuses.
  */
-export async function createCredential(options: string): Promise<string> {
-	const credential = await create(options);
+export async function createCredential(options: string, name?: string): Promise<string> {
+	const credential = await create(options, name);
 	const response = credential.response as AuthenticatorAttestationResponse;
 	return JSON.stringify({
 		id: credential.id,
@@ -62,8 +67,8 @@ export async function createCredential(options: string): Promise<string> {
  * authenticator data the browser read from the attestation, which the
  * server takes instead of parsing CBOR.
  */
-export async function createKey(options: string): Promise<unknown> {
-	const credential = await create(options);
+export async function createKey(options: string, name?: string): Promise<unknown> {
+	const credential = await create(options, name);
 	const response = credential.response as AuthenticatorAttestationResponse;
 	return {
 		rawId: encode(credential.rawId),

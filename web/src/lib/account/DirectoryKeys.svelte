@@ -15,6 +15,7 @@
 	} from '$lib/api/secondFactor';
 	import { createKey, webauthnAvailable } from '$lib/kratos/webauthn';
 	import { m } from '$lib/paraglide/messages';
+	import { session } from '$lib/session.svelte';
 
 	let status = $state<FactorStatus | null>(null);
 	let name = $state('');
@@ -43,7 +44,10 @@
 			}
 			let credential: unknown;
 			try {
-				credential = await createKey(JSON.stringify(offer.data.options));
+				credential = await createKey(
+					JSON.stringify(offer.data.options),
+					m.passkey_name_sign_in({ user: session.user?.username ?? '' })
+				);
 			} catch {
 				error = m.passkey_failed();
 				return;

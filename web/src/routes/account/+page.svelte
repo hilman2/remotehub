@@ -69,7 +69,10 @@
 		error = null;
 		let credential: string;
 		try {
-			credential = await createCredential(String(value(flow, 'webauthn_register_trigger')));
+			credential = await createCredential(
+				String(value(flow, 'webauthn_register_trigger')),
+				m.passkey_name_sign_in({ user: session.user?.username ?? '' })
+			);
 		} catch {
 			error = m.passkey_failed();
 			return;

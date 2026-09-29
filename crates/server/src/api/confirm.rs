@@ -6,6 +6,7 @@
 //! - `POST /api/session/confirm/start`: what the user can confirm with, an
 //!   authenticator app or keys, and a challenge for the keys.
 //! - `POST /api/session/confirm`: a code of the app, or a key's answer.
+//! - `GET /api/session/factors`: whether the user has an app and keys.
 //!
 //! A key stands alone here, without the password, so it must check its
 //! holder too (PIN, fingerprint or face). Directory users' factors are
@@ -87,12 +88,11 @@ async fn factors(state: &AppState, session: &Session) -> Result<Factors, Problem
     }
 }
 
-pub async fn start(
-    State(state): State<AppState>,
-    AnySession(session): AnySession,
-) -> Result<Json<Start>, Problem> {
+/// Whether the user has an authenticator app, and their keys' credential
+/// IDs (base64url).
+async fn available(state: &AppState, session: &Session) -> Result<(bool, Vec<String>), Problem> {
     let user = session.user_id;
-    let (app, keys) = match factors(&state, &session).await? {
+    Ok(match factors(state, session).await? {
         Factors::Directory => (
             second_factor::has_app(&state.db, user).await?,
             second_factor::key_ids(&state.db, user).await?,
@@ -106,7 +106,35 @@ pub async fn start(
                 .map(|key| URL_SAFE_NO_PAD.encode(&key.credential_id))
                 .collect(),
         ),
-    };
+    })
+}
+
+/// What the user has to confirm with, without a challenge: for the page's
+/// hint to set up a passkey (#244).
+#[derive(Debug, Serialize)]
+pub struct Available {
+    app: bool,
+    keys: bool,
+}
+
+/// `GET /api/session/factors`
+pub async fn factors_of(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<Json<Available>, Problem> {
+    let (app, keys) = available(&state, &session).await?;
+    Ok(Json(Available {
+        app,
+        keys: !keys.is_empty(),
+    }))
+}
+
+pub async fn start(
+    State(state): State<AppState>,
+    AnySession(session): AnySession,
+) -> Result<Json<Start>, Problem> {
+    let user = session.user_id;
+    let (app, keys) = available(&state, &session).await?;
     let key = if keys.is_empty() {
         None
     } else {

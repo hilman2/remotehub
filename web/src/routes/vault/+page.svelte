@@ -1304,7 +1304,11 @@
 		if (!key || !session.user) return;
 		error = null;
 		try {
-			const result = await addPasskey(key, session.user.username, passkeyLabel.trim());
+			const result = await addPasskey(
+				key,
+				m.passkey_name_vault({ user: session.user.username }),
+				passkeyLabel.trim()
+			);
 			if (!result.ok) {
 				error =
 					result.code === 'prf_unsupported' ? m.vault_prf_unsupported() : errorMessage(result.code);
@@ -2057,6 +2061,7 @@
 					{m.vault_add_passkey()}
 				</button>
 			</div>
+			<p class="mt-1.5 text-xs text-ink-3">{m.vault_passkey_hint()}</p>
 		{/if}
 		<div class="mt-4 flex flex-wrap gap-2">
 			<button type="button" class={button} onclick={() => show({ type: 'passphrase' })}>

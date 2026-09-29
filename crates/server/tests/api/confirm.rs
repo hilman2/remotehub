@@ -144,6 +144,11 @@ async fn five_wrong_answers_in_a_row_end_the_session(pool: PgPool) {
 async fn a_key_confirms_only_when_it_checks_its_holder(pool: PgPool) {
     let app = app(state(pool.clone()), None);
     let bob = token(&app, "bob", json!({})).await;
+    let factors = || call(&app, &bob, "GET", "/api/session/factors", None);
+    assert_eq!(
+        factors().await.json(),
+        json!({ "app": false, "keys": false })
+    );
     let mut key = Key::new(3);
     let offer = call(&app, &bob, "POST", "/api/account/security-keys/offer", None)
         .await
@@ -154,6 +159,10 @@ async fn a_key_confirms_only_when_it_checks_its_holder(pool: PgPool) {
     });
     let added = call(&app, &bob, "POST", "/api/account/security-keys", Some(body)).await;
     assert_eq!(added.status, StatusCode::NO_CONTENT, "{}", added.json());
+    assert_eq!(
+        factors().await.json(),
+        json!({ "app": false, "keys": true })
+    );
     idle(&pool, &bob).await;
 
     let started = start(&app, &bob).await;
