@@ -53,10 +53,18 @@ for database in remotehub kratos; do
 done
 echo "backup: ${dir}/backups/{remotehub,kratos}-${stamp}.dump"
 
+kratos_changed=0
+diff -rq "${work}/remotehub/kratos" kratos >/dev/null 2>&1 || kratos_changed=1
+# Over the old files, never removing one: a running container binds
+# kratos/ and caddy/Caddyfile, and would keep a removed one (#237).
 for file in "${owned[@]}"; do
-  mkdir -p "$(dirname "$file")"
-  rm -rf "$file"
-  cp -R "${work}/remotehub/${file}" "$file"
+  if [ -d "${work}/remotehub/${file}" ]; then
+    mkdir -p "$file"
+    cp -R "${work}/remotehub/${file}/." "$file/"
+  else
+    mkdir -p "$(dirname "$file")"
+    cp "${work}/remotehub/${file}" "$file"
+  fi
 done
 echo "ops package ${version}: ${owned[*]}"
 
@@ -64,14 +72,26 @@ before="$(sed -n 's/^REMOTEHUB_VERSION=//p' .env | tail -n 1)"
 sed -i "s/^REMOTEHUB_VERSION=.*/REMOTEHUB_VERSION=${version}/" .env
 docker compose pull -q </dev/null
 docker compose up -d --wait --wait-timeout 300 </dev/null
+# A Kratos that kept running reads a changed configuration only anew.
+if [ "$kratos_changed" = 1 ]; then
+  docker compose restart kratos </dev/null
+  docker compose up -d --wait --wait-timeout 300 </dev/null
+fi
 
 port="$(sed -n 's/^REMOTEHUB_PORT=//p' .env | tail -n 1)"
-health="$(curl -fsS "http://127.0.0.1:${port:-8080}/api/health")"
+base="http://127.0.0.1:${port:-8080}"
+health="$(curl -fsS "${base}/api/health")"
 case "$health" in
-  *"\"version\":\"${version}\""*) echo "remotehub ${before} → ${version}: ${health}" ;;
+  *"\"version\":\"${version}\""*) ;;
   *)
     echo "/api/health does not report ${version}: ${health}" >&2
     exit 1
     ;;
 esac
+# /api/health does not ask Kratos: a sign-in flow through remotehub does.
+if ! curl -fsS -o /dev/null "${base}/api/auth/self-service/login/api"; then
+  echo "local accounts do not answer: Kratos has no sign-in flow (docker compose logs kratos)" >&2
+  exit 1
+fi
+echo "remotehub ${before} → ${version}: ${health}, local accounts answer"
 REMOTE
