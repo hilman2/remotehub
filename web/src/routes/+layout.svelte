@@ -9,6 +9,7 @@
 	import LocaleSwitch from '$lib/components/LocaleSwitch.svelte';
 	import Logo from '$lib/components/Logo.svelte';
 	import ServerStatus from '$lib/components/ServerStatus.svelte';
+	import { guard } from '$lib/api/client';
 	import ThemeSwitch from '$lib/components/ThemeSwitch.svelte';
 	import { connectHref, rememberConnect, takePendingConnect } from '$lib/extension/connect';
 	import { getLocale } from '$lib/i18n';
@@ -24,12 +25,33 @@
 	} from '$lib/session.svelte';
 	import SessionStatus from '$lib/session/SessionStatus.svelte';
 	import SessionTabs from '$lib/session/SessionTabs.svelte';
+	import ConfirmDialog from '$lib/session/ConfirmDialog.svelte';
+	import LockScreen from '$lib/session/LockScreen.svelte';
+	import {
+		askConfirmation,
+		confirmed,
+		confirming,
+		lockScreen,
+		watchIdle
+	} from '$lib/session/confirm.svelte';
 	import SessionView from '$lib/session/SessionView.svelte';
 	import SetupHints from '$lib/setup/SetupHints.svelte';
 	import { tabs } from '$lib/session/tabs.svelte';
 	import { unlocked } from '$lib/vault/unlocked.svelte';
 
 	let { children } = $props();
+
+	// The server refuses a request for the session's sake: the page asks for
+	// the second factor and sends it again, or goes to the sign-in (#240-#242).
+	guard.locked = lockScreen;
+	guard.confirm = askConfirmation;
+	guard.ended = () => {
+		if (!session.user) return;
+		session.user = null;
+		session.ended = true;
+		// Whoever waits for a confirmation waits in vain.
+		confirmed(false);
+	};
 
 	const signInPage = $derived(page.url.pathname.startsWith(resolve('/sign-in')));
 	// The setup wizard (#143) stands alone, like the sign-in pages.
@@ -109,6 +131,18 @@
 		if (!signInPage && !setupPage) goto(resolve('/sign-in'));
 	});
 
+	// A page opened on a locked session shows whom to unlock; later, the
+	// page covers itself once the session idles out (#241).
+	$effect(() => {
+		if (session.user?.locked) lockScreen();
+	});
+
+	$effect(() => {
+		const idle = session.user?.idle_seconds;
+		if (!idle) return;
+		return watchIdle(idle, () => lockScreen());
+	});
+
 	$effect(() => {
 		if (!session.user || connectPage) return;
 		const pending = takePendingConnect();
@@ -121,6 +155,7 @@
 	}
 
 	async function leave() {
+		confirmed(false);
 		tabs.clear();
 		unlocked.key = null;
 		await signOut();
@@ -258,4 +293,11 @@
 			</div>
 		</footer>
 	</div>
+{/if}
+
+{#if session.user}
+	<ConfirmDialog />
+	{#if confirming.locked}
+		<LockScreen onsignout={leave} />
+	{/if}
 {/if}

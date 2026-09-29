@@ -54,6 +54,7 @@
 	let profileId = $state(start?.profile_id ?? '');
 	let description = $state(start?.description ?? '');
 	let keyboardLayout = $state<KeyboardLayout | ''>(start?.keyboard_layout ?? '');
+	let requiresConfirmation = $state(start?.requires_confirmation ?? false);
 	// `inherit`, `direct`, or the id of the device's own connector.
 	const startReach =
 		start?.connector_mode === 'connector'
@@ -128,6 +129,7 @@
 			keyboard_layout: protocol === 'rdp' ? keyboardLayout || null : null,
 			connector_mode: reach === 'inherit' || reach === 'direct' ? reach : 'connector',
 			connector_id: reach === 'inherit' || reach === 'direct' ? null : reach,
+			requires_confirmation: requiresConfirmation,
 			...(authMode === 'device'
 				? {
 						username,
@@ -289,6 +291,15 @@
 			{/each}
 		</select>
 	{/if}
+
+	<!-- #243: e.g. a domain controller asks for the second factor every time. -->
+	<label class="mt-4 flex items-start gap-2.5 text-sm">
+		<input type="checkbox" class="mt-0.5 size-4" bind:checked={requiresConfirmation} />
+		<span>
+			<span class="block font-medium">{m.device_requires_confirmation()}</span>
+			<span class="block text-xs text-ink-3">{m.device_requires_confirmation_hint()}</span>
+		</span>
+	</label>
 
 	<label class={label} for="device-description">{m.field_description()}</label>
 	<textarea id="device-description" class={field} rows="2" maxlength="2000" bind:value={description}

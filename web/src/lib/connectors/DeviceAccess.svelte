@@ -4,6 +4,7 @@
 	 * chip on the device's page. Asks every minute: the customer may open or
 	 * close it at any time. Shows nothing while the connector cannot say.
 	 */
+	import { background } from '$lib/api/client';
 	import Lock from '@lucide/svelte/icons/lock';
 	import LockOpen from '@lucide/svelte/icons/lock-open';
 	import { loadConnectorAccess, type ConnectorAccess } from '$lib/api/connectors';
@@ -23,7 +24,7 @@
 		let current = true;
 		access = null;
 		async function read() {
-			const result = await loadConnectorAccess(id);
+			const result = await loadConnectorAccess(id, background);
 			if (current) access = result.ok ? result.data : null;
 		}
 		read();

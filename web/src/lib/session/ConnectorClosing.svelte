@@ -5,6 +5,7 @@
 	 * connection itself. Asks every minute, as the customer may extend or
 	 * close access at any time.
 	 */
+	import { background } from '$lib/api/client';
 	import Clock from '@lucide/svelte/icons/clock';
 	import { loadConnectorAccess, loadConnectors } from '$lib/api/connectors';
 	import { formatLocale } from '$lib/i18n';
@@ -29,8 +30,8 @@
 			// The device's end, not the network's: the customer may have
 			// opened only it, or it longer than the rest (#180).
 			const [connectors, access] = await Promise.all([
-				loadConnectors(),
-				loadConnectorAccess(device)
+				loadConnectors(background),
+				loadConnectorAccess(device, background)
 			]);
 			if (!current) return;
 			if (connectors.ok) name = connectors.data.find((c) => c.id === id)?.name ?? '';

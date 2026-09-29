@@ -372,7 +372,7 @@ The same way, you can give it remotehub's address, so people only click *Connect
 ### What a connected extension may do
 
 Each connected extension signs in with a session of its own. It ends after the idle time and the maximum
-lifetime, as a sign-in does (`REMOTEHUB_SESSION_IDLE_MINUTES`, `REMOTEHUB_SESSION_MAX_HOURS`), and when an
+lifetime (`REMOTEHUB_SESSION_IDLE_MINUTES`, `REMOTEHUB_SESSION_MAX_HOURS`), and when an
 administrator ends the user's sessions. It lists the shared logins the user may reveal and fills them only
 into the pages they belong to. Every password or code it fills or copies goes into the audit log.
 

@@ -26,8 +26,9 @@ export interface ConnectorRequest {
 }
 
 /** The caller's own requests, newest first; an administrator's hold everyone's. */
-export const loadConnectorRequests = () =>
-	api<ConnectorRequest[]>('GET', '/api/connector-requests');
+/** `fetcher`: `background` for a read every few seconds (#241). */
+export const loadConnectorRequests = (fetcher?: typeof fetch) =>
+	api<ConnectorRequest[]>('GET', '/api/connector-requests', undefined, fetcher);
 export const askCustomer = (
 	object: { kind: ObjectKind; id: string },
 	minutes: number,

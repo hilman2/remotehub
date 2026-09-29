@@ -1,5 +1,6 @@
 <script lang="ts">
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import Clock from '@lucide/svelte/icons/clock';
 	import Fingerprint from '@lucide/svelte/icons/fingerprint';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import LogIn from '@lucide/svelte/icons/log-in';
@@ -28,6 +29,7 @@
 	import { m } from '$lib/paraglide/messages';
 	import {
 		loadMethods,
+		session,
 		signIn,
 		signInLocal,
 		type DirectoryFactor,
@@ -315,6 +317,16 @@
 				<span class="font-display text-lg font-bold">remotehub</span>
 			</div>
 			<h1 class="text-3xl font-semibold">{m.sign_in_title()}</h1>
+			{#if session.ended}
+				<!-- #240: the session ran out under the page; nothing else is wrong. -->
+				<p
+					class="flex items-start gap-2 rounded-xl border border-line bg-surface-2 p-3 text-sm"
+					role="status"
+				>
+					<Clock size={16} class="mt-0.5 shrink-0 text-ink-3" aria-hidden="true" />
+					{m.session_ended_notice()}
+				</p>
+			{/if}
 
 			{#if second}
 				<form class="flex flex-col gap-5" onsubmit={submitSecond}>

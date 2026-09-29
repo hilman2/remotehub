@@ -12,6 +12,10 @@ export interface User {
 	admin: boolean;
 	/** Roles for remotehub itself (#106). */
 	roles: Role[];
+	/** Idle too long: a confirmation with the second factor unlocks it (#241). */
+	locked: boolean;
+	/** After how many seconds without activity the session locks. */
+	idle_seconds: number;
 }
 
 export type Role = 'administrator' | 'auditor' | 'security_officer';
@@ -24,9 +28,15 @@ export const isAuditor = (user: User | null) =>
 export const isSecurityOfficer = (user: User | null) =>
 	!!user && user.roles.includes('security_officer');
 
-export const session = $state<{ user: User | null; loaded: boolean }>({
+export const session = $state<{
+	user: User | null;
+	loaded: boolean;
+	/** The session ended under the page: expired or ended elsewhere (#240). */
+	ended: boolean;
+}>({
 	user: null,
-	loaded: false
+	loaded: false,
+	ended: false
 });
 
 export async function loadSession(): Promise<void> {
@@ -69,7 +79,7 @@ export async function signIn(
 	second: DirectoryFactor = {}
 ): Promise<ApiResult<User>> {
 	const result = await api<User>('POST', '/api/session', { username, password, ...second });
-	if (result.ok) session.user = result.data;
+	if (result.ok) signedIn(result.data);
 	return result;
 }
 
@@ -102,7 +112,7 @@ export const loadMethods = () => api<Methods>('GET', '/api/session/methods');
  */
 export async function signInLocal(): Promise<ApiResult<User>> {
 	const result = await api<User>('POST', '/api/session/local');
-	if (result.ok) session.user = result.data;
+	if (result.ok) signedIn(result.data);
 	return result;
 }
 
@@ -112,6 +122,11 @@ export async function signInBreakGlass(
 	code: string
 ): Promise<ApiResult<User>> {
 	const result = await api<User>('POST', '/api/session/break-glass', { username, password, code });
-	if (result.ok) session.user = result.data;
+	if (result.ok) signedIn(result.data);
 	return result;
+}
+
+function signedIn(user: User) {
+	session.user = user;
+	session.ended = false;
 }

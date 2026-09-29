@@ -5,6 +5,7 @@
 	 * the signed-in user for it stands. Reads again every 15 seconds while
 	 * the customer has not answered.
 	 */
+	import { background } from '$lib/api/client';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import CircleX from '@lucide/svelte/icons/circle-x';
 	import Clock from '@lucide/svelte/icons/clock';
@@ -37,7 +38,7 @@
 	const time = new Intl.DateTimeFormat(formatLocale(), { dateStyle: 'short', timeStyle: 'short' });
 
 	async function read() {
-		const result = await loadConnectorRequests();
+		const result = await loadConnectorRequests(background);
 		if (!result.ok) return;
 		// An administrator's list holds everyone's; this shows the own.
 		latest =
