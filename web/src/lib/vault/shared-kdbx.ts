@@ -113,20 +113,33 @@ const usableTags = (tags: string[] | undefined) =>
 		.filter((tag) => tag && tag.length <= 50)
 		.slice(0, 20);
 
-/** Creates the entries below `collectionId`, with a collection for each group. */
+/**
+ * Creates the entries below `collectionId`, with a collection for each group.
+ * With `null`, into Shared itself (#216): the file's groups become
+ * collections at the top, and what lies at the file's top goes into one named
+ * `topName`. `groups` are made even without entries in them, e.g. the empty
+ * folders of a personal folder moved to Shared (#218).
+ */
 export async function importInto(
 	tree: Tree,
-	collectionId: string,
-	entries: KdbxEntry[]
+	collectionId: string | null,
+	entries: KdbxEntry[],
+	topName = '—',
+	groups: string[][] = []
 ): Promise<ImportResult> {
-	const collections = new Map<string, string>([['', collectionId]]);
+	const collections = new Map<string, string>(collectionId ? [['', collectionId]] : []);
 	const result: ImportResult = { created: 0, ids: [], failed: [] };
 	const collectionOf = async (path: string[]): Promise<string | null> => {
+		if (path.length === 0 && !collectionId) return collectionOf([topName]);
 		const key = path.join('\n');
 		const known = collections.get(key);
 		if (known) return known;
-		const parent = await collectionOf(path.slice(0, -1));
-		if (!parent) return null;
+		// Below the collection, or at the top of Shared.
+		let parent: string | null = null;
+		if (path.length > 1 || collectionId) {
+			parent = await collectionOf(path.slice(0, -1));
+			if (!parent) return null;
+		}
 		const name = path[path.length - 1].trim() || '—';
 		const existing = tree.collections.find((c) => c.parent_id === parent && c.name === name);
 		let id = existing?.id;
@@ -138,6 +151,9 @@ export async function importInto(
 		collections.set(key, id);
 		return id;
 	};
+	for (const group of groups) {
+		if (!(await collectionOf(group))) result.failed.push(group.join(' / '));
+	}
 	for (const entry of entries) {
 		const collection = await collectionOf(entry.path);
 		const title = entry.title.trim() || entry.username.trim() || entry.url.trim() || '—';

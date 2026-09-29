@@ -1442,3 +1442,67 @@ test('the permission report names what bob reaches and who reaches a folder', as
 	await page.getByRole('link', { name: folder }).click();
 	await expect(page.getByTestId('folder-report')).toContainText('Bob Helpdesk');
 });
+
+test('a KeePass file goes into Shared, and a personal folder moves there', async ({ page }) => {
+	await signIn(page);
+	const dialog = page.getByRole('dialog');
+	const shared = page.getByRole('region', { name: 'Shared', exact: true });
+
+	// Into Shared itself: the file's group becomes a collection at the top (#216).
+	await openVault(page);
+	await page.getByRole('button', { name: 'Shared vault settings' }).click();
+	await page.getByRole('menuitem', { name: 'Import a KeePass file' }).click();
+	await expect(
+		dialog.getByRole('heading', { name: 'Import a KeePass file into Shared' })
+	).toBeVisible();
+	await dialog.getByLabel('KeePass file').setInputFiles(keepassFixture);
+	await dialog.getByLabel('Its master password').fill('Fixture-Passw0rd');
+	await dialog.getByRole('button', { name: 'Import a KeePass file' }).click();
+	await expect(dialog.getByRole('status')).toHaveText('Entries imported: 1.');
+	await page.keyboard.press('Escape');
+	// Other tests leave collections called Servers below theirs.
+	await expect(shared.getByRole('button', { name: /^Servers/ }).first()).toBeVisible();
+
+	// Personal folders with an entry each move into Shared (#218). The target
+	// sorts first, so it is in sight without scrolling while dragging.
+	const target = `A E2E drop ${run}`;
+	await newCollection(page, target);
+	await freshVault(page, 'long enough passphrase');
+	const personal = page.getByRole('region', { name: 'Personal', exact: true });
+	const folderWithEntry = async (folder: string, title: string) => {
+		await personal.getByRole('button', { name: /^All personal entries/ }).click();
+		await page.getByRole('button', { name: 'Personal vault settings' }).click();
+		await page.getByRole('menuitem', { name: 'New folder' }).click();
+		await dialog.getByLabel('Name').fill(folder);
+		await dialog.getByRole('button', { name: 'Create' }).click();
+		await expect(page.getByRole('heading', { name: folder, exact: true })).toBeVisible();
+		await page.getByRole('button', { name: 'New entry' }).click();
+		await dialog.getByLabel('Title').fill(title);
+		await dialog.getByLabel('Password').fill('Moved-Passw0rd!');
+		await dialog.getByRole('button', { name: 'Create' }).click();
+		await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
+	};
+
+	// Dragged onto a collection: a collection below it.
+	const dragged = `Home ${run}`;
+	await folderWithEntry(dragged, 'NAS');
+	await personal
+		.getByRole('button', { name: new RegExp(`^${dragged}`) })
+		.dragTo(shared.getByRole('button', { name: new RegExp(`^${target}`) }));
+	await expect(page.getByText(`${dragged} moved to Shared.`)).toBeVisible();
+	await expect(personal.getByRole('button', { name: new RegExp(`^${dragged}`) })).toHaveCount(0);
+	await shared.getByRole('button', { name: new RegExp(`^${dragged}`) }).click();
+	await expect(page.getByTestId('shared-entry')).toContainText('NAS');
+
+	// Without a pointer, from the folder's menu: a collection at the top.
+	const menued = `Office ${run}`;
+	await folderWithEntry(menued, 'Printer');
+	await personal.getByRole('button', { name: new RegExp(`^${menued}`) }).click();
+	await page.getByRole('button', { name: 'Personal vault settings' }).click();
+	await page.getByRole('menuitem', { name: 'Move to Shared …' }).click();
+	await dialog.getByLabel('Into').selectOption({ label: 'Shared, at the top' });
+	await dialog.getByRole('button', { name: 'Move', exact: true }).click();
+	await expect(page.getByText(`${menued} moved to Shared.`)).toBeVisible();
+	await shared.getByRole('button', { name: new RegExp(`^${menued}`) }).click();
+	await expect(page.getByTestId('shared-entry')).toContainText('Printer');
+});

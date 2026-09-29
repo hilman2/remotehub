@@ -126,7 +126,7 @@ export function personalFolders(
 }
 
 /** A folder and every folder below it, by id; works for either tree. */
-function below(nodes: { id: string; parent_id: string | null }[], id: string): Set<string> {
+export function below(nodes: { id: string; parent_id: string | null }[], id: string): Set<string> {
 	const inside = new Set([id]);
 	let grew = true;
 	while (grew) {

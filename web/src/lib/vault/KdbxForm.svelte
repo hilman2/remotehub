@@ -14,7 +14,8 @@
 	}: {
 		mode: 'import' | 'export';
 		busy?: boolean;
-		onimport?: (entries: KdbxEntry[]) => void;
+		/** With the file's name, for what lies at its top (#216). */
+		onimport?: (entries: KdbxEntry[], name: string) => void;
 		onexport?: (password: string) => void;
 	} = $props();
 
@@ -43,7 +44,7 @@
 		}
 		if (!file) return;
 		try {
-			onimport?.(await readKdbx(await file.arrayBuffer(), password));
+			onimport?.(await readKdbx(await file.arrayBuffer(), password), file.name);
 		} catch {
 			error = m.kdbx_unreadable();
 		}
