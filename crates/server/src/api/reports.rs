@@ -300,6 +300,8 @@ pub async fn user(
         identity_id: identity,
         memberships: Vec::new(),
         roles: Vec::new(),
+        locked: false,
+        confirmed: false,
     };
     let own: Vec<String> = them.principal().into_iter().collect();
     let named: Vec<String> = them.groups.iter().cloned().chain(own).collect();

@@ -185,6 +185,9 @@ struct DeviceRow {
     connector_id: Option<Uuid>,
     /// The connector it is reached through, however chosen; none: directly.
     reached_through: Option<Uuid>,
+    /// Asks for a confirmation with the second factor before every
+    /// connection (#243).
+    requires_confirmation: bool,
     /// Sign-in mode `device`: its own credentials as far as they may be
     /// shown: user name, domain, `password` or `ssh_key`, and what
     /// identifies a key. Password and key stay sealed.
@@ -291,6 +294,7 @@ pub async fn tree(State(state): State<AppState>, session: Session) -> Result<Jso
                     AS keywords_changed_at,
                 keyboard_layout, certificate_fingerprint, connector_mode, connector_id,
                 device_connector(connector_mode, connector_id, folder_id) AS reached_through,
+                requires_confirmation,
                 username, domain, secret_kind, key_algorithm, key_fingerprint, has_certificate,
                 host_key
          FROM devices ORDER BY lower(name)",
@@ -710,6 +714,10 @@ pub struct DeviceInput {
     connector_mode: Option<String>,
     #[serde(default)]
     connector_id: Option<Uuid>,
+    /// Asks for a confirmation with the second factor before every
+    /// connection (#243), e.g. a domain controller.
+    #[serde(default)]
+    requires_confirmation: bool,
     /// Sign-in mode `device` only: the device's own credentials, a password
     /// (default) or, for SSH, a key (`ssh_key`).
     #[serde(default)]
@@ -735,6 +743,7 @@ struct ValidDevice {
     connector_mode: &'static str,
     /// Set exactly with `connector_mode` `connector`.
     connector_id: Option<Uuid>,
+    requires_confirmation: bool,
     /// Empty unless the sign-in mode is `device`.
     username: String,
     domain: String,
@@ -825,6 +834,7 @@ impl DeviceInput {
             keyboard_layout,
             connector_mode,
             connector_id: self.connector_id,
+            requires_confirmation: self.requires_confirmation,
             username: if own {
                 plain(&self.username, "username")?
             } else {
@@ -964,8 +974,9 @@ pub async fn create_device(
         "INSERT INTO devices
              (folder_id, name, protocol, host, port, auth_mode, profile_id, description, keyboard_layout,
               connector_id, username, domain, secret_version, secret_kind, key_algorithm,
-              key_fingerprint, has_certificate, connector_mode)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+              key_fingerprint, has_certificate, connector_mode, requires_confirmation)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+                 $19)
          RETURNING id",
     )
     .bind(device.folder_id)
@@ -986,6 +997,7 @@ pub async fn create_device(
     .bind(key_fingerprint)
     .bind(has_certificate)
     .bind(device.connector_mode)
+    .bind(device.requires_confirmation)
     .fetch_one(&mut *tx)
     .await
     .map_err(database)?;
@@ -997,6 +1009,7 @@ pub async fn create_device(
         "auth_mode": device.auth_mode, "profile_id": device.profile_id,
         "keyboard_layout": device.keyboard_layout, "connector_mode": device.connector_mode,
         "connector_id": device.connector_id,
+        "requires_confirmation": device.requires_confirmation,
         "username": device.username, "domain": device.domain, "secret_kind": device.secret_kind,
         "key_fingerprint": key_fingerprint,
     });
@@ -1115,7 +1128,7 @@ pub async fn update_device(
              auth_mode = $7, profile_id = $8, description = $9, keyboard_layout = $11,
              connector_id = $12, username = $13, domain = $14, secret_version = $15,
              secret_kind = $16, key_algorithm = $17, key_fingerprint = $18, has_certificate = $19,
-             connector_mode = $20, updated_at = now(),
+             connector_mode = $20, requires_confirmation = $21, updated_at = now(),
              host_key = CASE WHEN $10 THEN NULL ELSE host_key END,
              host_key_pinned_at = CASE WHEN $10 THEN NULL ELSE host_key_pinned_at END,
              certificate_fingerprint = CASE WHEN $10 THEN NULL ELSE certificate_fingerprint END,
@@ -1142,6 +1155,7 @@ pub async fn update_device(
     .bind(&key_fingerprint)
     .bind(has_certificate)
     .bind(device.connector_mode)
+    .bind(device.requires_confirmation)
     .execute(&mut *tx)
     .await
     .map_err(database)?;
@@ -1150,6 +1164,7 @@ pub async fn update_device(
         "auth_mode": device.auth_mode, "profile_id": device.profile_id, "folder_id": device.folder_id,
         "keyboard_layout": device.keyboard_layout, "connector_mode": device.connector_mode,
         "connector_id": device.connector_id,
+        "requires_confirmation": device.requires_confirmation,
         "username": device.username, "domain": device.domain, "secret_kind": device.secret_kind,
         "key_fingerprint": key_fingerprint, "secret_changed": device.secrets.is_some(),
         "secret_kept": secret_kept,

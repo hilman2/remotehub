@@ -31,6 +31,33 @@ pub const TAKEN: &str = "taken@example.com";
 /// state adds the new state.
 pub type Calls = Arc<Mutex<Vec<String>>>;
 
+/// Ada's authenticator app and key in Kratos (#241): the secret
+/// "12345678901234567890" and the test key with this seed.
+pub const ADA_TOTP: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+pub const ADA_KEY: u8 = 6;
+
+/// Ada as `GET /admin/identities/{id}?include_credential=totp&include_credential=webauthn`
+/// answers, shortened; Go writes byte slices as standard base64.
+fn ada_identity() -> Value {
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
+    let key = crate::second_factor::Key::new(ADA_KEY);
+    json!({
+        "id": ADA,
+        "credentials": {
+            "password": { "type": "password", "config": { "hashed_password": "$2a$…" } },
+            "totp": { "type": "totp", "config": {
+                "totp_url": format!("otpauth://totp/remotehub:ada%40example.com?algorithm=SHA1&digits=6&issuer=remotehub&period=30&secret={ADA_TOTP}"),
+            } },
+            "webauthn": { "type": "webauthn", "config": { "credentials": [{
+                "id": STANDARD.encode(&key.id), "public_key": STANDARD.encode(key.cose()),
+                "attestation_type": "none", "display_name": "Laptop",
+                "authenticator": { "aaguid": "AAAAAAAAAAAAAAAAAAAAAA==", "sign_count": 0, "clone_warning": false },
+            }] } },
+        },
+    })
+}
+
 fn session(identity: &str, email: &str, aal: &str, state: &str) -> Value {
     json!({
         "id": KRATOS_SESSION,
@@ -133,6 +160,9 @@ async fn admin(State(calls): State<Calls>, request: Request<Body>) -> impl IntoR
             })),
         )
             .into_response(),
+        (Method::GET, path) if path == format!("/admin/identities/{ADA}") => {
+            axum::Json(ada_identity()).into_response()
+        }
         (Method::PATCH, _) => axum::Json(json!({})).into_response(),
         (Method::DELETE, path) if path.ends_with("/credentials/webauthn") => {
             (StatusCode::NOT_FOUND, error()).into_response()
@@ -231,6 +261,7 @@ async fn a_kratos_session_counts_only_with_its_second_factor(pool: PgPool) {
         json!({
             "username": "ada@example.com", "display_name": "Ada", "kind": "local", "admin": false,
             "roles": [],
+            "locked": false, "idle_seconds": 1800,
         })
     );
     let token = response.session_token().unwrap();

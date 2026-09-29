@@ -174,6 +174,7 @@ async fn the_endpoint_signs_in_an_administrator_and_audits_it(pool: PgPool) {
         json!({
             "username": "emergency", "display_name": "emergency", "kind": "break_glass", "admin": true,
             "roles": ["administrator"],
+            "locked": false, "idle_seconds": 1800,
         })
     );
     let token = response.session_token().unwrap();

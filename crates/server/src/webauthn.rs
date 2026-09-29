@@ -230,6 +230,110 @@ pub fn verify(
     Ok(counter)
 }
 
+/// Whether the key checked who holds it, with a PIN, a fingerprint or a
+/// face (the flag UV). A confirmation in one step takes it (#241): the key
+/// is then something one has and something one knows or is.
+pub fn user_verified(answer: &Assertion) -> Result<bool, WebauthnError> {
+    let data = decode(&answer.response.authenticator_data, "authenticatorData")?;
+    data.get(32)
+        .map(|flags| flags & 0x04 != 0)
+        .ok_or(WebauthnError::Malformed("authenticatorData"))
+}
+
+/// The public key of an ES256 key in COSE form, as Kratos keeps the keys of
+/// local accounts (#241), as an uncompressed SEC1 point; none for any other
+/// key or anything else.
+pub fn cose_es256(cose: &[u8]) -> Option<Vec<u8>> {
+    let mut reader = Cbor { data: cose, at: 0 };
+    let entries = reader.head(5)?;
+    let (mut kty, mut alg, mut crv, mut x, mut y) = (None, None, None, None, None);
+    for _ in 0..entries {
+        match reader.int()? {
+            1 => kty = Some(reader.int()?),
+            3 => alg = Some(reader.int()?),
+            -1 => crv = Some(reader.int()?),
+            -2 => x = Some(reader.bytes()?),
+            -3 => y = Some(reader.bytes()?),
+            _ => reader.skip()?,
+        }
+    }
+    // EC2, ES256, P-256.
+    if (kty, alg, crv) != (Some(2), Some(ES256), Some(1)) {
+        return None;
+    }
+    let (x, y) = (x?, y?);
+    if x.len() != 32 || y.len() != 32 {
+        return None;
+    }
+    let mut point = vec![0x04];
+    point.extend_from_slice(x);
+    point.extend_from_slice(y);
+    VerifyingKey::from_sec1_bytes(&point).ok()?;
+    Some(point)
+}
+
+/// Just enough CBOR (RFC 8949) for a COSE key: a map of small integers to
+/// integers and byte strings.
+struct Cbor<'a> {
+    data: &'a [u8],
+    at: usize,
+}
+
+impl<'a> Cbor<'a> {
+    fn byte(&mut self) -> Option<u8> {
+        let byte = *self.data.get(self.at)?;
+        self.at += 1;
+        Some(byte)
+    }
+
+    /// The head of the next item: its major type and argument.
+    fn next(&mut self) -> Option<(u8, u64)> {
+        let first = self.byte()?;
+        let argument = match first & 0x1f {
+            info @ 0..=23 => u64::from(info),
+            24 => u64::from(self.byte()?),
+            25 => u64::from(u16::from_be_bytes([self.byte()?, self.byte()?])),
+            _ => return None,
+        };
+        Some((first >> 5, argument))
+    }
+
+    /// The argument of the next item, which must be of the major type `major`.
+    fn head(&mut self, major: u8) -> Option<u64> {
+        let (found, argument) = self.next()?;
+        (found == major).then_some(argument)
+    }
+
+    fn int(&mut self) -> Option<i64> {
+        match self.next()? {
+            (0, n) => i64::try_from(n).ok(),
+            (1, n) => i64::try_from(n).ok().map(|n| -1 - n),
+            _ => None,
+        }
+    }
+
+    fn take(&mut self, length: u64) -> Option<&'a [u8]> {
+        let length = usize::try_from(length).ok()?;
+        let taken = self.data.get(self.at..self.at.checked_add(length)?)?;
+        self.at += length;
+        Some(taken)
+    }
+
+    fn bytes(&mut self) -> Option<&'a [u8]> {
+        let length = self.head(2)?;
+        self.take(length)
+    }
+
+    /// Skips an integer, a byte string or a text string.
+    fn skip(&mut self) -> Option<()> {
+        match self.next()? {
+            (0 | 1, _) => Some(()),
+            (2 | 3, length) => self.take(length).map(|_| ()),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use p256::ecdsa::SigningKey;
@@ -416,5 +520,61 @@ mod tests {
         let mut rsa = device.register(b"c");
         rsa.response.algorithm = -257;
         assert_eq!(register(&rp(), b"c", &rsa), Err(WebauthnError::Algorithm));
+    }
+
+    #[test]
+    fn user_verification_is_read_from_the_flags() {
+        let mut device = Authenticator::new();
+        let mut answer = device.sign(b"c", &rp().origin);
+        assert_eq!(user_verified(&answer), Ok(false));
+        answer.response.authenticator_data = b64(&device.data("remotehub.example.com", 0x05));
+        assert_eq!(user_verified(&answer), Ok(true));
+        answer.response.authenticator_data = b64(&[0u8; 20]);
+        assert!(user_verified(&answer).is_err());
+    }
+
+    /// A COSE key as an authenticator encodes it: kty, alg, crv, x, y, plus
+    /// a text label an extension might add.
+    fn cose(key: &SigningKey, alg: i8, extra: bool) -> Vec<u8> {
+        let point = key.verifying_key().to_sec1_point(false);
+        let (x, y) = point.as_bytes()[1..].split_at(32);
+        let mut cose = vec![if extra { 0xa6 } else { 0xa5 }];
+        cose.extend([0x01, 0x02, 0x03]);
+        cose.push(if alg < 0 {
+            0x20 | (-1 - alg) as u8
+        } else {
+            alg as u8
+        });
+        cose.extend([0x20, 0x01, 0x21, 0x58, 0x20]);
+        cose.extend(x);
+        cose.extend([0x22, 0x58, 0x20]);
+        cose.extend(y);
+        if extra {
+            cose.extend([0x0a, 0x62, b'h', b'i']);
+        }
+        cose
+    }
+
+    #[test]
+    fn es256_keys_are_read_from_cose() {
+        let device = Authenticator::new();
+        let sec1 = device.key.verifying_key().to_sec1_point(false);
+        assert_eq!(
+            cose_es256(&cose(&device.key, -7, false)).as_deref(),
+            Some(sec1.as_bytes())
+        );
+        assert_eq!(
+            cose_es256(&cose(&device.key, -7, true)).as_deref(),
+            Some(sec1.as_bytes())
+        );
+        // EdDSA, a cut-off key and a point that is not on the curve.
+        assert_eq!(cose_es256(&cose(&device.key, -8, false)), None);
+        let whole = cose(&device.key, -7, false);
+        assert_eq!(cose_es256(&whole[..whole.len() - 1]), None);
+        let mut off_curve = whole.clone();
+        let last = off_curve.len() - 1;
+        off_curve[last] ^= 1;
+        assert_eq!(cose_es256(&off_curve), None);
+        assert_eq!(cose_es256(b""), None);
     }
 }

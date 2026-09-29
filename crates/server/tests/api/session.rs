@@ -22,7 +22,9 @@ async fn sign_in_session_and_sign_out(pool: PgPool) {
             "display_name": "Alice Admin",
             "kind": "directory",
             "admin": true,
-            "roles": ["administrator"]
+            "roles": ["administrator"],
+            "locked": false,
+            "idle_seconds": 1800
         })
     );
     let cookie = response.headers[header::SET_COOKIE]
@@ -191,7 +193,7 @@ async fn foreign_origins_cannot_change_state(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
-async fn sessions_end_when_idle_or_expired(pool: PgPool) {
+async fn sessions_lock_when_idle_and_end_when_expired(pool: PgPool) {
     let app = app(state(pool.clone()), None);
     let idle = send(&app, sign_in_request("alice", "right"))
         .await
@@ -218,18 +220,70 @@ async fn sessions_end_when_idle_or_expired(pool: PgPool) {
     .await
     .unwrap();
 
-    for token in [&idle, &expired] {
+    // Idle: locked (#241). The page learns whose it is; everything else
+    // waits for a confirmation, and asking does not unlock it.
+    for _ in 0..2 {
+        let me = send(&app, get("/api/session", Some(&idle))).await;
+        assert_eq!(me.status, StatusCode::OK);
         assert_eq!(
-            send(&app, get("/api/session", Some(token))).await.status,
-            StatusCode::UNAUTHORIZED
+            (&me.json()["username"], &me.json()["locked"]),
+            (&json!("alice"), &json!(true))
+        );
+        let tree = send(&app, get("/api/tree", Some(&idle))).await;
+        assert_eq!(
+            (tree.status, tree.code()),
+            (StatusCode::UNAUTHORIZED, "session_locked".to_owned())
         );
     }
+    let over = send(&app, get("/api/session", Some(&expired))).await;
+    assert_eq!(
+        (over.status, over.code()),
+        (StatusCode::UNAUTHORIZED, "unauthenticated".to_owned())
+    );
+    // A locked session stays until its maximum lifetime.
     assert_eq!(
         remotehub_server::session::purge(&pool, settings().session.idle)
             .await
             .unwrap(),
-        2
+        1
     );
+}
+
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn requests_in_the_background_do_not_keep_a_session_alive(pool: PgPool) {
+    let app = app(state(pool.clone()), None);
+    let token = send(&app, sign_in_request("alice", "right"))
+        .await
+        .session_token()
+        .unwrap();
+    let hash = Sha256::digest(token.as_bytes()).to_vec();
+    let quiet_for = || async {
+        sqlx::query_scalar::<_, f64>(
+            "SELECT extract(epoch FROM now() - last_seen_at)::float8 FROM sessions
+             WHERE token_hash = $1",
+        )
+        .bind(&hash)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    sqlx::query("UPDATE sessions SET last_seen_at = now() - interval '10 minutes'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let mut background = get("/api/tree", Some(&token));
+    background.headers_mut().insert(
+        remotehub_server::session::BACKGROUND,
+        header::HeaderValue::from_static("1"),
+    );
+    assert_eq!(send(&app, background).await.status, StatusCode::OK);
+    assert!(quiet_for().await >= 600.0);
+    assert_eq!(
+        send(&app, get("/api/tree", Some(&token))).await.status,
+        StatusCode::OK
+    );
+    assert!(quiet_for().await < 60.0);
 }
 
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]

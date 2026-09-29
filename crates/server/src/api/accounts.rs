@@ -32,7 +32,7 @@ const PUBLIC_PATHS: [&str; 2] = ["self-service/", "sessions/whoami"];
 /// comes back from a provider on its own, behind the provider's callback.
 const CLOSED_PATHS: [&str; 1] = ["self-service/registration"];
 
-fn kratos(state: &AppState) -> Result<&Kratos, Problem> {
+pub(super) fn kratos(state: &AppState) -> Result<&Kratos, Problem> {
     state
         .settings
         .kratos
@@ -40,7 +40,7 @@ fn kratos(state: &AppState) -> Result<&Kratos, Problem> {
         .ok_or(Problem::new(ErrorCode::NotFound))
 }
 
-fn unavailable(error: KratosError) -> Problem {
+pub(super) fn unavailable(error: KratosError) -> Problem {
     tracing::warn!(%error, "Kratos failed");
     Problem::new(ErrorCode::AccountsUnavailable)
 }

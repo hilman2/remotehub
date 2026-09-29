@@ -163,7 +163,8 @@ pub async fn remove_all(tx: &mut PgConnection, user_id: Uuid) -> sqlx::Result<bo
 /// How long a challenge for a security key holds.
 const CHALLENGE_SECONDS: f64 = 300.0;
 
-/// A new challenge for `purpose` (`register` or `sign_in`); its ID and bytes.
+/// A new challenge for `purpose` (`register`, `sign_in` or `confirm`); its ID
+/// and bytes.
 pub async fn challenge<'e>(
     db: impl PgExecutor<'e>,
     user_id: Uuid,
@@ -223,35 +224,75 @@ pub async fn key_ids<'e>(db: impl PgExecutor<'e>, user_id: Uuid) -> sqlx::Result
         .collect())
 }
 
+/// What a key signs a challenge for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyUse {
+    /// The second step of a sign-in, after the password.
+    SignIn,
+    /// A confirmation that it is still them (#241): the key stands alone
+    /// there, so it must check its holder too, with a PIN, a fingerprint or
+    /// a face.
+    Confirm,
+}
+
+impl KeyUse {
+    /// The challenge's purpose in `webauthn_challenges`.
+    pub fn purpose(self) -> &'static str {
+        match self {
+            KeyUse::SignIn => "sign_in",
+            KeyUse::Confirm => "confirm",
+        }
+    }
+
+    /// Whether an answer is enough: a confirmation needs the key's check
+    /// of its holder (the flag UV).
+    pub fn accepts(self, answer: &Assertion) -> bool {
+        self == KeyUse::SignIn || webauthn::user_verified(answer) == Ok(true)
+    }
+}
+
 /// What the browser needs to ask a security key for a signature (#129).
-pub fn assertion_options(rp: &RelyingParty, challenge: &[u8], keys: &[String]) -> Value {
+pub fn assertion_options(
+    rp: &RelyingParty,
+    challenge: &[u8],
+    keys: &[String],
+    usage: KeyUse,
+) -> Value {
     use base64::Engine;
     json!({ "publicKey": {
         "challenge": base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(challenge),
         "rpId": rp.id,
         "timeout": 120_000,
-        "userVerification": "discouraged",
+        "userVerification": match usage {
+            KeyUse::SignIn => "discouraged",
+            KeyUse::Confirm => "required",
+        },
         "allowCredentials": keys.iter()
             .map(|id| json!({ "type": "public-key", "id": id }))
             .collect::<Vec<_>>(),
     }})
 }
 
-/// Checks a security key's answer to a sign-in challenge; a right one moves
-/// the key's counter on.
+/// Checks a security key's answer to a challenge; a right one moves the
+/// key's counter on.
 pub async fn verify_key(
     tx: &mut PgConnection,
     rp: &RelyingParty,
     user_id: Uuid,
     answer: &KeyAnswer,
+    usage: KeyUse,
 ) -> Result<bool, Problem> {
-    let Some(challenge) = take_challenge(&mut *tx, user_id, "sign_in", answer.challenge_id).await?
+    let Some(challenge) =
+        take_challenge(&mut *tx, user_id, usage.purpose(), answer.challenge_id).await?
     else {
         return Ok(false);
     };
     let Ok(credential_id) = answer.credential.credential_id() else {
         return Ok(false);
     };
+    if !usage.accepts(&answer.credential) {
+        return Ok(false);
+    }
     let key: Option<(Uuid, Vec<u8>, i64)> = sqlx::query_as(
         "SELECT id, public_key, sign_count FROM security_keys
          WHERE user_id = $1 AND credential_id = $2 FOR UPDATE",
@@ -349,7 +390,7 @@ pub async fn at_sign_in(
             });
         }
         if let Some(key) = step.key {
-            return Ok(if verify_key(tx, rp, user_id, key).await? {
+            return Ok(if verify_key(tx, rp, user_id, key, KeyUse::SignIn).await? {
                 passed
             } else {
                 wrong()
@@ -361,10 +402,11 @@ pub async fn at_sign_in(
         let keys = key_ids(&mut *tx, user_id).await?;
         if !keys.is_empty() {
             // Outside the sign-in's transaction, which ends here unused.
-            let (id, bytes) = challenge(pool, user_id, "sign_in").await?;
+            let usage = KeyUse::SignIn;
+            let (id, bytes) = challenge(pool, user_id, usage.purpose()).await?;
             problem = problem
                 .param("key_challenge_id", id.to_string())
-                .param("key_options", assertion_options(rp, &bytes, &keys));
+                .param("key_options", assertion_options(rp, &bytes, &keys, usage));
         }
         return Ok(Outcome::Refused {
             problem,

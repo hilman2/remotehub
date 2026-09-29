@@ -14,6 +14,7 @@ mod break_glass;
 mod catalog;
 mod certificate;
 mod collections;
+mod confirm;
 mod connector_requests;
 mod connectors;
 mod directory;

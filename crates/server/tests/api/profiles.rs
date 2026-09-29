@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 
 use crate::common::{
-    BOB_SID, OPS_SID, Response, authed, lab_key, profile, send, sign_in_request, state,
+    BOB_SID, OPS_SID, Response, authed, confirm_all, lab_key, profile, send, sign_in_request, state,
 };
 
 async fn call(app: &Router, token: &str, method: &str, uri: &str, body: Option<Value>) -> Response {
@@ -840,7 +840,7 @@ async fn a_profile_goes_only_when_no_device_uses_it(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn revealing_a_profile_needs_reveal_and_is_audited(pool: PgPool) {
-    let f = fixture(pool).await;
+    let f = fixture(pool.clone()).await;
     let a_admin = profile(
         &f.app,
         &f.alice,
@@ -871,6 +871,7 @@ async fn revealing_a_profile_needs_reveal_and_is_audited(pool: PgPool) {
     let olaf = sign_in(&f.app, "olaf").await;
     assert_eq!(reveal(&olaf, &a_admin, "show").await.code(), "not_found");
     let bob = sign_in(&f.app, "bob").await;
+    confirm_all(&pool).await;
     grant(&f.app, &f.alice, "folder", &f.a, BOB_SID, "connect").await;
     assert_eq!(reveal(&bob, &a_admin, "show").await.code(), "forbidden");
 
@@ -945,6 +946,7 @@ async fn a_folders_grants_reach_its_profiles_and_a_collections_do_not(pool: PgPo
         .unwrap();
     grant(&f.app, &f.alice, "collection", &f.a, BOB_SID, "manage").await;
     let bob = sign_in(&f.app, "bob").await;
+    confirm_all(&pool).await;
     let reveal = format!("/api/profiles/{a_admin}/reveal");
     let show = || Some(json!({ "purpose": "show" }));
 

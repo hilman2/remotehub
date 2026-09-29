@@ -22,7 +22,7 @@ use crate::auth::{PER_ADDRESS, PER_USER};
 use crate::break_glass;
 use crate::proxy;
 use crate::second_factor;
-use crate::session::{self, Session};
+use crate::session::{self, AnySession, Session};
 use crate::webauthn::RelyingParty;
 
 #[derive(Deserialize)]
@@ -51,16 +51,24 @@ pub struct Me {
     /// Roles for remotehub itself (#106): `administrator`, `auditor`,
     /// `security_officer`.
     roles: Vec<&'static str>,
+    /// Idle too long (#241): a confirmation with the second factor unlocks
+    /// the session.
+    locked: bool,
+    /// After how many seconds without requests or input the session locks,
+    /// so that the page covers itself in time.
+    idle_seconds: u64,
 }
 
 impl Me {
-    pub fn of(session: &Session) -> Self {
+    pub fn of(session: &Session, state: &AppState) -> Self {
         Me {
             username: session.username.clone(),
             display_name: session.display_name.clone(),
             kind: session.kind.clone(),
             admin: session.is_admin(),
             roles: session.role_names(),
+            locked: session.locked,
+            idle_seconds: state.settings.session.idle.as_secs(),
         }
     }
 
@@ -70,7 +78,7 @@ impl Me {
         let session = session::lookup(&state.db, token, state.settings.session.idle)
             .await?
             .ok_or(Problem::new(ErrorCode::Internal))?;
-        Ok(Me::of(&session))
+        Ok(Me::of(&session, state))
     }
 }
 
@@ -349,8 +357,10 @@ pub async fn sign_in_break_glass(
     Ok((AppendHeaders(vec![session::set_cookie(&token)]), Json(me)))
 }
 
-pub async fn current(session: Session) -> Json<Me> {
-    Json(Me::of(&session))
+/// Also for a locked session, so that a page opened then shows whom to
+/// unlock (#241).
+pub async fn current(State(state): State<AppState>, AnySession(session): AnySession) -> Json<Me> {
+    Json(Me::of(&session, &state))
 }
 
 pub async fn sign_out(

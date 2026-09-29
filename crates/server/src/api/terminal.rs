@@ -34,7 +34,7 @@ use super::connect::{
 use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
 use crate::audit::{self, Action};
-use crate::session::Session;
+use crate::session::{Activity, Session};
 use crate::{AppState, refresh};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -101,6 +101,14 @@ async fn run(
         send_problem(&mut socket, &Problem::new(ErrorCode::InvalidRequest)).await;
         return;
     };
+    // A device that asks for it takes a confirmation of the last minute
+    // (#243); the page asks for one before it connects.
+    if target.requires_confirmation
+        && let Err(problem) = session.require_confirmation()
+    {
+        send_problem(&mut socket, &problem).await;
+        return;
+    }
     let purpose = match connect::purpose(&state, &session, purpose).await {
         Ok(purpose) => purpose,
         Err(problem) => {
@@ -223,10 +231,16 @@ async fn run(
     let started = Instant::now();
     let (mut sent, mut received) = (0usize, 0usize);
     let mut exit_status = None;
+    let mut activity = Activity::of(&state, &session);
     loop {
         tokio::select! {
             message = socket.recv() => match message {
                 Some(Ok(Message::Binary(data))) => {
+                    // Typing keeps the session alive, and stays here while
+                    // it is locked (#239, #241).
+                    if !activity.input().await {
+                        continue;
+                    }
                     sent += data.len();
                     if shell.send(&data).await.is_err() {
                         break;

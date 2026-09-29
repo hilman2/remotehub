@@ -87,6 +87,8 @@ error_codes! {
     SecondFactorRequired = ("second_factor_required", FORBIDDEN, "Confirm the sign-in with the second factor"),
     SecondFactorSetupRequired = ("second_factor_setup_required", FORBIDDEN, "Set up a second factor first"),
     SecondFactorInvalid = ("second_factor_invalid", UNAUTHORIZED, "The code is not right"),
+    SessionLocked = ("session_locked", UNAUTHORIZED, "The session is locked"),
+    ConfirmationRequired = ("confirmation_required", FORBIDDEN, "Confirm with the second factor first"),
     SetupPending = ("setup_pending", CONFLICT, "remotehub is not set up yet"),
     SetupCodeInvalid = ("setup_code_invalid", FORBIDDEN, "The setup code is not valid"),
     SetupDone = ("setup_done", CONFLICT, "remotehub is set up already"),

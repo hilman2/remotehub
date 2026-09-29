@@ -48,6 +48,9 @@ pub struct Target {
     /// The connector the device is reached through, its own or its folder's
     /// (#176); none: directly.
     pub connector_id: Option<Uuid>,
+    /// Asks for a confirmation with the second factor before every
+    /// connection (#243).
+    pub requires_confirmation: bool,
 }
 
 /// Who opens the connection to the device.
@@ -230,6 +233,7 @@ pub async fn target(
     let target: Target = sqlx::query_as(
         "SELECT id, name, protocol, host, port, auth_mode, profile_id, host_key, keyboard_layout,
                 certificate_fingerprint,
+                requires_confirmation,
                 device_connector(connector_mode, connector_id, folder_id) AS connector_id
          FROM devices WHERE id = $1",
     )
