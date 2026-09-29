@@ -14,6 +14,7 @@
 	import FileUp from '@lucide/svelte/icons/file-up';
 	import Fingerprint from '@lucide/svelte/icons/fingerprint';
 	import FolderIcon from '@lucide/svelte/icons/folder';
+	import FolderInput from '@lucide/svelte/icons/folder-input';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import Layers from '@lucide/svelte/icons/layers';
@@ -74,6 +75,7 @@
 	import EntryTable from '$lib/vault/EntryTable.svelte';
 	import { FOLDER_ICON } from '$lib/vault/icons';
 	import {
+		below,
 		counter,
 		listed,
 		outline,
@@ -135,6 +137,10 @@
 	const EMPTY: EntryContent = { title: '', username: '', password: '', url: '', notes: '' };
 	const SORT_KEY = 'remotehub.vault.sort';
 	const DRAG_TYPE = 'text/x-remotehub-entry';
+	/** A personal folder, dragged into Shared (#218). */
+	const FOLDER_DRAG_TYPE = 'text/x-remotehub-folder';
+	/** The place of Shared itself, for a folder dropped at its top. */
+	const SHARED_TOP = 'shared-top';
 
 	// ---- The personal vault ----
 
@@ -532,7 +538,9 @@
 		| { type: 'purge'; item: Item }
 		| { type: 'empty'; side: 'personal' | 'shared' }
 		| { type: 'request'; credential: Credential; role: Role }
-		| { type: 'kdbx'; mode: 'import' | 'export'; collection: Collection | null }
+		/** `shared`: into Shared itself, at the top (#216); else a collection, or the personal vault. */
+		| { type: 'kdbx'; mode: 'import' | 'export'; collection: Collection | null; shared?: true }
+		| { type: 'move-folder'; folder: string; name: string }
 		| { type: 'unlocks' }
 		| { type: 'passphrase' }
 		| { type: 'reset' };
@@ -541,11 +549,29 @@
 	let dialogOpen = $state(false);
 	let kdbxResult = $state<string | null>(null);
 	let folderName = $state('');
+	/** Where *Move to Shared* puts a personal folder: a collection's id, or `top` (#218). */
+	let moveInto = $state('');
+	/** The places in Shared a personal folder may go, with their paths. */
+	const sharedPlaces = $derived.by(() => {
+		if (!tree) return [];
+		const known = tree;
+		const places = known.collections
+			.filter((c) => allows(c.role, 'manage'))
+			.map((c) => ({
+				id: c.id,
+				path: collectionPath(known, c.id)
+					.map((p) => p.name)
+					.join(' / ')
+			}))
+			.sort((a, b) => a.path.localeCompare(b.path, getLocale(), { sensitivity: 'base' }));
+		return known.may_create_top_level ? [{ id: 'top', path: '' }, ...places] : places;
+	});
 
 	function show(next: Open) {
 		error = null;
 		kdbxResult = null;
 		menu = null;
+		moveInto = '';
 		open = next;
 		dialogOpen = true;
 	}
@@ -570,7 +596,10 @@
 			case 'request':
 				return m.request_title({ name: open.credential.name });
 			case 'kdbx':
+				if (open.shared) return m.kdbx_import_shared();
 				return open.mode === 'import' ? m.kdbx_import() : m.kdbx_export();
+			case 'move-folder':
+				return m.vault_move_folder_title({ name: open.name });
 			case 'unlocks':
 				return m.vault_unlocks_title();
 			case 'passphrase':
@@ -826,20 +855,108 @@
 		await reload();
 	}
 
-	/** Drops an entry dragged from the table onto a folder of the tree. */
+	/** Drops an entry dragged from the table, or a personal folder, onto a folder of the tree. */
 	function dropOn(event: DragEvent, target: Target) {
 		event.preventDefault();
 		dropOver = null;
+		const folder = event.dataTransfer?.getData(FOLDER_DRAG_TYPE);
+		if (folder) {
+			if (target.side === 'shared' && takesFolder(target.id)) moveFolderToShared(folder, target.id);
+			return;
+		}
 		const dragged = event.dataTransfer?.getData(DRAG_TYPE);
 		const item = items.find((i) => i.key === dragged);
 		if (item && !item.deleted) moveTo(item, target);
 	}
 
-	function dragOver(event: DragEvent, place: string) {
-		if (!event.dataTransfer?.types.includes(DRAG_TYPE)) return;
+	function dragOver(event: DragEvent, place: string, target: Target) {
+		const types = event.dataTransfer?.types ?? [];
+		const folder = types.includes(FOLDER_DRAG_TYPE);
+		// A folder only into Shared, where a collection may be made (#218).
+		if (folder ? target.side !== 'shared' || !takesFolder(target.id) : !types.includes(DRAG_TYPE))
+			return;
 		event.preventDefault();
-		event.dataTransfer.dropEffect = 'move';
+		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
 		dropOver = place;
+	}
+
+	/**
+	 * Whether a personal folder may go into `collection`, or into Shared itself
+	 * with null: it becomes a collection there, which takes `manage` on the
+	 * collection, or the right to make collections at the top (#218).
+	 */
+	function takesFolder(collection: string | null): boolean {
+		if (collection === null) return tree?.may_create_top_level ?? false;
+		const role = tree?.collections.find((c) => c.id === collection)?.role ?? null;
+		return allows(role, 'manage');
+	}
+
+	function startFolderDrag(event: DragEvent, folder: string) {
+		if (!event.dataTransfer) return;
+		event.dataTransfer.effectAllowed = 'move';
+		event.dataTransfer.setData(FOLDER_DRAG_TYPE, folder);
+	}
+
+	/**
+	 * Moves a personal folder with everything in it into Shared (#218): it
+	 * becomes a collection there, its folders collections below it and its
+	 * entries credentials, as a single entry moves. The originals go only once
+	 * everything arrived; what is in their recycle bin goes to the top.
+	 */
+	async function moveFolderToShared(folderId: string, into: string | null) {
+		const folder = folders.find((f) => f.id === folderId);
+		if (!key || !tree || stage !== 'open' || !folder || !takesFolder(into)) return;
+		const opened = key;
+		const inside = below(folders, folderId);
+		const pathOf = (id: string): string[] => {
+			const here = folders.find((f) => f.id === id);
+			if (!here) return [];
+			return id === folderId || !here.parent_id
+				? [here.name]
+				: [...pathOf(here.parent_id), here.name];
+		};
+		const moving = entries.filter(
+			(e) =>
+				e.content &&
+				e.content.kind !== 'folder' &&
+				!e.content.deleted &&
+				e.content.parent &&
+				inside.has(e.content.parent)
+		);
+		busy = true;
+		status = null;
+		const converted: KdbxEntry[] = [];
+		for (const entry of moving) {
+			const out = await personalAsKdbx(opened, entry);
+			if (!out) {
+				busy = false;
+				status = m.vault_move_failed({ title: entry.content?.title ?? '' });
+				return;
+			}
+			converted.push({ ...out, path: pathOf(entry.content?.parent ?? folderId) });
+		}
+		const groups = [...inside].map(pathOf);
+		const result = await importInto(tree, into, converted, folder.name, groups);
+		if (result.failed.length > 0) {
+			busy = false;
+			status = m.vault_folder_not_moved({ name: folder.name, names: result.failed.join(', ') });
+			await reload();
+			return;
+		}
+		for (const entry of moving) await purgePersonal(entry);
+		for (const entry of entries) {
+			if (entry.content?.deleted && entry.content.parent && inside.has(entry.content.parent)) {
+				await saveEntry(opened, entry.id, { ...entry.content, parent: null });
+			}
+		}
+		for (const id of inside) {
+			const entry = entries.find((e) => e.id === id);
+			if (entry) await purgePersonal(entry);
+		}
+		busy = false;
+		status = m.vault_folder_moved({ name: folder.name });
+		pick({ kind: 'personal', folder: folder.parent_id });
+		await reload();
 	}
 
 	// ---- Context menu and shortcuts ----
@@ -1054,6 +1171,18 @@
 								}
 							]
 						: []),
+					// Without a pointer, what dragging does (#218).
+					...(scopeFolder && sharedPlaces.length > 0
+						? [
+								{
+									label: m.vault_move_folder(),
+									icon: FolderInput,
+									onselect: () =>
+										scopeFolder &&
+										show({ type: 'move-folder', folder: scopeFolder.id, name: scopeFolder.name })
+								}
+							]
+						: []),
 					{
 						label: m.kdbx_import(),
 						icon: FileUp,
@@ -1076,13 +1205,16 @@
 
 	// ---- KeePass files ----
 
-	async function importKdbx(imported: KdbxEntry[]) {
+	async function importKdbx(imported: KdbxEntry[], file: string) {
 		if (open?.type !== 'kdbx') return;
 		const into = open.collection;
 		busy = true;
 		error = null;
-		if (into && tree) {
-			const result = await importInto(tree, into.id, imported);
+		if ((into || open.shared) && tree) {
+			// Into Shared itself, what lies at the file's top goes into a
+			// collection named after the file (#216).
+			const top = file.replace(/\.kdbx$/i, '').trim() || m.vault_shared();
+			const result = await importInto(tree, into?.id ?? null, imported, top);
 			kdbxResult = m.kdbx_imported({ count: result.created });
 			if (result.failed.length > 0)
 				error = m.kdbx_not_imported({ names: result.failed.join(', ') });
@@ -1301,20 +1433,30 @@
 )}
 	{@const Glyph = glyph}
 	{@const place = drop ? placeOf(drop) : null}
+	<!-- A personal folder goes into Shared by dragging (#218). -->
+	{@const folder =
+		stage === 'open' && target.kind === 'personal' && target.folder ? target.folder : null}
 	<button
 		type="button"
 		class={navItem}
 		style:padding-left="{0.5 + depth * 1}rem"
 		aria-current={!searching && sameScope(scope, target)}
 		data-drop={place !== null && dropOver === place}
+		draggable={folder !== null}
 		onclick={() => pick(target)}
-		ondragover={(event) => drop && place && dragOver(event, place)}
+		ondragstart={(event) => folder && startFolderDrag(event, folder)}
+		ondragover={(event) => drop && place && dragOver(event, place, drop)}
 		ondragleave={() => (dropOver = null)}
 		ondrop={(event) => drop && dropOn(event, drop)}
 	>
 		{#if Glyph}<Glyph size={15} class="shrink-0 text-ink-3" aria-hidden="true" />{/if}
 		<span class="flex-1 truncate">{text}</span>
-		<span class="text-xs text-ink-3 tabular-nums">{count(target) || ''}</span>
+		{#if place !== null && dropOver === place}
+			<!-- Where it goes, not by colour alone. -->
+			<FolderInput size={15} class="shrink-0 text-accent" aria-hidden="true" />
+		{:else}
+			<span class="text-xs text-ink-3 tabular-nums">{count(target) || ''}</span>
+		{/if}
 	</button>
 {/snippet}
 
@@ -1530,8 +1672,28 @@
 			</section>
 
 			<section class="flex flex-col gap-0.5" aria-labelledby="vault-shared">
-				<div class="flex items-center gap-2 px-2 pb-1">
+				<!-- A personal folder dropped here becomes a collection at the top (#218). -->
+				<div
+					role="presentation"
+					class="flex items-center gap-2 rounded-md px-2 pb-1 data-[drop=true]:ring-2 data-[drop=true]:ring-accent"
+					data-drop={dropOver === SHARED_TOP}
+					ondragover={(event) => {
+						if (!event.dataTransfer?.types.includes(FOLDER_DRAG_TYPE) || !takesFolder(null)) return;
+						event.preventDefault();
+						dropOver = SHARED_TOP;
+					}}
+					ondragleave={() => (dropOver = null)}
+					ondrop={(event) => {
+						event.preventDefault();
+						dropOver = null;
+						const folder = event.dataTransfer?.getData(FOLDER_DRAG_TYPE);
+						if (folder && takesFolder(null)) moveFolderToShared(folder, null);
+					}}
+				>
 					<h2 id="vault-shared" class="eyebrow">{m.vault_shared()}</h2>
+					{#if dropOver === SHARED_TOP}
+						<FolderInput size={15} class="shrink-0 text-accent" aria-hidden="true" />
+					{/if}
 					{#if tree?.may_create_top_level}
 						<button
 							type="button"
@@ -1542,6 +1704,17 @@
 							<Plus size={15} aria-hidden="true" />
 							<span class="sr-only">{m.vault_new_collection()}</span>
 						</button>
+						<SettingsMenu
+							label={m.vault_shared_settings()}
+							items={[
+								{
+									label: m.kdbx_import(),
+									icon: FileUp,
+									onselect: () =>
+										show({ type: 'kdbx', mode: 'import', collection: null, shared: true })
+								}
+							]}
+						/>
 					{/if}
 				</div>
 				{#each collectionOutline as folder (folder.id)}
@@ -1817,6 +1990,36 @@
 	{:else if dialogOpen && open?.type === 'request'}
 		<RequestForm held={open.role} kind="credential" onsubmit={sendRequest} oncancel={close} />
 		{@render problem()}
+	{:else if dialogOpen && open?.type === 'move-folder'}
+		{@const moving = open}
+		<form
+			onsubmit={async (event) => {
+				event.preventDefault();
+				if (!moveInto) return;
+				close();
+				await moveFolderToShared(moving.folder, moveInto === 'top' ? null : moveInto);
+			}}
+		>
+			<p class="text-sm text-ink-2">{m.vault_move_folder_hint()}</p>
+			<label class={label} for="move-folder-into">{m.vault_move_folder_into()}</label>
+			<select id="move-folder-into" class={field} required bind:value={moveInto}>
+				<option value="" disabled>{m.vault_move_folder_choose()}</option>
+				{#each sharedPlaces as place (place.id)}
+					<option value={place.id}>{place.path || m.vault_move_folder_top()}</option>
+				{/each}
+			</select>
+			<div class="mt-5 flex justify-end gap-2">
+				<button
+					type="button"
+					class="rounded-lg px-3 py-1.5 text-sm hover:bg-surface-2"
+					onclick={close}
+				>
+					{m.action_cancel()}
+				</button>
+				<button type="submit" class={primary} disabled={busy}>{m.vault_move_folder_submit()}</button
+				>
+			</div>
+		</form>
 	{:else if dialogOpen && open?.type === 'kdbx'}
 		<KdbxForm mode={open.mode} {busy} onimport={importKdbx} onexport={exportKdbx} />
 		{#if kdbxResult}
