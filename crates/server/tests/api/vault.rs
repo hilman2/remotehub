@@ -10,7 +10,9 @@ use remotehub_totp::{Params, unix_now};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
-use crate::common::{BOB_SID, ORIGIN, Response, authed, collection, send, sign_in_request, state};
+use crate::common::{
+    BOB_SID, ORIGIN, Response, authed, collection, confirm_all, send, sign_in_request, state,
+};
 
 /// A one-time password as a service hands it out in a QR code, with all
 /// that can differ from the usual: SHA-256, eight digits, a minute a code.
@@ -162,6 +164,7 @@ impl Vault {
     }
 
     async fn code(&self, token: &str, id: &str, purpose: &str) -> Response {
+        confirm_all(&self.pool).await;
         let uri = format!("/api/credentials/{id}/code");
         self.call(token, "POST", &uri, Some(json!({ "purpose": purpose })))
             .await
@@ -169,6 +172,7 @@ impl Vault {
 
     /// What alice sees when she reveals the entry `id` with `body`.
     async fn reveal(&self, id: &str, body: Value) -> Value {
+        confirm_all(&self.pool).await;
         let uri = format!("/api/credentials/{id}/reveal");
         let response = self.call(&self.alice, "POST", &uri, Some(body)).await;
         assert_eq!(response.status, StatusCode::OK, "{}", response.json());

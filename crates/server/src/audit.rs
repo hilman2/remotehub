@@ -128,6 +128,10 @@ audit_actions! {
     VaultRecoveryCompleted = "vault_recovery.completed",
     ExtensionConnected = "extension.connected",
     ExtensionDisconnected = "extension.disconnected",
+    // Confirmed with the second factor (#241), which unlocks a locked
+    // session; five wrong answers in a row end it.
+    SessionConfirmed = "session.confirmed",
+    SessionConfirmFailed = "session.confirm_failed",
 }
 
 /// Who acted: a signed-in user, or only a name (failed sign-in).

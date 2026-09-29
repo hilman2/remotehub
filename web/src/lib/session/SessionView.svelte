@@ -9,7 +9,10 @@
 	import CircleMinus from '@lucide/svelte/icons/circle-minus';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import ShieldAlert from '@lucide/svelte/icons/shield-alert';
+	import ShieldCheck from '@lucide/svelte/icons/shield-check';
+	import { untrack } from 'svelte';
 	import { allows, isGraphical, resetHostKey, type Device } from '$lib/api/catalog';
+	import { api, background } from '$lib/api/client';
 	import { errorMessage } from '$lib/api/errors';
 	import DisplayView from '$lib/display/DisplayView.svelte';
 	import {
@@ -25,6 +28,7 @@
 	import { unlocked } from '$lib/vault/unlocked.svelte';
 	import { loadVault, readEntries, type EntryContent } from '$lib/vault/vault';
 	import ConnectorClosing from './ConnectorClosing.svelte';
+	import { askConfirmation, lockScreen } from './confirm.svelte';
 	import { shown } from './status.svelte';
 	import type { Phase } from './tabs.svelte';
 
@@ -70,11 +74,32 @@
 	let status = $state<Status>({ kind: 'connecting' });
 	// Remounting the view starts a new connection.
 	let attempt = $state(0);
+	/**
+	 * A device that asks for it connects after a confirmation with the
+	 * second factor (#243), right before, once the form is filled in: it
+	 * holds a minute. The server asks again when it ran out.
+	 */
+	let gate = $state<'open' | 'waiting' | 'declined'>(
+		untrack(() => device.requires_confirmation) ? 'waiting' : 'open'
+	);
 
 	const graphical = $derived(isGraphical(device.protocol));
 	const needsCredentials = $derived(device.auth_mode === 'ask' && credentials === null);
 	const needsPurpose = $derived(askPurpose && purpose === null);
 	const asking = $derived(needsCredentials || needsPurpose);
+
+	$effect(() => {
+		if (asking || gate !== 'waiting') return;
+		askConfirmation().then((ok) => {
+			if (!ok) {
+				gate = 'declined';
+				return;
+			}
+			gate = 'open';
+			status = { kind: 'connecting' };
+			attempt += 1;
+		});
+	});
 	const phase = $derived<Phase>(
 		status.kind === 'connecting' || status.kind === 'connected' || status.kind === 'closed'
 			? status.kind
@@ -182,6 +207,10 @@
 			if (status.kind === 'connecting' || status.kind === 'connected') {
 				status = { kind: 'closed', exitStatus: null };
 			}
+		} else if (event.code === 'confirmation_required') {
+			// The confirmation ran out meanwhile: once more, then on (#243).
+			gate = 'waiting';
+			status = { kind: 'connecting' };
 		} else {
 			status = { kind: 'error', code: event.code, params: event.params };
 		}
@@ -193,15 +222,28 @@
 			: { kind: 'failed', failure: failureOf(code), detail };
 	}
 
-	function onend() {
-		if (status.kind === 'connecting' || status.kind === 'connected') status = { kind: 'lost' };
+	async function onend() {
+		const before = status.kind;
+		if (gate !== 'open' || (before !== 'connecting' && before !== 'connected')) return;
+		status = { kind: 'lost' };
+		if (before !== 'connecting') return;
+		// Refused before it connected: the session's doing, not the device's
+		// (#240). Locked, it connects once unlocked; over, the page goes to
+		// the sign-in.
+		const me = await api<{ locked: boolean }>('GET', '/api/session', undefined, background);
+		if (me.ok && me.data.locked && (await lockScreen())) retry();
+	}
+
+	/** Connects again with what was given. */
+	function retry() {
+		status = { kind: 'connecting' };
+		attempt += 1;
 	}
 
 	function reconnect() {
-		status = { kind: 'connecting' };
 		// Asked credentials are asked again.
 		if (device.auth_mode === 'ask') credentials = null;
-		attempt += 1;
+		retry();
 	}
 
 	async function trustNewKey() {
@@ -311,6 +353,23 @@
 			{m.terminal_connect()}
 		</button>
 	</form>
+{:else if gate !== 'open'}
+	<div
+		class="mx-auto mt-16 flex w-full max-w-sm flex-col gap-4 rounded-card border border-line bg-surface p-7 text-sm"
+		role="status"
+	>
+		<p class="flex items-start gap-2">
+			<ShieldCheck size={18} class="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+			{gate === 'waiting'
+				? m.session_waiting_confirmation()
+				: m.session_confirmation_declined({ name: device.name })}
+		</p>
+		{#if gate === 'declined'}
+			<button type="button" class="{button} self-start" onclick={() => (gate = 'waiting')}>
+				{m.session_confirm_now()}
+			</button>
+		{/if}
+	</div>
 {:else}
 	<div class="relative h-full min-h-80">
 		{#key attempt}

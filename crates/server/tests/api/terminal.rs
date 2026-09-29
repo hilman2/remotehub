@@ -910,3 +910,39 @@ async fn a_device_signs_in_with_a_key_of_its_own(pool: PgPool) {
         .unwrap();
     output_until(&mut socket, "key says tester").await;
 }
+
+/// A device that asks for it takes a confirmation with the second factor
+/// before every connection (#243), before anything reaches the device.
+#[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
+async fn a_device_that_asks_for_it_opens_only_after_a_confirmation(pool: PgPool) {
+    let (state, app, token, folder) = setup(pool).await;
+    let secret = crate::second_factor::enroll(&app, &token).await;
+    let device = create(
+        &app,
+        &token,
+        "/api/devices",
+        json!({
+            "folder_id": folder, "name": "dc01", "protocol": "ssh", "host": "127.0.0.1",
+            "port": 1, "auth_mode": "ask", "requires_confirmation": true,
+        }),
+    )
+    .await;
+    let address = serve(state).await;
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({ "username": "root", "password": "x" })).await;
+    assert_eq!(event(&mut socket).await["code"], "confirmation_required");
+
+    let body = json!({ "code": crate::second_factor::code(&secret, 0) });
+    let confirmed = send(
+        &app,
+        authed("POST", "/api/session/confirm", Some(body), &token),
+    )
+    .await;
+    assert_eq!(confirmed.status, 204, "{}", confirmed.json());
+    let mut socket = open(address, &device, &token, ORIGIN).await.unwrap();
+    start(&mut socket, json!({ "username": "root", "password": "x" })).await;
+    // On to the device, which is not there.
+    let answer = event(&mut socket).await;
+    assert_eq!(answer["type"], "error", "{answer}");
+    assert_ne!(answer["code"], "confirmation_required");
+}

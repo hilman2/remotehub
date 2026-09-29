@@ -1,59 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
 import { inbox } from './mailpit';
+import { accept, address, kratosAdmin, onboard, run } from './local';
 import { step, totp } from './totp';
 
 // Local accounts through Ory Kratos (#103): an invited account sets its
 // password and authenticator app, then signs in with both.
-
-/** Kratos' admin API; the tests reach it on the compose network. */
-const kratosAdmin = process.env.E2E_KRATOS_ADMIN_URL ?? 'http://kratos:4434';
-const run = Date.now().toString(36);
-
-/** What `remotehub account invite` does: an identity and its one-time code. */
-async function invite(email: string, name: string) {
-	const created = await fetch(`${kratosAdmin}/admin/identities`, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ schema_id: 'user', traits: { email, name } })
-	});
-	expect(created.status).toBe(201);
-	const { id } = (await created.json()) as { id: string };
-	const code = await fetch(`${kratosAdmin}/admin/recovery/code`, {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ identity_id: id, expires_in: '1h' })
-	});
-	expect(code.status).toBe(201);
-	return (await code.json()) as { recovery_link: string; recovery_code: string };
-}
-
-/** An address no other test, and no repetition, uses. */
-const address = (who: string) => `${who}-${run}-${crypto.randomUUID().slice(0, 8)}@remotehub.test`;
-
-/**
- * Invites an account and walks through the invitation: code, password,
- * authenticator app. Returns the app's key; the account is signed in.
- */
-async function onboard(page: Page, email: string, password: string, name = '') {
-	const invitation = await invite(email, name);
-	return accept(page, invitation.recovery_link, invitation.recovery_code, password);
-}
-
-/** Walks through an invitation's link and code; see `onboard`. */
-async function accept(page: Page, recoveryLink: string, code: string, password: string) {
-	const link = new URL(recoveryLink);
-	await page.goto(link.pathname + link.search);
-	await page.getByLabel('Code', { exact: true }).fill(code);
-	await page.getByRole('button', { name: 'Continue' }).click();
-	await page.getByLabel('New password').fill(password);
-	await page.getByRole('button', { name: 'Continue' }).click();
-	// remotehub requires an authenticator app before the first session.
-	const secret = (await page.getByTestId('totp-secret').innerText()).trim();
-	await page.getByLabel('Code from the app').fill(totp(secret, step()));
-	await page.getByRole('button', { name: 'Set up' }).click();
-	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
-	return secret;
-}
 
 /** Signs in with a directory account of the lab, up to the password. */
 async function typeDirectory(page: Page, user: string, password: string) {
@@ -293,11 +244,14 @@ test('a passkey is the second factor after the password, never the whole sign-in
 	const email = address('passkey');
 	const password = `Passkey-Passw0rd-${run}`;
 	await onboard(page, email, password, 'Pia Passkey');
+	// Without a passkey, the devices page points to one (#244).
+	const hint = page.getByRole('note').filter({ hasText: 'Faster with a passkey' });
+	await expect(hint).toBeVisible();
 	// A platform authenticator that keeps passkeys and confirms the person,
 	// as Windows Hello does.
 	const cdp = await page.context().newCDPSession(page);
 	await cdp.send('WebAuthn.enable');
-	await cdp.send('WebAuthn.addVirtualAuthenticator', {
+	const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
 		options: {
 			protocol: 'ctap2',
 			transport: 'internal',
@@ -311,10 +265,16 @@ test('a passkey is the second factor after the password, never the whole sign-in
 	// One list of keys for the second factor; none for signing in (#231).
 	await page.getByRole('link', { name: /Pia Passkey/ }).click();
 	await expect(page.getByRole('region', { name: 'Passkeys', exact: true })).toHaveCount(0);
-	const keys = page.getByRole('region', { name: 'Security keys and passkeys' });
+	const keys = page.getByRole('region', { name: 'Passkeys and security keys for signing in' });
 	await keys.getByLabel('Name of the key').fill('Windows Hello');
 	await keys.getByRole('button', { name: 'Add a security key' }).click();
 	await expect(keys.getByRole('button', { name: 'Remove Windows Hello' })).toBeVisible();
+	// Named for what it does in the browser's list (#245); the hint is gone.
+	const { credentials } = await cdp.send('WebAuthn.getCredentials', { authenticatorId });
+	expect(credentials.map((c) => c.userName)).toEqual([`${email} · remotehub sign-in`]);
+	await page.getByRole('link', { name: 'Devices', exact: true }).click();
+	await expect(page.getByRole('heading', { name: 'Devices', level: 1 })).toBeVisible();
+	await expect(hint).toHaveCount(0);
 
 	// The password, then the passkey as the second factor.
 	await signOut(page);
@@ -365,7 +325,7 @@ test('a directory account signs in with a security key remotehub keeps', async (
 		}
 	});
 	await page.getByRole('link', { name: /Erin Keys/ }).click();
-	const keys = page.getByRole('region', { name: 'Security keys and passkeys' });
+	const keys = page.getByRole('region', { name: 'Passkeys and security keys for signing in' });
 	await keys.getByLabel('Name of the key').fill('Erin’s key');
 	await keys.getByRole('button', { name: 'Add a security key' }).click();
 	await expect(keys.getByRole('button', { name: 'Remove Erin’s key' })).toBeVisible();

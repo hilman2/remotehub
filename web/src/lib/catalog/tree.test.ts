@@ -33,6 +33,7 @@ function device(id: string, name: string, host: string): Device {
 		connector_mode: 'inherit',
 		connector_id: null,
 		reached_through: null,
+		requires_confirmation: false,
 		username: '',
 		domain: '',
 		secret_kind: 'password',

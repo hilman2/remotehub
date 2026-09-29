@@ -3,8 +3,9 @@
 //! A session is a random 256-bit token in the cookie `__Host-remotehub-session`
 //! (HttpOnly, Secure, SameSite=Strict, host-only). The database keeps only its
 //! SHA-256 hash, the user and the group SIDs from sign-in. A session ends
-//! after the idle time without requests, after the maximum lifetime, or when
-//! the user signs out.
+//! after the maximum lifetime or when the user signs out; after the idle time
+//! without requests or input into a connection it locks, and a confirmation
+//! with the second factor unlocks it (#241).
 //!
 //! The browser extension (#201) has sessions of its own in the same table,
 //! with the client `extension`. Their token travels as a bearer token, never
@@ -76,9 +77,33 @@ pub struct Session {
     #[serde(skip)]
     #[sqlx(default)]
     pub roles: Vec<String>,
+    /// Idle longer than the idle time (#241): only a confirmation or signing
+    /// out takes the session then; everything else answers `session_locked`.
+    #[serde(skip)]
+    #[sqlx(default)]
+    pub locked: bool,
+    /// Confirmed with the second factor within [`CONFIRMED_FOR`] (#242, #243).
+    #[serde(skip)]
+    #[sqlx(default)]
+    pub confirmed: bool,
 }
 
+/// How long a confirmation holds: showing and then copying one secret asks
+/// once (#242).
+pub const CONFIRMED_FOR: Duration = Duration::from_secs(60);
+
 impl Session {
+    /// `confirmation_required` unless the session was confirmed with the
+    /// second factor within [`CONFIRMED_FOR`]: for showing a secret (#242)
+    /// and for devices that ask for it (#243).
+    pub fn require_confirmation(&self) -> Result<(), Problem> {
+        if self.confirmed {
+            Ok(())
+        } else {
+            Err(Problem::new(ErrorCode::ConfirmationRequired))
+        }
+    }
+
     /// Administrators manage remotehub itself: break-glass accounts, and
     /// whoever has the role, given by the setup wizard (#143) or on *Users*.
     pub fn is_admin(&self) -> bool {
@@ -233,25 +258,103 @@ pub fn new_code() -> String {
     new_token()
 }
 
-/// The session for a token, if it is still valid; marks it as used.
+/// The session for a token, if it is still valid, locked or not; marks an
+/// unlocked one as used.
 pub async fn lookup(
     db: &PgPool,
     token: &str,
     idle: Duration,
 ) -> Result<Option<Session>, sqlx::Error> {
+    find(db, token, idle, true).await
+}
+
+/// The session for a token, like [`lookup`]; marks it as used only with
+/// `keep_alive`.
+async fn find(
+    db: &PgPool,
+    token: &str,
+    idle: Duration,
+    keep_alive: bool,
+) -> Result<Option<Session>, sqlx::Error> {
     let token_hash = hash(token);
     let Some(session) = by_hash(db, &token_hash, idle).await? else {
         return Ok(None);
     };
-    // Keeps the session alive; at most one write per minute and session.
+    if keep_alive && !session.locked {
+        touch(db, &token_hash, idle).await?;
+    }
+    Ok(Some(session))
+}
+
+/// Input into an open connection (#239): it keeps the session alive like a
+/// request, and while the session is locked it does not reach the device
+/// (#241). One query a minute while unlocked, at most one every two seconds
+/// while locked.
+pub struct Activity {
+    db: PgPool,
+    token_hash: Vec<u8>,
+    idle: Duration,
+    checked: Option<std::time::Instant>,
+    open: bool,
+}
+
+impl Activity {
+    pub fn of(state: &AppState, session: &Session) -> Self {
+        Activity {
+            db: state.db.clone(),
+            token_hash: session.token_hash.clone(),
+            idle: state.settings.session.idle,
+            checked: None,
+            open: !session.locked,
+        }
+    }
+
+    /// Whether this input may go on to the device.
+    pub async fn input(&mut self) -> bool {
+        let every = Duration::from_secs(if self.open { 60 } else { 2 });
+        if self.checked.is_some_and(|at| at.elapsed() < every) {
+            return self.open;
+        }
+        self.checked = Some(std::time::Instant::now());
+        // Unlocked and not over: marked as used, as `touch` does.
+        let open = sqlx::query(
+            "UPDATE sessions
+             SET last_seen_at = CASE WHEN last_seen_at < now() - interval '1 minute'
+                                     THEN now() ELSE last_seen_at END
+             WHERE token_hash = $1 AND expires_at > now()
+               AND last_seen_at > now() - make_interval(secs => $2)",
+        )
+        .bind(&self.token_hash)
+        .bind(self.idle.as_secs_f64())
+        .execute(&self.db)
+        .await;
+        match open {
+            Ok(done) => self.open = done.rows_affected() == 1,
+            Err(error) => tracing::warn!(%error, "a connection's session could not be checked"),
+        }
+        self.open
+    }
+}
+
+/// The header of requests the page makes on its own, e.g. to read a state
+/// every minute: they do not keep the session alive, or it would never lock
+/// (#241).
+pub const BACKGROUND: &str = "x-remotehub-background";
+
+/// Keeps a session alive, at most one write per minute and session; a
+/// locked one stays locked (#241). Requests do it, and so does input into
+/// an open connection (#239).
+pub async fn touch(db: &PgPool, token_hash: &[u8], idle: Duration) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE sessions SET last_seen_at = now()
-         WHERE token_hash = $1 AND last_seen_at < now() - interval '1 minute'",
+         WHERE token_hash = $1 AND last_seen_at < now() - interval '1 minute'
+           AND last_seen_at > now() - make_interval(secs => $2)",
     )
-    .bind(token_hash.as_slice())
+    .bind(token_hash)
+    .bind(idle.as_secs_f64())
     .execute(db)
     .await?;
-    Ok(Some(session))
+    Ok(())
 }
 
 /// The same session read again, e.g. after its groups changed (#108).
@@ -272,6 +375,8 @@ async fn by_hash(
         "SELECT s.token_hash, s.id, s.client, s.user_id, s.groups,
                 u.username, u.display_name, u.kind, u.sid, u.upn,
                 u.identity_id, own.memberships,
+                s.last_seen_at <= now() - make_interval(secs => $2) AS locked,
+                coalesce(s.confirmed_at > now() - make_interval(secs => $3), false) AS confirmed,
                 ARRAY(SELECT DISTINCT r.role FROM role_assignments r
                       WHERE r.principal_sid = ANY (s.groups || own.memberships)
                          OR r.principal_sid = u.sid
@@ -286,10 +391,13 @@ async fn by_hash(
          WHERE s.token_hash = $1
            AND u.blocked_at IS NULL
            AND s.expires_at > now()
-           AND s.last_seen_at > now() - make_interval(secs => $2)",
+           -- A browser's session locks after the idle time (#241); the
+           -- extension's ends.
+           AND (s.client = 'web' OR s.last_seen_at > now() - make_interval(secs => $2))",
     )
     .bind(token_hash)
     .bind(idle.as_secs_f64())
+    .bind(CONFIRMED_FOR.as_secs_f64())
     .fetch_optional(db)
     .await
 }
@@ -303,11 +411,13 @@ pub async fn delete<'e>(db: impl PgExecutor<'e>, token: &str) -> Result<(), sqlx
 }
 
 /// Removes sessions that can no longer be used, and the extension's codes
-/// that ran out unused.
+/// that ran out unused. A locked browser session stays until its maximum
+/// lifetime (#241).
 pub async fn purge(db: &PgPool, idle: Duration) -> Result<u64, sqlx::Error> {
     let result = sqlx::query(
         "DELETE FROM sessions
-         WHERE expires_at <= now() OR last_seen_at <= now() - make_interval(secs => $1)",
+         WHERE expires_at <= now()
+            OR (client <> 'web' AND last_seen_at <= now() - make_interval(secs => $1))",
     )
     .bind(idle.as_secs_f64())
     .execute(db)
@@ -419,10 +529,28 @@ impl FromRequestParts<AppState> for Session {
     type Rejection = Problem;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Problem> {
+        let AnySession(session) = AnySession::from_request_parts(parts, state).await?;
+        if session.locked {
+            return Err(Problem::new(ErrorCode::SessionLocked));
+        }
+        Ok(session)
+    }
+}
+
+/// A browser's session, locked or not (#241): for what a locked one may do,
+/// confirming and saying whose it is.
+pub struct AnySession(pub Session);
+
+impl FromRequestParts<AppState> for AnySession {
+    type Rejection = Problem;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Problem> {
         let token = token(&parts.headers).ok_or(Problem::new(ErrorCode::Unauthenticated))?;
-        lookup(&state.db, &token, state.settings.session.idle)
+        let keep_alive = !parts.headers.contains_key(BACKGROUND);
+        find(&state.db, &token, state.settings.session.idle, keep_alive)
             .await?
             .filter(|session| session.client == "web")
+            .map(AnySession)
             .ok_or(Problem::new(ErrorCode::Unauthenticated))
     }
 }

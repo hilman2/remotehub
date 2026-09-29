@@ -292,14 +292,16 @@ export function passkeysAvailable(): boolean {
 }
 
 /**
- * Registers a passkey and wraps the vault key with its PRF output. Returns
+ * Registers a passkey and wraps the vault key with its PRF output. `name` is
+ * what the passkey is called in the browser's list (#245), `label` what
+ * remotehub calls it. Returns
  * `prf_unsupported` when the authenticator cannot derive secrets.
  */
-export async function addPasskey(key: CryptoKey, username: string, label: string) {
+export async function addPasskey(key: CryptoKey, name: string, label: string) {
 	const credential = (await navigator.credentials.create({
 		publicKey: {
 			rp: { name: 'remotehub' },
-			user: { id: randomBytes(16), name: username, displayName: username },
+			user: { id: randomBytes(16), name, displayName: name },
 			challenge: randomBytes(32),
 			pubKeyCredParams: [
 				{ type: 'public-key', alg: -7 },

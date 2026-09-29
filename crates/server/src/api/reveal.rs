@@ -185,6 +185,7 @@ pub async fn credential(
     let purpose = purpose(&input)?;
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Reveal, ObjectId::Credential(id))?;
+    session.require_confirmation()?;
     type Row = (String, i32, sqlx::types::Json<Vec<Field>>);
     let (username, current, fields): Row =
         sqlx::query_as("SELECT username, version, fields FROM credentials WHERE id = $1")
@@ -252,6 +253,7 @@ pub async fn code(
     };
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Reveal, ObjectId::Credential(id))?;
+    session.require_confirmation()?;
     let code = current_code(&state, id).await?;
     record_as(
         &state,
@@ -324,6 +326,7 @@ pub async fn device(
     let purpose = purpose(&input)?;
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Reveal, ObjectId::Device(id))?;
+    session.require_confirmation()?;
     let (username, domain, version, kind): (String, String, i32, String) = sqlx::query_as(
         "SELECT username, domain, secret_version, secret_kind FROM devices WHERE id = $1",
     )
@@ -352,6 +355,7 @@ pub async fn profile(
     let purpose = purpose(&input)?;
     let (subject, catalog) = context(&state, &session).await?;
     require(&catalog, &subject, Role::Reveal, ObjectId::Profile(id))?;
+    session.require_confirmation()?;
     let (username, domain, version, kind): (String, String, i32, String) = sqlx::query_as(
         "SELECT username, domain, secret_version, secret_kind FROM login_profiles WHERE id = $1",
     )

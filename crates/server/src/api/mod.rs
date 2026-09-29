@@ -7,6 +7,7 @@ mod audit;
 mod catalog;
 pub mod certificate;
 mod collections;
+mod confirm;
 mod connect;
 mod connector_requests;
 mod connectors;
@@ -59,6 +60,9 @@ pub fn router(state: AppState) -> Router<AppState> {
                 .post(session::sign_in)
                 .delete(session::sign_out),
         )
+        .route("/session/confirm/start", post(confirm::start))
+        .route("/session/confirm", post(confirm::confirm))
+        .route("/session/factors", get(confirm::factors_of))
         .route("/session/break-glass", post(session::sign_in_break_glass))
         .route("/session/local", post(accounts::sign_in))
         .route("/session/methods", get(accounts::methods))

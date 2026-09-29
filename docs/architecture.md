@@ -129,6 +129,20 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   sends a single-use challenge with `second_factor_required`; a key's counter must grow. Local accounts get
   their second factor from Kratos.
 - **Sessions:** server-side in PostgreSQL; cookie HttpOnly, Secure, SameSite=Strict; CSRF protection.
+- **Locked sessions and confirmations (`session.rs`, `api/confirm.rs`, #239–#243):** after the idle time
+  without requests or input into a connection, a browser's session locks instead of ending; the maximum
+  lifetime still ends it. A locked session answers `session_locked` to everything but
+  `GET /api/session` and the confirmation, and input into its open connections stays on the server. The
+  page covers itself and asks for the second factor: a passkey or security key with user verification
+  (PIN, fingerprint, face), or a code of the authenticator app. Directory users' factors are remotehub's
+  own, local accounts' are read from Kratos' admin API (the key's COSE form, remotehub's own counter and
+  code step), break-glass accounts use their code. A confirmation unlocks the session and holds for a
+  minute: showing or copying a secret (`api/reveal.rs`) and connecting to a device marked
+  `requires_confirmation` (e.g. a domain controller) need one of the last minute, else
+  `confirmation_required`. Five wrong answers in a row end the session; both outcomes are audited
+  (`session.confirmed`, `session.confirm_failed`). Requests the page makes on its own carry
+  `x-remotehub-background` and do not keep a session alive. The browser extension's sessions still end
+  after the idle time.
 - **Directory changes reach sessions (`refresh.rs`):** every five minutes and before every connection,
   the service account reads a directory user's groups and `userAccountControl`/`accountExpires` again, by
   SID. New groups replace those of all their sessions; a disabled, expired or vanished account loses its
@@ -174,7 +188,8 @@ The browser never talks to a target or to guacd, and never receives a stored pas
   code (`POST /api/credentials/{id}/code`); it takes `reveal` and is audited as `credential.code_shown`.
   The secret leaves the server only in an export. The browser makes the codes of personal entries.
 - **Reveal (`api/reveal.rs`):** with `reveal`, a vault credential, a login profile or a device's own
-  credentials are shown or copied on their page. Each time is audited (`credential.revealed`, with `show` or `copy`) before the
+  credentials are shown or copied on their page, after a confirmation with the second factor of the last
+  minute (#242). Each time is audited (`credential.revealed`, with `show` or `copy`) before the
   value leaves the server, and the answer is `no-store`. The UI hides a shown value and clears a copied
   one from the clipboard after 30 seconds.
 - **Just-in-time access:** someone who sees an object asks for `connect` or `reveal` on it for up to a day,

@@ -332,3 +332,13 @@ pub fn authed(method: &str, uri: &str, body: Option<Value>, token: &str) -> Requ
         .body(body.map_or_else(Body::empty, |b| Body::from(b.to_string())))
         .unwrap()
 }
+
+/// Confirms every session signed in so far with the second factor, for the
+/// rest of the test (#242): tests of showing secrets are about roles and
+/// the audit log; confirming has tests of its own (`confirm.rs`).
+pub async fn confirm_all(db: &PgPool) {
+    sqlx::query("UPDATE sessions SET confirmed_at = now() + interval '1 hour'")
+        .execute(db)
+        .await
+        .unwrap();
+}

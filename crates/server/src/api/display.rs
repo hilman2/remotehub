@@ -42,7 +42,7 @@ use super::connect::{
 use super::problem::{ErrorCode, Problem};
 use super::session::ClientAddress;
 use crate::audit::{self, Action};
-use crate::session::Session;
+use crate::session::{Activity, Session};
 use crate::{AppState, refresh};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -189,6 +189,14 @@ async fn run(
         send_problem(&mut socket, &Problem::new(ErrorCode::InvalidRequest)).await;
         return;
     };
+    // A device that asks for it takes a confirmation of the last minute
+    // (#243); the page asks for one before it connects.
+    if target.requires_confirmation
+        && let Err(problem) = session.require_confirmation()
+    {
+        send_problem(&mut socket, &problem).await;
+        return;
+    }
     let purpose = match connect::purpose(&state, &session, purpose).await {
         Ok(purpose) => purpose,
         Err(problem) => {
@@ -440,7 +448,14 @@ async fn run(
 
     // 6. Relay until either side ends; the browser ends with the session.
     let started = Instant::now();
-    let outcome = relay(&mut socket, &mut connection, browser.as_mut()).await;
+    let mut activity = Activity::of(&state, &session);
+    let outcome = relay(
+        &mut socket,
+        &mut connection,
+        browser.as_mut(),
+        &mut activity,
+    )
+    .await;
     connection.close().await;
     drop(browser);
     let _ = socket.send(Message::Close(None)).await;
@@ -538,6 +553,7 @@ async fn relay(
     socket: &mut WebSocket,
     connection: &mut Connection,
     mut browser: Option<&mut browser::Session>,
+    activity: &mut Activity,
 ) -> Outcome {
     let mut outcome = Outcome::default();
     let mut from_browser = Parser::default();
@@ -560,6 +576,12 @@ async fn relay(
                     loop {
                         match from_browser.next_instruction() {
                             Ok(Some(instruction)) if guacamole::allowed_from_browser(&instruction.opcode) => {
+                                // Keys and the mouse keep the session alive, and
+                                // stay here while it is locked (#239, #241).
+                                if guacamole::is_input(&instruction.opcode) && !activity.input().await {
+                                    outcome.dropped += 1;
+                                    continue;
+                                }
                                 forward.push_str(&instruction.encode());
                             }
                             // Internal instructions (empty opcode) and anything
@@ -660,6 +682,7 @@ mod tests {
             keyboard_layout: None,
             certificate_fingerprint: None,
             connector_id: None,
+            requires_confirmation: false,
         };
         let credentials = Credentials {
             username: r"EXAMPLE\alice".into(),

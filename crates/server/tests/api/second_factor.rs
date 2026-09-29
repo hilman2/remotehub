@@ -18,7 +18,7 @@ use crate::common::{
     BOB_SID, OPS_SID, ORIGIN, Response, authed, get, json as request, send, state,
 };
 
-fn now() -> u64 {
+pub(crate) fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -26,7 +26,7 @@ fn now() -> u64 {
 }
 
 /// The app's code `offset` seconds from now.
-fn code(secret: &str, offset: i64) -> String {
+pub(crate) fn code(secret: &str, offset: i64) -> String {
     code_at(secret, now().saturating_add_signed(offset)).unwrap()
 }
 
@@ -38,18 +38,24 @@ async fn sign_in(app: &Router, user: &str, extra: Value) -> Response {
     send(app, request("POST", "/api/session", body, Some(ORIGIN))).await
 }
 
-async fn token(app: &Router, user: &str, extra: Value) -> String {
+pub(crate) async fn token(app: &Router, user: &str, extra: Value) -> String {
     let response = sign_in(app, user, extra).await;
     assert_eq!(response.status, StatusCode::OK, "{}", response.json());
     response.session_token().unwrap()
 }
 
-async fn call(app: &Router, token: &str, method: &str, uri: &str, body: Option<Value>) -> Response {
+pub(crate) async fn call(
+    app: &Router,
+    token: &str,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> Response {
     send(app, authed(method, uri, body, token)).await
 }
 
 /// Sets up an app for the signed-in user; returns its secret.
-async fn enroll(app: &Router, token: &str) -> String {
+pub(crate) async fn enroll(app: &Router, token: &str) -> String {
     let offer = call(app, token, "POST", "/api/account/second-factor/offer", None).await;
     assert_eq!(offer.status, StatusCode::OK, "{}", offer.json());
     let secret = offer.json()["secret"].as_str().unwrap().to_owned();
@@ -359,25 +365,38 @@ async fn a_wrong_secret_or_code_sets_up_nothing(pool: PgPool) {
 
 /// A security key as a browser's WebAuthn would use it (#129), with the
 /// relying party of the tests' origin.
-struct Key {
+pub(crate) struct Key {
     signing: SigningKey,
-    id: Vec<u8>,
+    pub(crate) id: Vec<u8>,
     counter: u32,
     counts: bool,
+    /// Checks its holder (PIN, fingerprint), as a confirmation needs (#241).
+    pub(crate) verifies: bool,
 }
 
-fn b64(bytes: &[u8]) -> String {
+pub(crate) fn b64(bytes: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
 impl Key {
-    fn new(seed: u8) -> Self {
+    pub(crate) fn new(seed: u8) -> Self {
         Key {
             signing: SigningKey::from_slice(&[seed; 32]).unwrap(),
             id: vec![seed; 20],
             counter: 0,
             counts: false,
+            verifies: false,
         }
+    }
+
+    /// The public key in COSE form, as Kratos keeps it: kty, alg, crv, x, y.
+    pub(crate) fn cose(&self) -> Vec<u8> {
+        let point = self.signing.verifying_key().to_sec1_point(false);
+        let mut cose = vec![0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20];
+        cose.extend(&point.as_bytes()[1..33]);
+        cose.extend([0x22, 0x58, 0x20]);
+        cose.extend(&point.as_bytes()[33..]);
+        cose
     }
 
     fn data(&self, flags: u8) -> Vec<u8> {
@@ -394,7 +413,7 @@ impl Key {
     }
 
     /// The answer to `navigator.credentials.create()` with the server's options.
-    fn register(&self, options: &Value) -> Value {
+    pub(crate) fn register(&self, options: &Value) -> Value {
         let challenge = options["publicKey"]["challenge"].as_str().unwrap();
         let mut data = self.data(0x41);
         data.extend([0u8; 16]);
@@ -413,14 +432,14 @@ impl Key {
     }
 
     /// The answer to `navigator.credentials.get()`.
-    fn sign(&mut self, options: &Value) -> Value {
+    pub(crate) fn sign(&mut self, options: &Value) -> Value {
         // Many passkeys keep no counter and always send 0: then only the
         // single use of the challenge stops a replay.
         if self.counts {
             self.counter += 1;
         }
         let challenge = options["publicKey"]["challenge"].as_str().unwrap();
-        let data = self.data(0x01);
+        let data = self.data(if self.verifies { 0x05 } else { 0x01 });
         let client = Self::client_data("webauthn.get", challenge);
         let signed = [data.as_slice(), &Sha256::digest(&client)].concat();
         let signature: Signature = self.signing.sign(&signed);

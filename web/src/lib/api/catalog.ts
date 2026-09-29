@@ -86,6 +86,8 @@ export interface Device {
 	connector_id: string | null;
 	/** The connector it is reached through, however chosen; null: directly. */
 	reached_through: string | null;
+	/** Asks for a confirmation with the second factor before every connection (#243). */
+	requires_confirmation: boolean;
 	/**
 	 * Sign-in mode `device`: its own credentials as far as they are shown;
 	 * password and key stay on the server.
@@ -199,6 +201,7 @@ export interface DeviceInput {
 	connector_mode: ConnectorMode;
 	/** Set exactly with `connector_mode` `connector`. */
 	connector_id: string | null;
+	requires_confirmation: boolean;
 	/** Sign-in mode `device` only. */
 	username?: string;
 	domain?: string;

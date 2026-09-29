@@ -214,6 +214,16 @@ pub fn allowed_from_browser(opcode: &str) -> bool {
     )
 }
 
+/// Instructions of someone at the browser: keys, the mouse, touches and the
+/// clipboard. They keep remotehub's session alive, and a locked session
+/// keeps them from the device (#239, #241).
+pub fn is_input(opcode: &str) -> bool {
+    matches!(
+        opcode,
+        "blob" | "clipboard" | "end" | "key" | "mouse" | "touch"
+    )
+}
+
 /// guacd 1.6's keyboard layouts for RDP (`server-layout`): the layout of the
 /// target's session, into whose scancodes guacd translates the browser's keys.
 /// `failsafe` sends characters as Unicode instead, whatever the layout, at

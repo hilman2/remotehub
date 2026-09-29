@@ -35,6 +35,7 @@
 		type Role,
 		type Tree
 	} from '$lib/api/catalog';
+	import PasskeyHint from '$lib/account/PasskeyHint.svelte';
 	import type { ApiResult } from '$lib/api/client';
 	import { loadConnectors, type Connector } from '$lib/api/connectors';
 	import { createRequest, requestableRoles } from '$lib/api/requests';
@@ -620,6 +621,8 @@
 				</p>
 			{/if}
 
+			<PasskeyHint />
+
 			{#if tree && tree.folders.length === 0}
 				<p class="font-display text-2xl text-ink-2">{m.devices_empty_title()}</p>
 			{:else if folder}
@@ -693,6 +696,12 @@
 								{/if}
 							{/if}
 							<span class="chip">{m.catalog_access({ role: ROLE_LABELS[device.role]() })}</span>
+							{#if device.requires_confirmation}
+								<span class="chip">
+									<ShieldCheck size={13} class="text-accent" aria-hidden="true" />
+									{m.device_protected()}
+								</span>
+							{/if}
 						</div>
 					</div>
 					<div class="flex flex-col items-end gap-2">

@@ -40,7 +40,7 @@ the next version and restarting makes it the current key.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `REMOTEHUB_SESSION_IDLE_MINUTES` | `30` | A session ends after this long without a request. At most the maximum below. |
+| `REMOTEHUB_SESSION_IDLE_MINUTES` | `30` | A browser's session locks after this long without a request or input into a connection; the second factor unlocks it, page and connections stay. The browser extension's session ends instead. At most the maximum below. |
 | `REMOTEHUB_SESSION_MAX_HOURS` | `12` | A session ends this long after sign-in. |
 
 ## Local accounts (Ory Kratos)

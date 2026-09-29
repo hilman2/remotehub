@@ -17,11 +17,52 @@ export const NETWORK_ERROR = 'network';
  */
 export const lasting: typeof fetch = (input, init) => fetch(input, { ...init, keepalive: true });
 
+/**
+ * A fetch for what the page asks on its own, e.g. a state read every
+ * minute: it does not keep the session alive, or the session would never
+ * lock (#241). Pass it as `fetcher` to `api`.
+ */
+export const background: typeof fetch = (input, init) =>
+	fetch(input, {
+		...init,
+		headers: { ...(init?.headers as Record<string, string>), 'x-remotehub-background': '1' }
+	});
+
+/**
+ * What the page does when the server refuses a request for the session's
+ * sake; the layout sets it. `locked` and `confirm` resolve to true once the
+ * user confirmed with the second factor, and the request is sent again.
+ */
+export const guard: {
+	/** The session is locked (#241). */
+	locked?: () => Promise<boolean>;
+	/** The request needs a confirmation of the last minute (#242). */
+	confirm?: () => Promise<boolean>;
+	/** The session is over: expired or ended elsewhere (#240). */
+	ended?: () => void;
+} = {};
+
 export async function api<T>(
 	method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
 	path: string,
 	body?: unknown,
 	fetcher: typeof fetch = fetch
+): Promise<ApiResult<T>> {
+	const result = await send<T>(method, path, body, fetcher);
+	if (result.ok) return result;
+	const again =
+		(result.code === 'session_locked' && guard.locked) ||
+		(result.code === 'confirmation_required' && guard.confirm);
+	if (again && (await again())) return api(method, path, body, fetcher);
+	if (result.code === 'unauthenticated') guard.ended?.();
+	return result;
+}
+
+async function send<T>(
+	method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+	path: string,
+	body: unknown,
+	fetcher: typeof fetch
 ): Promise<ApiResult<T>> {
 	const headers: Record<string, string> = { accept: 'application/json' };
 	if (body !== undefined) headers['content-type'] = 'application/json';

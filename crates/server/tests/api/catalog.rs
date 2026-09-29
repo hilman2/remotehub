@@ -2,7 +2,8 @@
 //! rules of authorize() applied end to end.
 
 use crate::common::{
-    BOB_SID, OPS_SID, authed, collection, lab_key, profile, send, sign_in_request, state,
+    BOB_SID, OPS_SID, authed, collection, confirm_all, lab_key, profile, send, sign_in_request,
+    state,
 };
 use axum::Router;
 use axum::http::StatusCode;
@@ -803,7 +804,7 @@ async fn device_secrets(pool: &PgPool, device: &str) -> Vec<i32> {
 
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn stored_secrets_are_shown_only_with_reveal_and_audited(pool: PgPool) {
-    let f = fixture(pool).await;
+    let f = fixture(pool.clone()).await;
     let db01 = create(
         &f.app,
         &f.alice,
@@ -827,6 +828,7 @@ async fn stored_secrets_are_shown_only_with_reveal_and_audited(pool: PgPool) {
     }
     let bob = sign_in(&f.app, "bob").await;
     // The device's own password goes with its folder, the shared
+    confirm_all(&pool).await;
     // credential with its collection (#190).
     let grant_bob = |role: &'static str| {
         let (app, alice) = (&f.app, &f.alice);
@@ -931,7 +933,7 @@ async fn stored_secrets_are_shown_only_with_reveal_and_audited(pool: PgPool) {
 
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn credentials_keep_keepass_fields_and_seal_the_protected_ones(pool: PgPool) {
-    let f = fixture(pool).await;
+    let f = fixture(pool.clone()).await;
     let body = |fields: Value, icon: i64| {
         json!({
             "collection_id": f.linux_keys, "name": "router", "username": "admin",
@@ -973,6 +975,7 @@ async fn credentials_keep_keepass_fields_and_seal_the_protected_ones(pool: PgPoo
         )
     );
     assert!(!tree(&f.app, &f.alice).await.to_string().contains("pin-xyz"));
+    confirm_all(&pool).await;
     let reveal = format!("/api/credentials/{id}/reveal");
     let revealed = |app: Router, token: String| {
         let reveal = reveal.clone();
@@ -1205,7 +1208,7 @@ async fn files_are_sealed_with_a_credential_and_downloaded_with_reveal(pool: PgP
 
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn older_versions_are_revealed_on_request(pool: PgPool) {
-    let f = fixture(pool).await;
+    let f = fixture(pool.clone()).await;
     let id = f.root_pw.clone();
     let change = json!({
         "collection_id": f.linux_keys, "name": "root", "username": "root",
@@ -1235,6 +1238,7 @@ async fn older_versions_are_revealed_on_request(pool: PgPool) {
         .map(|v| v["version"].as_i64().unwrap())
         .collect();
     assert_eq!(numbers, [2, 1]);
+    confirm_all(&pool).await;
     let reveal = format!("/api/credentials/{id}/reveal");
     let old = call(
         &f.app,

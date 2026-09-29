@@ -13,12 +13,14 @@ use axum::http::{HeaderMap, HeaderName, Method, Request, Response, StatusCode, h
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
+use secrecy::{ExposeSecret, SecretString};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::config::KratosConfig;
+use crate::{totp, webauthn};
 
 /// Adds an invited account to remotehub's users, so that administrators see
 /// it before its first sign-in. Returns its user ID. The first sign-in fills
@@ -159,6 +161,98 @@ pub struct Traits {
     pub email: String,
     #[serde(default)]
     pub name: String,
+}
+
+/// A local account's second factors as Kratos keeps them. remotehub checks
+/// them itself when someone confirms that it is them (#241): Kratos has no
+/// flow that asks for the second factor alone.
+#[derive(Debug, Default)]
+pub struct SecondFactors {
+    pub app: Option<totp::Params>,
+    pub keys: Vec<KratosKey>,
+}
+
+/// A security key or passkey of a local account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KratosKey {
+    pub credential_id: Vec<u8>,
+    /// SEC1, uncompressed; keys of other kinds than ES256 are left out.
+    pub public_key: Vec<u8>,
+    /// The counter as Kratos last saw it.
+    pub counter: u32,
+}
+
+/// What `GET /admin/identities/{id}?include_credential=…` answers, as far
+/// as the second factors go. Go writes byte slices as standard base64.
+#[derive(Deserialize)]
+struct StoredIdentity {
+    #[serde(default)]
+    credentials: StoredCredentials,
+}
+
+#[derive(Default, Deserialize)]
+struct StoredCredentials {
+    totp: Option<Stored<StoredTotp>>,
+    webauthn: Option<Stored<StoredKeys>>,
+}
+
+#[derive(Deserialize)]
+struct Stored<T> {
+    config: Option<T>,
+}
+
+#[derive(Deserialize)]
+struct StoredTotp {
+    /// `otpauth://totp/…` with the secret.
+    totp_url: Option<SecretString>,
+}
+
+#[derive(Deserialize)]
+struct StoredKeys {
+    #[serde(default)]
+    credentials: Vec<StoredKey>,
+}
+
+#[derive(Deserialize)]
+struct StoredKey {
+    id: String,
+    /// A COSE key.
+    public_key: String,
+    authenticator: Option<StoredAuthenticator>,
+}
+
+#[derive(Deserialize)]
+struct StoredAuthenticator {
+    #[serde(default)]
+    sign_count: u32,
+}
+
+impl StoredIdentity {
+    fn second_factors(self) -> SecondFactors {
+        use base64::Engine;
+        use base64::engine::general_purpose::STANDARD;
+        let app = self
+            .credentials
+            .totp
+            .and_then(|totp| totp.config?.totp_url)
+            .and_then(|url| totp::Params::parse(url.expose_secret()));
+        let keys = self
+            .credentials
+            .webauthn
+            .and_then(|keys| keys.config)
+            .map(|config| config.credentials)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|key| {
+                Some(KratosKey {
+                    credential_id: STANDARD.decode(&key.id).ok()?,
+                    public_key: webauthn::cose_es256(&STANDARD.decode(&key.public_key).ok()?)?,
+                    counter: key.authenticator.map_or(0, |a| a.sign_count),
+                })
+            })
+            .collect();
+        SecondFactors { app, keys }
+    }
 }
 
 impl std::fmt::Debug for Kratos {
@@ -349,6 +443,20 @@ impl Kratos {
         Ok(())
     }
 
+    /// The account's authenticator app and keys, for a confirmation (#241).
+    pub async fn second_factors(&self, identity: Uuid) -> Result<SecondFactors, KratosError> {
+        let answer: StoredIdentity = self
+            .admin(
+                Method::GET,
+                &format!(
+                    "/admin/identities/{identity}?include_credential=totp&include_credential=webauthn"
+                ),
+                None,
+            )
+            .await?;
+        Ok(answer.second_factors())
+    }
+
     /// Deletes the account in Kratos.
     pub async fn delete(&self, identity: Uuid) -> Result<(), KratosError> {
         self.admin::<serde_json::Value>(
@@ -470,5 +578,56 @@ mod tests {
             ]
         );
         assert_eq!(providers(&json!({})), []);
+    }
+
+    #[test]
+    fn reads_the_second_factors_of_an_identity() {
+        use base64::Engine;
+        use base64::engine::general_purpose::STANDARD;
+        // A P-256 key in COSE form: kty 2, alg -7, crv 1, x, y.
+        let key = p256::ecdsa::SigningKey::from_slice(&[7u8; 32]).unwrap();
+        let point = key.verifying_key().to_sec1_point(false);
+        let mut cose = vec![0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20];
+        cose.extend(&point.as_bytes()[1..33]);
+        cose.extend([0x22, 0x58, 0x20]);
+        cose.extend(&point.as_bytes()[33..]);
+        // As Kratos v26.2 answers the admin API, shortened.
+        let identity: StoredIdentity = serde_json::from_value(json!({
+            "id": "8f0e8a4e-6a4b-4d52-9d5a-0d7c2b1e4f10",
+            "credentials": {
+                "password": { "type": "password", "config": { "hashed_password": "$argon2id$…" } },
+                "totp": { "type": "totp", "config": {
+                    "totp_url": "otpauth://totp/remotehub:ada@example.com?algorithm=SHA1&digits=6&issuer=remotehub&period=30&secret=JBSWY3DPEHPK3PXP",
+                } },
+                "webauthn": { "type": "webauthn", "config": {
+                    "credentials": [
+                        { "id": STANDARD.encode([1, 2, 3]), "public_key": STANDARD.encode(&cose),
+                          "attestation_type": "none", "display_name": "Laptop",
+                          "authenticator": { "aaguid": "AAAAAAAAAAAAAAAAAAAAAA==", "sign_count": 4, "clone_warning": false },
+                          "is_passwordless": false },
+                        { "id": STANDARD.encode([4]), "public_key": STANDARD.encode([0xa1, 0x01, 0x01]) },
+                    ],
+                    "user_handle": "AQID",
+                } },
+            },
+        }))
+        .unwrap();
+        let factors = identity.second_factors();
+        assert_eq!(
+            factors.app.unwrap().secret.as_slice(),
+            b"Hello!\xde\xad\xbe\xef"
+        );
+        assert_eq!(
+            factors.keys,
+            [KratosKey {
+                credential_id: vec![1, 2, 3],
+                public_key: point.as_bytes().to_vec(),
+                counter: 4,
+            }]
+        );
+
+        let none: StoredIdentity = serde_json::from_value(json!({ "id": "x" })).unwrap();
+        let none = none.second_factors();
+        assert!(none.app.is_none() && none.keys.is_empty());
     }
 }

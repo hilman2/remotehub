@@ -7,7 +7,9 @@ use axum::http::StatusCode;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 
-use crate::common::{BOB_SID, OPS_SID, Response, authed, collection, send, sign_in_request};
+use crate::common::{
+    BOB_SID, OPS_SID, Response, authed, collection, confirm_all, send, sign_in_request,
+};
 use crate::terminal::{create, setup};
 
 async fn call(app: &Router, token: &str, method: &str, uri: &str, body: Option<Value>) -> Response {
@@ -116,7 +118,7 @@ async fn administrators_create_collections_at_the_top_managers_inside_theirs(poo
 
 #[sqlx::test(migrations = "../../migrations", fixtures("set_up"))]
 async fn a_collection_grant_reaches_what_is_in_it_and_a_folder_grant_no_credential(pool: PgPool) {
-    let (_, app, alice, folder) = setup(pool).await;
+    let (_, app, alice, folder) = setup(pool.clone()).await;
     let vault = collection(&app, &alice, None, "Vault").await;
     let linux = collection(&app, &alice, Some(&vault), "Linux").await;
     let root = credential(&app, &alice, &linux, "root").await;
@@ -131,6 +133,7 @@ async fn a_collection_grant_reaches_what_is_in_it_and_a_folder_grant_no_credenti
     )
     .await;
     let bob = sign_in(&app, "bob").await;
+    confirm_all(&pool).await;
     let reveal = format!("/api/credentials/{root}/reveal");
     let show = || Some(json!({ "purpose": "show" }));
 

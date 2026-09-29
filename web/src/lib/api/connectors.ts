@@ -57,9 +57,11 @@ export interface CreatedConnector {
 	token: string;
 }
 
-export const loadConnectors = () => api<Connector[]>('GET', '/api/connectors');
+/** `fetcher`: `background` for a read every minute (#241); also below. */
+export const loadConnectors = (fetcher?: typeof fetch) =>
+	api<Connector[]>('GET', '/api/connectors', undefined, fetcher);
 export const createConnector = (name: string) =>
 	api<CreatedConnector>('POST', '/api/connectors', { name });
 export const deleteConnector = (id: string) => api('DELETE', `/api/connectors/${id}`);
-export const loadConnectorAccess = (deviceId: string) =>
-	api<ConnectorAccess>('GET', `/api/devices/${deviceId}/connector-access`);
+export const loadConnectorAccess = (deviceId: string, fetcher?: typeof fetch) =>
+	api<ConnectorAccess>('GET', `/api/devices/${deviceId}/connector-access`, undefined, fetcher);

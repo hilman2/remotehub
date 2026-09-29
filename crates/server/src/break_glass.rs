@@ -279,14 +279,50 @@ pub async fn authenticate_at(
     if !password_matches(password.expose_secret(), &hash) {
         return Ok(None);
     }
+    let accepted = code_matches(db, vault, user_id, totp_version, code, unix_seconds).await?;
+    Ok(accepted.then_some(Account {
+        user_id,
+        username,
+        display_name,
+    }))
+}
+
+/// Checks a TOTP code alone, as a confirmation of a signed-in break-glass
+/// account does (#241); a right one is used up.
+pub async fn verify_code(
+    db: &PgPool,
+    vault: &DynVault,
+    user_id: Uuid,
+    code: &str,
+    unix_seconds: u64,
+) -> Result<bool, BreakGlassError> {
+    let version: Option<i32> =
+        sqlx::query_scalar("SELECT totp_version FROM local_accounts WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_optional(db)
+            .await?;
+    match version {
+        Some(version) => code_matches(db, vault, user_id, version, code, unix_seconds).await,
+        None => Ok(false),
+    }
+}
+
+async fn code_matches(
+    db: &PgPool,
+    vault: &DynVault,
+    user_id: Uuid,
+    totp_version: i32,
+    code: &str,
+    unix_seconds: u64,
+) -> Result<bool, BreakGlassError> {
     let secret = secrets::load(db, vault, user_id, totp_version, TOTP_FIELD)
         .await?
         .ok_or(SecretError::Vault(remotehub_vault::VaultError::Open))?;
     let Some(step) = totp::step(&secret, code.trim(), unix_seconds) else {
-        return Ok(None);
+        return Ok(false);
     };
     // Each code works once: the step must be newer than the last one used.
-    let accepted = sqlx::query(
+    Ok(sqlx::query(
         "UPDATE local_accounts SET last_totp_step = $2 WHERE user_id = $1 AND last_totp_step < $2",
     )
     .bind(user_id)
@@ -294,12 +330,7 @@ pub async fn authenticate_at(
     .execute(db)
     .await?
     .rows_affected()
-        == 1;
-    Ok(accepted.then_some(Account {
-        user_id,
-        username,
-        display_name,
-    }))
+        == 1)
 }
 
 /// An argon2id hash of a random password nobody knows.

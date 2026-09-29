@@ -2,6 +2,7 @@ import { expect, test, type Download, type Locator, type Page } from '@playwrigh
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readKdbx } from '../../src/lib/vault/kdbx';
+import { confirmIt, signInConfirming } from './confirm';
 
 // Connections end to end: an AD user of the test lab signs in, sets up
 // folders, credentials and devices through the UI, and works on them in the
@@ -196,10 +197,11 @@ test('an AD user adds an SSH device and works in its terminal', async ({ page })
 
 test('a stored password is shown and copied, and the audit log knows', async ({
 	page,
-	context
+	context,
+	browser
 }) => {
 	await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-	await signIn(page);
+	await signInConfirming(page, browser);
 	const credential = `reveal ${run}`;
 	await newCredential(page, credential, async (dialog) => {
 		await dialog.getByLabel('User name', { exact: true }).fill('tester');
@@ -209,6 +211,8 @@ test('a stored password is shown and copied, and the audit log knows', async ({
 
 	const pane = details(page);
 	await pane.getByRole('button', { name: 'Show password' }).click();
+	// Only after a confirmation with the second factor (#242).
+	await confirmIt(page);
 	await expect(page.getByTestId('revealed')).toHaveText('Shown-Passw0rd!');
 	await pane.getByRole('button', { name: 'Hide password' }).click();
 	await expect(page.getByTestId('revealed')).toHaveCount(0);
@@ -235,8 +239,11 @@ test('a stored password is shown and copied, and the audit log knows', async ({
 	await expect(page.getByText('Showed or copied a stored credential').first()).toBeVisible();
 });
 
-test('the vault keeps folders, fields and icons, and shows what is shared', async ({ page }) => {
-	await signIn(page);
+test('the vault keeps folders, fields and icons, and shows what is shared', async ({
+	page,
+	browser
+}) => {
+	await signInConfirming(page, browser);
 	// A shared credential with a protected field, in a collection of its own.
 	const shared = `Shared router ${run}`;
 	await page.evaluate(
@@ -305,11 +312,12 @@ test('the vault keeps folders, fields and icons, and shows what is shared', asyn
 	const detail = details(page);
 	await expect(detail).toContainText('https://router.lan');
 	await detail.getByRole('button', { name: 'Show password' }).click();
+	await confirmIt(page);
 	await expect(detail.getByTestId('revealed-field')).toHaveText('8765');
 });
 
-test('a shared credential keeps files and its earlier passwords', async ({ page }) => {
-	await signIn(page);
+test('a shared credential keeps files and its earlier passwords', async ({ page, browser }) => {
+	await signInConfirming(page, browser);
 	const dialog = page.getByRole('dialog');
 	const credential = `files ${run}`;
 	await newCredential(page, credential, async (form) => {
@@ -360,11 +368,15 @@ test('a shared credential keeps files and its earlier passwords', async ({ page 
 	await dialog.getByRole('tab', { name: 'History' }).click();
 	const first = dialog.getByRole('listitem').last();
 	await first.getByRole('button', { name: 'Show' }).click();
+	await confirmIt(page);
 	await expect(first.getByTestId('earlier-password')).toHaveText('Old-Passw0rd!');
 });
 
-test('a shared entry shows one-time codes and waits in the recycle bin', async ({ page }) => {
-	await signIn(page);
+test('a shared entry shows one-time codes and waits in the recycle bin', async ({
+	page,
+	browser
+}) => {
+	await signInConfirming(page, browser);
 	const credential = `totp ${run}`;
 	await newCredential(page, credential, async (form) => {
 		await form.getByRole('tab', { name: 'Advanced' }).click();
@@ -374,6 +386,7 @@ test('a shared entry shows one-time codes and waits in the recycle bin', async (
 	});
 	const pane = details(page);
 	await pane.getByRole('button', { name: 'Show one-time code' }).click();
+	await confirmIt(page);
 	await expect(pane.getByTestId('totp-code')).toHaveText(/^\d{6}$/);
 
 	// Deleted once, it leaves its folder for the recycle bin and comes back from there.
@@ -640,6 +653,34 @@ test('a device signs in with credentials of its own', async ({ page }) => {
 	await expect(page.locator('.xterm-rows:visible')).toContainText('own key says tester');
 });
 
+test('a device marked for it connects only after a confirmation', async ({ page, browser }) => {
+	await signInConfirming(page, browser);
+	const dialog = page.getByRole('dialog');
+	const folder = `E2E confirmed ${run}`;
+	await newFolder(page, folder);
+
+	// A domain controller, say (#243).
+	const name = `lab ssh confirmed ${run}`;
+	await page.getByRole('button', { name: 'New device' }).click();
+	await dialog.getByLabel('Name', { exact: true }).fill(name);
+	await dialog.getByLabel('Host name or IP address').fill(sshHost);
+	await dialog.getByLabel('Sign in with').selectOption({ label: 'Credentials of this device' });
+	await dialog.getByLabel('User name', { exact: true }).fill('tester');
+	await dialog.getByLabel('Password', { exact: true }).fill('Tester-Passw0rd!');
+	await dialog.getByLabel('Confirm with the second factor before every connection').check();
+	await dialog.getByRole('button', { name: 'Create' }).click();
+	await expect(page.getByRole('heading', { name })).toBeVisible();
+	await expect(page.getByText('Confirmation before connecting')).toBeVisible();
+
+	await page.getByRole('button', { name: 'Connect', exact: true }).click();
+	await confirmIt(page);
+	await expect(page.getByText(/host key/)).toBeVisible();
+	await page.locator('.xterm').click();
+	await page.keyboard.type('echo "confirmed $(whoami)"');
+	await page.keyboard.press('Enter');
+	await expect(page.locator('.xterm-rows')).toContainText('confirmed tester');
+});
+
 test('a group of remotehub’s own passes a permission on to its members', async ({
 	page,
 	browser
@@ -891,7 +932,7 @@ test('the personal vault opens only in the browser, with passphrase, passkey or 
 	// A passkey that can derive secrets (WebAuthn PRF), as Chromium emulates it.
 	const cdp = await context.newCDPSession(page);
 	await cdp.send('WebAuthn.enable');
-	await cdp.send('WebAuthn.addVirtualAuthenticator', {
+	const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
 		options: {
 			protocol: 'ctap2',
 			transport: 'internal',
@@ -940,7 +981,10 @@ test('the personal vault opens only in the browser, with passphrase, passkey or 
 	await personal('Ways to unlock');
 	await dialog.getByLabel('Name of the passkey').fill('virtual key');
 	await dialog.getByRole('button', { name: 'Add a passkey' }).click();
-	await expect(dialog.getByText('Passkey · virtual key')).toBeVisible();
+	await expect(dialog.getByText('Passkey for the personal vault · virtual key')).toBeVisible();
+	// The browser lists it apart from a passkey for signing in (#245).
+	const { credentials } = await cdp.send('WebAuthn.getCredentials', { authenticatorId });
+	expect(credentials.map((c) => c.userName)).toContain('alice · personal vault');
 	await page.keyboard.press('Escape');
 
 	const lock = () => personal('Lock');
@@ -1222,8 +1266,8 @@ test('the vault takes in a KeePass file and gives one back', async ({ page }) =>
 	expect(router.files.map((f) => new TextDecoder().decode(f.data))).toEqual(['remote vpn']);
 });
 
-test('a collection takes in a KeePass file and exports it, audited', async ({ page }) => {
-	await signIn(page);
+test('a collection takes in a KeePass file and exports it, audited', async ({ page, browser }) => {
+	await signInConfirming(page, browser);
 	const dialog = page.getByRole('dialog');
 	const collection = `E2E keepass ${run}`;
 	await newCollection(page, collection);
@@ -1243,6 +1287,7 @@ test('a collection takes in a KeePass file and exports it, audited', async ({ pa
 	await dialog.getByLabel('Passphrase again').fill('Export-Passw0rd');
 	const downloading = page.waitForEvent('download');
 	await dialog.getByRole('button', { name: 'Export as a KeePass file' }).click();
+	await confirmIt(page);
 	const [router, ...rest] = await openDownload(downloading, 'Export-Passw0rd');
 	expect(rest).toEqual([]);
 	expect(router).toMatchObject({ path: ['Servers'], title: 'Router', password: 'Entry-Pass!' });
