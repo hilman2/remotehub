@@ -49,7 +49,12 @@ function placeholders(text: string): string[] {
 	return [...new Set([...text.matchAll(/\{\s*(\w+)\s*\}/g)].map((m) => m[1]))].sort();
 }
 
-const textOf = (catalog: Catalog, key: string) => new Map(messages(catalog)).get(key) ?? '';
+/** Each catalog's messages by key, read once: the tests look up every key (#247). */
+const TEXTS = new Map(
+	Object.values(CATALOGS).map((catalog) => [catalog, new Map(messages(catalog))])
+);
+
+const textOf = (catalog: Catalog, key: string) => TEXTS.get(catalog)?.get(key) ?? '';
 
 describe('message catalogs', () => {
 	it('name every key once', () => {
