@@ -109,7 +109,7 @@ tried_by_ci() {
   built="$(docker create "remotehub-ci-image:tree-${ci_tree:0:12}")"
   id="$(docker cp -q "${built}:/usr/share/remotehub/downloads/remotehub-extension.json" - 2>/dev/null |
     tar -xO 2>/dev/null | sed -n 's/.*"id":"\([a-p]*\)".*/\1/p' || true)"
-  docker rm -f "$built" >/dev/null
+  docker rm -fv "$built" >/dev/null
   [ -n "$id" ] && [ "$id" != obnekonmlefgdhgodgbjapgoophnhlao ]
 }
 
@@ -137,7 +137,7 @@ mkdir -p "$windows"
 built="$(docker create "${IMAGE}:${version}")"
 docker cp -q "${built}:/usr/share/remotehub/downloads/remotehub-connector.exe" "${windows}/" || true
 docker cp -q "${built}:/usr/share/remotehub/downloads/remotehub-extension.json" "${windows}/" || true
-docker rm -f "$built" >/dev/null
+docker rm -fv "$built" >/dev/null
 [ -s "${windows}/remotehub-connector.exe" ] || ci_fehler "no remotehub-connector.exe in ${IMAGE}:${version}"
 # The development key's ID would make every installation by policy trust a
 # key that is public.

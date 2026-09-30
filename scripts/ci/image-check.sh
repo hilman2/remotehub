@@ -36,7 +36,7 @@ built="$(docker create "${image}:${tag}")"
 for file in remotehub-connector.exe remotehub-extension.zip remotehub-extension.json; do
   docker cp -q "${built}:/usr/share/remotehub/downloads/${file}" "${windows}/" || true
 done
-docker rm -f "$built" >/dev/null
+docker rm -fv "$built" >/dev/null
 [ "$(head -c 2 "${windows}/remotehub-connector.exe" 2>/dev/null)" = MZ ] || {
   echo "FAILED: no Windows program in ${image}:${tag}"
   exit 1
@@ -151,7 +151,7 @@ docker run --rm "${connector_image}:${tag}" --version | grep -qx "remotehub-conn
 connector="${project}-connector"
 connector_data="${project}-connector-data"
 connector_gone() {
-  docker rm -f "$connector" >/dev/null 2>&1 || true
+  docker rm -fv "$connector" >/dev/null 2>&1 || true
   docker volume rm "$connector_data" >/dev/null 2>&1 || true
 }
 connector_fail() { # message
