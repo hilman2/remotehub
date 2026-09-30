@@ -174,7 +174,7 @@ cargo_run() { # tools script [docker-run-options...]
     -v remotehub-ci-cargo-git:/usr/local/cargo/git \
     -v remotehub-ci-target:/ci-target \
     -v remotehub-ci-src:/src \
-    -e CARGO_TARGET_DIR=/ci-target -e CARGO_BUILD_JOBS=8 -e CARGO_TERM_COLOR=never \
+    -e CARGO_TARGET_DIR=/ci-target -e CARGO_INCREMENTAL=0 -e CARGO_BUILD_JOBS=8 -e CARGO_TERM_COLOR=never \
     -e DATABASE_URL=postgres://ci:ci@db:5432/ci \
     -e REMOTEHUB_TEST_LDAP_URL=ldaps://dc.remotehub.test \
     -e REMOTEHUB_TEST_SSH_HOST=ssh-target \
