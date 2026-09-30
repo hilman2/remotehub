@@ -45,7 +45,7 @@ host() { # name prepare check [install]
   local dind="${project}-${name}" opt="${project}-${name}-opt"
   echo "── Host: ${name}"
   cleanup() {
-    docker rm -f "$dind" >/dev/null 2>&1 || true
+    docker rm -fv "$dind" >/dev/null 2>&1 || true
     docker volume rm "$opt" >/dev/null 2>&1 || true
   }
   # What an interrupted run left under these names would decide this one:
