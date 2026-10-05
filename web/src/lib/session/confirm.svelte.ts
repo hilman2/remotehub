@@ -12,7 +12,12 @@ export interface ConfirmStart {
 	key: { challenge_id: string; options: unknown } | null;
 }
 
-export const startConfirmation = () => api<ConfirmStart>('POST', '/api/session/confirm/start');
+/**
+ * Asked again while the page waits for a confirmation (#253), so it does
+ * not keep the session alive: an open dialog must not stop it from locking.
+ */
+export const startConfirmation = () =>
+	api<ConfirmStart>('POST', '/api/session/confirm/start', undefined, background);
 
 export type ConfirmAnswer =
 	{ code: string } | { key: { challenge_id: string; credential: unknown } };

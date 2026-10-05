@@ -34,21 +34,35 @@
 	/** Break-glass accounts have their code alone. */
 	const mayAddKey = $derived(session.user?.kind !== 'break_glass' && webauthnAvailable());
 
+	/** When `start` came: its challenge lives five minutes on the server. */
+	let loadedAt = 0;
+	const stale = () => Date.now() - loadedAt >= FRESH_MS;
+
 	async function load() {
 		const result = await startConfirmation();
-		if (result.ok) start = result.data;
-		else error = errorMessage(result.code);
+		if (result.ok) {
+			start = result.data;
+			loadedAt = Date.now();
+		} else error = errorMessage(result.code);
 	}
 
+	// The lock screen waits while nobody is there: a challenge loaded when
+	// it came would have expired by the time they are back (#253).
 	$effect(() => {
 		load();
+		const timer = setInterval(() => {
+			if (!busy && stale()) load();
+		}, CHECK_MS);
+		return () => clearInterval(timer);
 	});
 
 	async function withKey() {
-		if (!start?.key) return;
 		busy = true;
 		error = null;
 		try {
+			// Timers stand still while the computer sleeps.
+			if (stale()) await load();
+			if (!start?.key) return;
 			let credential: unknown;
 			try {
 				credential = JSON.parse(await getCredential(JSON.stringify(start.key.options)));
@@ -85,6 +99,10 @@
 		code = '';
 		error = errorMessage(result.code);
 	}
+
+	/** Renewed a minute before the server's five minutes run out. */
+	const FRESH_MS = 4 * 60_000;
+	const CHECK_MS = 30_000;
 
 	const field = 'h-12 w-full rounded-xl border border-line-strong bg-surface px-3.5';
 </script>
