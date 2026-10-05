@@ -32,7 +32,9 @@ RUN --mount=type=secret,id=extension_key \
 # Keep in sync with rust-toolchain.toml (the CI job `base` checks it).
 FROM rust:1.98.1-trixie AS server
 # The site connector for Windows (#166) is cross-built with mingw-w64.
-RUN apt-get update \
+# Over HTTPS: a plain-HTTP download of mingw-w64 can stall on the way (#255).
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+  && apt-get update \
   && apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 \
   && rm -rf /var/lib/apt/lists/*
 RUN rustup target add x86_64-pc-windows-gnu

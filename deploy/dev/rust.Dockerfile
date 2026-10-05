@@ -8,7 +8,9 @@ FROM rust:1.98.1-trixie
 # cargo clippy -p remotehub-connector --target x86_64-pc-windows-gnu (#166).
 RUN rustup component add rustfmt clippy \
   && rustup target add x86_64-pc-windows-gnu
-RUN apt-get update \
+# Over HTTPS: a plain-HTTP download of mingw-w64 can stall on the way (#255).
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+  && apt-get update \
   && apt-get install -y --no-install-recommends mold gcc-mingw-w64-x86-64 \
   && rm -rf /var/lib/apt/lists/*
 # mold links test binaries several times faster than GNU ld; set only here,

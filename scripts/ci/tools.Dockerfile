@@ -17,7 +17,9 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
   && node --version && pnpm --version
 # mingw-w64: the C compiler for ring's code when clippy checks the connector
 # for Windows (#166).
-RUN apt-get update \
+# Over HTTPS: a plain-HTTP download of mingw-w64 can stall on the way (#255).
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+  && apt-get update \
   && apt-get install -y --no-install-recommends shellcheck mold rsync gcc-mingw-w64-x86-64 \
   && rm -rf /var/lib/apt/lists/*
 RUN rustup component add rustfmt clippy \
